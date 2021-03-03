@@ -1,80 +1,123 @@
-# The mode of test:
-# 'SSE':    lightest load on the processor, lowest temperatures, highest boost clock
-# 'AVX':    medium load on the processor, medium temperatures, medium boost clock
-# 'AVX2':   heaviest on the processor, highest temperatures, lowest boost clock
-# 'CUSTOM': you can define your own settings (see further below for setting the values)
-$mode = 'SSE'
-
-
-# Set the runtime per core in seconds
-#  360 = 6 minutes
-#  600 = 10 minutes
-#  900 = 15 minutes
-# 1200 = 20 minutes
-# 1800 = 30 minutes
-# 3600 = 1 hour
-$runtimePerCore = 1200
-
-
-# The number of threads to use for testing
-# You can only choose between 1 and 2
-# If Hyperthreading / SMT is disabled, this will automatically be set to 1
-# Currently there's no automatic way to determine which core has thrown an error
-# Setting this to 1 causes higher boost clock speed (due to less heat)
-# Default is 1
-# Maximum is 2
-$numberOfThreads = 1
-
-
-# The max number of iterations, 10000 is basically unlimited
-$maxIterations = 10000
-
-
-# Ignore certain cores
-# These cores will not be tested
-# The enumeration starts with a 0
-# Example: $coresToIgnore = @(0, 1, 2)
-$coresToIgnore = @()
-
-
-# Restart the Prime95 process for each new core test
-# So each core will have the same sequence of FFT sizes
-# The sequence of FFT sizes for Small FFTs:
-# 40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240
-# Runtime on a 5900x: 5,x minutes
-# Note: The screen never seems to turn off with this setting enabled
-$restartPrimeForEachCore = 0
-
-
-# The name of the log file
-# The $mode above will be added to the name (and a .log file ending)
-$logfile = 'CoreCycler'
-
-
-# Set the custom settings here for the 'CUSTOM' mode
-# Note: The automatic detection at which FFT size an error likely occurred
-#       will not work if you change the FFT sizes
-$customCpuSupportsSSE  = '1'		# Needs to be set to 1 for SSE mode
-$customCpuSupportsSSE2 = '1'		# Also needs to be set to 1 for SSE mode
-$customCpuSupportsAVX  = '0'		# Needs to be set to 1 for AVX mode
-$customCpuSupportsAVX2 = '0'		# Needs to be set to 1 for AVX2 mode
-$customCpuSupportsFMA3 = '0'		# Also needs to be set to 1 for AVX2 mode on Ryzen
-$customMinTortureFFT   = '36'		# The minimum FFT size to test
-$customMaxTortureFFT   = '248'		# The maximum FFT size to test
-$customTortureMem      = '0'		# The amount of memory to use. 0 = In-Place
-$customTortureTime     = '1'		# The max amount of minutes for each FFT size
-$customTortureWeak     = '1048576'	# Not sure, I haven't found much information about it
+<#
+.AUTHOR
+	sp00n
+.VERSION
+	0.55
+.DESCRIPTION
+	Sets the affinity of the Prime95 process to one core only and cycles through
+	all the cores
+.LINK
+	https://github.com/sp00n/corecycler
+.NOTE
+	Please excuse my amateurish code in this file, it's my first attempt at writing in PowerShell ._.
+#>
 
 
 
+# Default config settings
+# Change the various settings in the config.ini file
 
-############################################################
-######### DO NOT CHANGE ANYTHING BELOW THIS POINT! #########
-############################################################
+$defaults = @{
+
+	# The mode of the test:
+	# 'SSE':    lightest load on the processor, lowest temperatures, highest boost clock
+	# 'AVX':    medium load on the processor, medium temperatures, medium boost clock
+	# 'AVX2':   heaviest on the processor, highest temperatures, lowest boost clock
+	# 'CUSTOM': you can define your own settings (see further below for setting the values)
+	mode = 'SSE';
+
+
+	# Set the runtime per core in seconds
+	#  360 = 6 minutes
+	#  600 = 10 minutes
+	#  900 = 15 minutes
+	# 1200 = 20 minutes
+	# 1800 = 30 minutes
+	# 3600 = 1 hour
+	runtimePerCore = 360;
+
+
+	# The number of threads to use for testing
+	# You can only choose between 1 and 2
+	# If Hyperthreading / SMT is disabled, this will automatically be set to 1
+	# Currently there's no automatic way to determine which core has thrown an error
+	# Setting this to 1 causes higher boost clock speed (due to less heat)
+	# Default is 1
+	# Maximum is 2
+	numberOfThreads = 1;
+
+
+	# The max number of iterations, 10000 is basically unlimited
+	maxIterations = 10000;
+
+
+	# Ignore certain cores
+	# These cores will not be tested
+	# The enumeration starts with a 0
+	# Example: $settings.coresToIgnore = @(0, 1, 2)
+	coresToIgnore = @();
+
+
+	# Restart the Prime95 process for each new core test
+	# So each core will have the same sequence of FFT sizes
+	# The sequence of FFT sizes for Small FFTs:
+	# 40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240
+	# Runtime on a 5900x: 5,x minutes
+	# Note: The screen never seems to turn off with this setting enabled
+	restartPrimeForEachCore = 0;
+
+
+	# The name of the log file
+	# The $settings.mode above will be added to the name (and a .log file ending)
+	logfile = 'CoreCycler';
+
+
+	# Set the custom settings here for the 'CUSTOM' mode
+	# Note: The automatic detection at which FFT size an error likely occurred
+	#       will not work if you change the FFT sizes
+	customCpuSupportsSSE  = '1';		# Needs to be set to 1 for SSE mode
+	customCpuSupportsSSE2 = '1';		# Also needs to be set to 1 for SSE mode
+	customCpuSupportsAVX  = '0';		# Needs to be set to 1 for AVX mode
+	customCpuSupportsAVX2 = '0';		# Needs to be set to 1 for AVX2 mode
+	customCpuSupportsFMA3 = '0';		# Also needs to be set to 1 for AVX2 mode on Ryzen
+	customMinTortureFFT   = '36';		# The minimum FFT size to test
+	customMaxTortureFFT   = '248';		# The maximum FFT size to test
+	customTortureMem      = '0';		# The amount of memory to use. 0 = In-Place
+	customTortureTime     = '1';		# The max amount of minutes for each FFT size
+	customTortureWeak     = '1048576';	# Not sure, I haven't found much information about it
+}
+
+
+# Set the default settings
+$settings = $defaults
+
+
+# Read the config file and overwrite the settings
+$userSettings = Get-Content -raw 'config.ini' | ConvertFrom-StringData
+
+foreach ($entry in $userSettings.GetEnumerator()) {
+	# Special handling for coresToIgnore
+	if ($entry.Name -eq 'coresToIgnore') {
+		if ($entry.Value -and ![string]::IsNullOrEmpty($entry.Value) -and ![String]::IsNullOrWhiteSpace($entry.Value)) {
+			# Split the string by comma and add to the coresToIgnore entry
+			$entry.Value -split ',\s*' | ForEach-Object { $settings.coresToIgnore += [Int]$_ }
+		}
+	}
+
+	# Setting cannot be empty
+	elseif ($entry.Value -and ![string]::IsNullOrEmpty($entry.Value) -and ![String]::IsNullOrWhiteSpace($entry.Value)) {
+		$settings[$entry.Name] = $entry.Value
+	}
+
+	# If empty, just ignore and use the defaults
+	else {
+		
+	}
+}
 
 
 # The full path and name of the log file
-$logfilePath = $PSScriptRoot + '\' + $logfile + '-' + $mode + '.log'
+$logfilePath = $PSScriptRoot + '\' + $settings.logfile + '-' + $settings.mode + '.log'
 
 
 # The number of physical and logical cores
@@ -98,7 +141,7 @@ $primePath   = $processPath + $processName
 
 
 # The Prime95 results.txt file name for this run
-$primeResultsName = 'results-CoreCycler-' + (Get-Date -format yyyy-MM-dd-HH-mm-ss) + '-' + $mode + '.txt'
+$primeResultsName = 'results-CoreCycler-' + (Get-Date -format yyyy-MM-dd-HH-mm-ss) + '-' + $settings.mode + '.txt'
 $primeResultsPath = $processPath + $primeResultsName
 
 
@@ -107,14 +150,14 @@ $process = Get-Process $processName -ErrorAction SilentlyContinue
 
 
 # Limit the number of threads to 1 - 2
-$numberOfThreads = [Math]::Max(1, [Math]::Min(2, $numberOfThreads))
-$numberOfThreads = $(if ($isHyperthreadingEnabled) { $numberOfThreads } else { 1 })
+$settings.numberOfThreads = [Math]::Max(1, [Math]::Min(2, $settings.numberOfThreads))
+$settings.numberOfThreads = $(if ($isHyperthreadingEnabled) { $settings.numberOfThreads } else { 1 })
 
 
 # The expected CPU usage for the running Prime95 process
 # The selected number of threads should be at 100%, so e.g. for 1 thread out of 24 threads this is 100/24*1= 4.17%
 # Used to determine if Prime95 is still running or has thrown an error
-$expectedUsage = [Math]::Round(100 / $numLogicalCores * $numberOfThreads, 2)
+$expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThreads, 2)
 
 
 # Store all the cores that have thrown an error in Prime95
@@ -127,8 +170,8 @@ $cpuUsageCheckInterval = 30
 
 
 # Calculate the interval time for the CPU power check
-$cpuCheckIterations = [Math]::Floor($runtimePerCore / $cpuUsageCheckInterval)
-$runtimeRemaining   = $runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
+$cpuCheckIterations = [Math]::Floor($settings.runtimePerCore / $cpuUsageCheckInterval)
+$runtimeRemaining   = $settings.runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
 
 
 # The small FFT sizes
@@ -203,25 +246,40 @@ Add-Type -TypeDefinition $CloseWindowDefinition
 
 
 
-# Get the main window handler for the Prime95 process
-# Even if minimized to the tray
-# @param void
-# @return void
+<##
+ # Write a message to the screen and to the log file
+ # .PARAM void It merges all parameters into a single line
+ # .RETURN void
+ #>
+function Write-Text {
+	$args -join "" | Tee-Object -filepath $logfilePath -append
+}
+
+
+<##
+ # Get the main window handler for the Prime95 process
+ # Even if minimized to the tray
+ # .PARAM void
+ # .RETURN void
+ #>
 function Get-Prime95-WindowHandler {
 	# 'Prime95 - Self-Test': worker running
 	# 'Prime95': worker not running
 	$windowObj = [Api.Apidef]::GetWindows() | Where-Object { $_.WinTitle -eq 'Prime95 - Self-Test' -or $_.WinTitle -eq 'Prime95' }
 	
+	# Override the global script variables
 	$Script:processWindowHandler = $windowObj.MainWindowHandle
 	$Script:processId = $windowObj.ProcessId
 }
 
 
 
-# Create the Prime95 config files (local.txt & prime.txt)
-# This depends on the $mode variable
-# @param string $configType
-# @return void
+<##
+ # Create the Prime95 config files (local.txt & prime.txt)
+ # This depends on the $settings.mode variable
+ # .PARAM string $configType The config type to set in the config files (SSE, AVX, AVX, CUSTOM)
+ # .RETURN void
+ #>
 function Initialize-Prime95 {
 	param (
 		$configType
@@ -238,22 +296,22 @@ function Initialize-Prime95 {
 	# Limit the load to the selected number of threads
 	Add-Content $configFile1 ('NumCPUs=1')
 	Add-Content $configFile1 ('CoresPerTest=1')
-	Add-Content $configFile1 ('CpuNumHyperthreads=' + $numberOfThreads)
-	Add-Content $configFile1 ('WorkerThreads=' + $numberOfThreads)
+	Add-Content $configFile1 ('CpuNumHyperthreads=' + $settings.numberOfThreads)
+	Add-Content $configFile1 ('WorkerThreads=' + $settings.numberOfThreads)
 	
 	
 
 	# Here you can define your own settings
 	if ($configType -eq "CUSTOM") {
 		# For Ryzen processors, FMA3 needs to be enabled as well as AVX2 to use the AVX2 mode in Prime95
-		Add-Content $configFile1 ('CpuSupportsSSE='  + $customCpuSupportsSSE)
-		Add-Content $configFile1 ('CpuSupportsSSE2=' + $customCpuSupportsSSE2)
-		Add-Content $configFile1 ('CpuSupportsAVX='  + $customCpuSupportsAVX)
-		Add-Content $configFile1 ('CpuSupportsAVX2=' + $customCpuSupportsAVX2)
-		Add-Content $configFile1 ('CpuSupportsFMA3=' + $customCpuSupportsFMA3)
+		Add-Content $configFile1 ('CpuSupportsSSE='  + $settings.customCpuSupportsSSE)
+		Add-Content $configFile1 ('CpuSupportsSSE2=' + $settings.customCpuSupportsSSE2)
+		Add-Content $configFile1 ('CpuSupportsAVX='  + $settings.customCpuSupportsAVX)
+		Add-Content $configFile1 ('CpuSupportsAVX2=' + $settings.customCpuSupportsAVX2)
+		Add-Content $configFile1 ('CpuSupportsFMA3=' + $settings.customCpuSupportsFMA3)
 	}
 	
-	# The various default test modes (see the description for $mode for an explanation)
+	# The various default test modes (see the description for $settings.mode for an explanation)
 	elseif ($configType -eq "SSE") {
 		Add-Content $configFile1 'CpuSupportsSSE=1'
 		Add-Content $configFile1 'CpuSupportsSSE2=1'
@@ -277,7 +335,7 @@ function Initialize-Prime95 {
 	}
 	else {
 		'ERROR: Invalid mode type provided!'
-		Read-Host -Prompt "Press Enter to exit"
+		Read-Host -Prompt 'Press Enter to exit'
 		exit
 	}
 
@@ -291,11 +349,11 @@ function Initialize-Prime95 {
 	
 	# Here you can define custom FFT sizes
 	if ($configType -eq "CUSTOM") {
-		Add-Content $configFile2 ('MinTortureFFT=' + $customMinTortureFFT)
-		Add-Content $configFile2 ('MaxTortureFFT=' + $customMaxTortureFFT)
-		Add-Content $configFile2 ('TortureMem='    + $customTortureMem)
-		Add-Content $configFile2 ('TortureTime='   + $customTortureTime)
-		Add-Content $configFile2 ('TortureWeak='   + $customTortureWeak)
+		Add-Content $configFile2 ('MinTortureFFT=' + $settings.customMinTortureFFT)
+		Add-Content $configFile2 ('MaxTortureFFT=' + $settings.customMaxTortureFFT)
+		Add-Content $configFile2 ('TortureMem='    + $settings.customTortureMem)
+		Add-Content $configFile2 ('TortureTime='   + $settings.customTortureTime)
+		Add-Content $configFile2 ('TortureWeak='   + $settings.customTortureWeak)
 	}
 	
 	# Default settings
@@ -323,9 +381,11 @@ function Initialize-Prime95 {
 }
 
 
-# Open Prime95 and set global script variables
-# @param void
-# @return void
+<##
+ # Open Prime95 and set global script variables
+ # .PARAM void
+ # .RETURN void
+ #>
 function Start-Prime95 {
 	# Minimized to the tray
 	$Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Hidden
@@ -338,7 +398,7 @@ function Start-Prime95 {
 	
 	if (!$Script:process) {
 		'ERROR: Could not start process ' + $processName + '!'
-		Read-Host -Prompt "Press Enter to exit"
+		Read-Host -Prompt 'Press Enter to exit'
 		exit
 	}
 
@@ -356,9 +416,11 @@ function Start-Prime95 {
 }
 
 
-# Close Prime95
-# @param void
-# @return void
+<##
+ # Close Prime95
+ # .PARAM void
+ # .RETURN void
+ #>
 function Close-Prime95 {
 	# If there is no processWindowHandler id
 	# Try to get it
@@ -394,10 +456,12 @@ function Close-Prime95 {
 }
 
 
-# Check the CPU power usage and restart Prime95 if necessary
-# Throws an error if the CPU usage is too low
-# @param int $coreNumber The current core being tested
-# @return void
+<##
+ # Check the CPU power usage and restart Prime95 if necessary
+ # Throws an error if the CPU usage is too low
+ # .PARAM int $coreNumber The current core being tested
+ # .RETURN void
+ #>
 function Test-CPU-Usage {
 	param (
 		$coreNumber
@@ -405,6 +469,7 @@ function Test-CPU-Usage {
 	
 	# The minimum CPU usage for Prime95, below which it should be treated as an error
 	# We need to account for the number of threads
+	# Min. 1.5%
 	# 100/32=   3,125% for 1 thread out of 32 threads
 	# 100/32*2= 6,250% for 2 threads out of 32 threads
 	# 100/24=   4,167% for 1 thread out of 24 threads
@@ -472,7 +537,7 @@ function Test-CPU-Usage {
 		$Script:coresWithError += $coreNumber
 
 		# If Hyperthreading / SMT is enabled and the number of threads larger than 1
-		if ($isHyperthreadingEnabled -and ($numberOfThreads -gt 1)) {
+		if ($isHyperthreadingEnabled -and ($settings.numberOfThreads -gt 1)) {
 			$cpuNumbersArray = @($coreNumber, ($coreNumber + 1))
 			$cpuNumberString = (($cpuNumbersArray | sort) -join ' or ')
 		}
@@ -491,17 +556,18 @@ function Test-CPU-Usage {
 		
 		# Put out an error message
 		$timestamp = Get-Date -format HH:mm:ss
-		'ERROR: ' + $timestamp | Tee-Object -filepath $logfilePath -append
-		'ERROR: Prime95 seems to have stopped with an error!' | Tee-Object -filepath $logfilePath -append
-		'ERROR: At Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')' | Tee-Object -filepath $logfilePath -append
-		'ERROR MESSAGE: ' + $primeError | Tee-Object -filepath $logfilePath -append
+		Write-Text('ERROR: ' + $timestamp)
+		Write-Text('ERROR: Prime95 seems to have stopped with an error!')
+		Write-Text('ERROR: At Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+		Write-Text('ERROR MESSAGE: ' + $primeError)
 		
 		# DEBUG
 		# Also add the 5 last rows of the results.txt file
-		#'LAST 5 ROWS OF RESULTS.TXT:' | Tee-Object -filepath $logfilePath -append
-		#Get-Item -Path $primeResultsPath | Get-Content -Tail 5 | Tee-Object -filepath $logfilePath -append
+		#Write-Text('LAST 5 ROWS OF RESULTS.TXT:')
+		#Write-Text(Get-Item -Path $primeResultsPath | Get-Content -Tail 5)
 		
 		# Try to determine the last run FFT size
+		# This will horribly fail if the FFT sizes were changed in the custom config
 		# If the result.txt doesn't exist, assume that it was on the very first iteration
 		if (!$resultFileHandle) {
 			$lastRunFFT = $FFTSizes[0]
@@ -511,10 +577,8 @@ function Test-CPU-Usage {
 		else {
 			$lastFiveRows = $resultFileHandle | Get-Content -Tail 5
 			$lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-			
-			
 			$hasMatched = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
-			$lastPassedFFT = [Int]$matches[1]
+			$lastPassedFFT = [Int]$matches[1]	# $matches is a fixed(?) variable name for -match
 			
 			
 			# If the last passed FFT size is the last entry of the FFT sizes, start at the beginning
@@ -526,14 +590,14 @@ function Test-CPU-Usage {
 			}
 		}
 		
+		# Educated guess
 		if ($lastRunFFT) {
-			'ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K' | Tee-Object -filepath $logfilePath -append
+			Write-Text('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K')
 		}
 		
 
-
 		# Try to restart Prime95 and continue with the next core
-		'Trying to restart Prime95' | Tee-Object -filepath $logfilePath -append
+		Write-Text('Trying to restart Prime95')
 		
 		
 		# Start Prime95 again
@@ -552,7 +616,7 @@ if ($process) {
 }
 
 # Create the config file
-Initialize-Prime95 $mode
+Initialize-Prime95 $settings.mode
 
 # Start Prime95
 Start-Prime95
@@ -564,66 +628,68 @@ $timestamp = Get-Date -format u
 
 
 # Start messages
-'------------------------------------------' | Tee-Object -filepath $logfilePath -append
-'CoreCycler startet at ' + $timestamp | Tee-Object -filepath $logfilePath -append
-'------------------------------------------' | Tee-Object -filepath $logfilePath -append
+Write-Text('------------------------------------------')
+Write-Text('CoreCycler startet at ' + $timestamp)
+Write-Text('------------------------------------------')
 
 # Display the number of logical & physical cores
-'Found ' + $numLogicalCores + ' logical and ' + $numPhysCores + ' physical cores' | Tee-Object -filepath $logfilePath -append
-'Hyperthreading / SMT is: ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' })) | Tee-Object -filepath $logfilePath -append
-'Selected number of threads: ' + $numberOfThreads | Tee-Object -filepath $logfilePath -append
+Write-Text('Found ' + $numLogicalCores + ' logical and ' + $numPhysCores + ' physical cores')
+Write-Text('Hyperthreading / SMT is: ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' })))
+Write-Text('Selected number of threads: ' + $settings.numberOfThreads)
+Write-Text('Number of iterations: ' + $settings.maxIterations)
 
 # And the selected mode (SSE, AVX, AVX2)
-'Selected mode: ' + $mode | Tee-Object -filepath $logfilePath -append
-'------------------------------------------' | Tee-Object -filepath $logfilePath -append
+Write-Text('Selected mode: ' + $settings.mode)
+Write-Text('------------------------------------------')
 
 
 # Print a message if we're ignoring certain cores
-if ($coresToIgnore.Length -gt 0) {
-	$coresToIgnoreString = (($coresToIgnore | sort) -join ', ')
-	'Ignoring cores ' + $coresToIgnoreString | Tee-Object -filepath $logfilePath -append
-	'---------------' + ('-' * $coresToIgnoreString.Length) | Tee-Object -filepath $logfilePath -append
+if ($settings.coresToIgnore.Length -gt 0) {
+	$settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
+	Write-Text('Ignored cores: ' + $settings.coresToIgnoreString)
+	Write-Text('---------------' + ('-' * $settings.coresToIgnoreString.Length))
 }
 
 
 # Display the results.txt file name for Prime95 for this run
-'Prime95''s results are being stored in:' | Tee-Object -filepath $logfilePath -append
-'' + $primeResultsPath | Tee-Object -filepath $logfilePath -append
+Write-Text('Prime95''s results are being stored in:')
+Write-Text($primeResultsPath)
 
 
 # Try to get the affinity of the Prime95 process. If not found, abort
 try {
-	'Current affinity of process: ' + $process.ProcessorAffinity | Tee-Object -filepath $logfilePath -append
+	Write-Text('Current affinity of process: ' + $process.ProcessorAffinity)
 }
 catch {
-	'ERROR: Process ' + $processName + ' not found!' | Tee-Object -filepath $logfilePath -append
-	Read-Host -Prompt "Press Enter to exit"
+	Write-Text('ERROR: Process ' + $processName + ' not found!')
+	Read-Host -Prompt 'Press Enter to exit'
 	exit
 }
 
 
 
-# Repeat the whole check $maxIterations times
-for ($iteration=1; $iteration -le $maxIterations; $iteration++) {
+# Repeat the whole check $settings.maxIterations times
+for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
 	$timestamp = Get-Date -format HH:mm:ss
 
 	# Check if all of the cores have thrown an error, and if so, abort
-	if ($coresWithError.Length -eq ($numPhysCores - $coresToIgnore.Length)) {
+	if ($coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
 		# Also close the Prime95 process to not let it run unnecessarily
 		Close-Prime95
 		
-		$timestamp + ' - All Cores have thrown an error, aborting!' | Tee-Object -filepath $logfilePath -append
-		Read-Host -Prompt "Press Enter to exit"
+		Write-Text($timestamp + ' - All Cores have thrown an error, aborting!')
+		Read-Host -Prompt 'Press Enter to exit'
 		exit
 	}
 
 
-	'' | Tee-Object -filepath $logfilePath -append
-	$timestamp + ' - Iteration ' + $iteration | Tee-Object -filepath $logfilePath -append
-	'---------------------------' | Tee-Object -filepath $logfilePath -append
+	Write-Text('')
+	Write-Text($timestamp + ' - Iteration ' + $iteration)
+	Write-Text('---------------------------')
 	
 	# Iterate over each core
-	:coreLoop for ($coreNumber=0; $coreNumber -lt $numPhysCores; $coreNumber++) {
+	# Named for loop
+	:coreLoop for ($coreNumber = 0; $coreNumber -lt $numPhysCores; $coreNumber++) {
 		$timestamp = Get-Date -format HH:mm:ss
 		$affinity = 0
 		$cpuNumbersArray = @()
@@ -631,8 +697,8 @@ for ($iteration=1; $iteration -le $maxIterations; $iteration++) {
 		# Get the current CPU core(s)
 
 		# If the number of threads is more than 1
-		if ($numberOfThreads -gt 1) {
-			for ($currentThread=0; $currentThread -lt $numberOfThreads; $currentThread++) {
+		if ($settings.numberOfThreads -gt 1) {
+			for ($currentThread = 0; $currentThread -lt $settings.numberOfThreads; $currentThread++) {
 				# We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
 				$thisCPUNumber    = ($coreNumber * 2) + $currentThread
 				$cpuNumbersArray += $thisCPUNumber
@@ -653,47 +719,47 @@ for ($iteration=1; $iteration -le $maxIterations; $iteration++) {
 
 
 		# If this core is in the ignored cores array
-		if ($coresToIgnore -contains $thisCoreNumber) {
+		if ($settings.coresToIgnore -contains $coreNumber) {
 			# Ignore it silently
-			#$timestamp + ' - Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping' | Tee-Object -filepath $logfilePath -append
+			#Write-Text($timestamp + ' - Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping')
 			continue
 		}
 
 		# If this core is stored in the error core array
-		if ($coresWithError -contains $thisCoreNumber) {
-			$timestamp + ' - Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping' | Tee-Object -filepath $logfilePath -append
+		if ($coresWithError -contains $coreNumber) {
+			Write-Text($timestamp + ' - Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
 			continue
 		}
 
 
-		# If $restartPrimeForEachCore is set, restart Prime95 for each core
-		# TODO: this check will not work correctly if core 0 is added to the $coresToIgnore array
-		if ($restartPrimeForEachCore -and ($iteration -gt 1 -or $coreNumber -gt 0)) {
+		# If $settings.restartPrimeForEachCore is set, restart Prime95 for each core
+		# TODO: this check will not work correctly if core 0 is added to the $settings.coresToIgnore array
+		if ($settings.restartPrimeForEachCore -and ($iteration -gt 1 -or $coreNumber -gt 0)) {
 			Close-Prime95
 			Start-Prime95
 		}
 		
 	   
 		# This core has not thrown an error yet, run the test
-		$timestamp + ' - Set to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')' | Tee-Object -filepath $logfilePath -append
+		Write-Text($timestamp + ' - Set to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
 		
 		# Set the affinity to a specific core
 		try {
 			$process.ProcessorAffinity = [System.IntPtr][Int]$affinity
-			'Running for ' + $runtimePerCore + ' seconds...' | Tee-Object -filepath $logfilePath -append
+			Write-Text('Running for ' + $settings.runtimePerCore + ' seconds...')
 			
 		}
 		catch {
-			'ERROR: Could not set the affinity to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')!' | Tee-Object -filepath $logfilePath -append
+			Write-Text('ERROR: Could not set the affinity to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')!')
 			Close-Prime95
-			Read-Host -Prompt "Press Enter to exit"
+			Read-Host -Prompt 'Press Enter to exit'
 			exit
 		}
 		
-		#Start-Sleep -Seconds $runtimePerCore
+		#Start-Sleep -Seconds $settings.runtimePerCore
 		
 		# Make a check each x seconds for the CPU power usage
-		for ($checkNumber=0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
+		for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
 			Start-Sleep -Seconds $cpuUsageCheckInterval
 
 			# Check if the process is still using enough CPU process power
@@ -725,13 +791,13 @@ for ($iteration=1; $iteration -le $maxIterations; $iteration++) {
 	
 	# Print out the cores that have thrown an error so far
 	if ($coresWithError.Length -gt 0) {
-		'The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ') | Tee-Object -filepath $logfilePath -append
+		Write-Text('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', '))
 	}
 }
 
 
 # The CoreCycler has finished
 $timestamp = Get-Date -format HH:mm:ss
-$timestamp + ' - CoreCycler finished' | Tee-Object -filepath $logfilePath -append
+Write-Text($timestamp + ' - CoreCycler finished')
 Close-Prime95
-Read-Host -Prompt "Press Enter to exit"
+Read-Host -Prompt 'Press Enter to exit'
