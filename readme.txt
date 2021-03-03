@@ -10,6 +10,15 @@ Double click the "Run CoreCycler.bat" file.
 
 
 
+INCLUDED SOFTWARE
+-----------------
+The script itself is a PowerShell script, but it uses the included Prime95 version 30.4b9 to actually do the stress 
+testing. If you don't trust me (and you shouldn't!), you can move your own copy of Prime95 into the /p95 directory.
+To download Prime95, go to the official site at https://www.mersenne.org/download/ (however, the 30.4 version used 
+here is at the time of writing this only available through their forum).
+
+
+
 DEUTSCH
 -------
 Mit diesem kleinen Script kann man die Einstellungen des Curve Optimizer für jeden einzelnen Kern seiner CPU auf

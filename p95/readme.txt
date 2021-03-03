@@ -199,7 +199,7 @@ must be downloaded by users doing proof certification work.  Proof certification
 very fast (256, 512, or 1024 times faster than the original PRP test depending on proof
 power).  By default, your computer is signed up for occasional proof certification work.
 
-*For proof power 7, tt is possible to cut the proof file size in half but this doubles the
+*For proof power 7, it is possible to cut the proof file size in half but this doubles the
 work required by the user doing the certification.  See undoc.txt.
 
 Temporary disk usage
