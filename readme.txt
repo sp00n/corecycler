@@ -1,6 +1,6 @@
 CORECYCLER
 ----------
-Test script for PBO & Curve Optimizer stability testing
+Stability test script for PBO & Curve Optimizer stability testing on AMD Ryzen processors
 
 
 

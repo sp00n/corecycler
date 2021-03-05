@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.6.0
+    0.7.0
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -12,223 +12,15 @@
     Please excuse my amateurish code in this file, it's my first attempt at writing in PowerShell ._.
 #>
 
-
-
-# Default config settings
-# Change the various settings in the config.ini file
-
-$defaultSettings = @{
-
-    # The mode of the stress test
-    # 'SSE':    lightest load on the processor, lowest temperatures, highest boost clock
-    # 'AVX':    medium load on the processor, medium temperatures, medium boost clock
-    # 'AVX2':   heaviest on the processor, highest temperatures, lowest boost clock
-    # 'CUSTOM': you can define your own settings (see further below for setting the values)
-    mode = 'SSE'
-
-
-    # Set the runtime per core in seconds
-    #  360 = 6 minutes
-    #  600 = 10 minutes
-    #  900 = 15 minutes
-    # 1200 = 20 minutes
-    # 1800 = 30 minutes
-    # 3600 = 1 hour
-    runtimePerCore = 360
-
-
-    # The number of threads to use for testing
-    # You can only choose between 1 and 2
-    # If Hyperthreading / SMT is disabled, this will automatically be set to 1
-    # Currently there's no automatic way to determine which core has thrown an error
-    # Setting this to 1 causes higher boost clock speed (due to less heat)
-    # Default is 1
-    # Maximum is 2
-    numberOfThreads = 1
-
-
-    # The max number of iterations, 10000 is basically unlimited
-    maxIterations = 10000
-
-
-    # Ignore certain cores
-    # These cores will not be tested
-    # The enumeration starts with a 0
-    # Example: $settings.coresToIgnore = @(0, 1, 2)
-    coresToIgnore = @()
-
-
-    # Restart the Prime95 process for each new core test
-    # So each core will have the same sequence of FFT sizes
-    # The sequence of FFT sizes for Small FFTs:
-    # 40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240
-    # Runtime on a 5900x: 5,x minutes
-    # Note: The screen never seems to turn off with this setting enabled
-    restartPrimeForEachCore = 0
-
-
-    # The name of the log file
-    # The $settings.mode above will be added to the name (and a .log file ending)
-    logfile = 'CoreCycler'
-
-
-    # Set the custom settings here for the 'CUSTOM' mode
-    # Note: The automatic detection at which FFT size an error likely occurred
-    #       will not work if you change the FFT sizes
-    customCpuSupportsSSE  = 1         # Needs to be set to 1 for SSE mode
-    customCpuSupportsSSE2 = 1         # Also needs to be set to 1 for SSE mode
-    customCpuSupportsAVX  = 0         # Needs to be set to 1 for AVX mode
-    customCpuSupportsAVX2 = 0         # Needs to be set to 1 for AVX2 mode
-    customCpuSupportsFMA3 = 0         # Also needs to be set to 1 for AVX2 mode on Ryzen
-    customMinTortureFFT   = 36        # The minimum FFT size to test
-    customMaxTortureFFT   = 248       # The maximum FFT size to test
-    customTortureMem      = 0         # The amount of memory to use in MB. 0 = In-Place
-    customTortureTime     = 1         # The max amount of minutes for each FFT size
-}
-
-
-# Set the default settings
-$settings = $defaultSettings
-
-
-# Read the config file and overwrite the default settings
-$userSettings = Get-Content -raw 'config.ini' | ConvertFrom-StringData
-
-foreach ($entry in $userSettings.GetEnumerator()) {
-    # Special handling for coresToIgnore
-    if ($entry.Name -eq 'coresToIgnore') {
-        if ($entry.Value -and ![string]::IsNullOrEmpty($entry.Value) -and ![String]::IsNullOrWhiteSpace($entry.Value)) {
-            # Split the string by comma and add to the coresToIgnore entry
-            $entry.Value -split ',\s*' | ForEach-Object { $settings.coresToIgnore += [Int]$_ }
-        }
-    }
-
-    # Setting cannot be empty
-    elseif ($entry.Value -and ![string]::IsNullOrEmpty($entry.Value) -and ![String]::IsNullOrWhiteSpace($entry.Value)) {
-        # For anything but the mode and logfile, transform the value to an integer
-        if ($entry.Name -eq 'logfile' -or $entry.Name -eq 'mode') {
-            $settings[$entry.Name] = [String]$entry.Value
-        }
-        else {
-            $settings[$entry.Name] = [Int]$entry.Value
-        }
-    }
-
-    # If it is empty, just ignore and use the default setting
-}
-
-
-# The full path and name of the log file
-$logfilePath = $PSScriptRoot + '\' + $settings.logfile + '-' + $settings.mode + '.log'
-
-
-# The number of physical and logical cores
-# This also includes hyperthreading resp. SMT (Simultaneous Multi-Threading)
-# We currently only test the first core for each hyperthreaded "package",
-# so e.g. only 12 cores for a 24 threaded Ryzen 5900x
-# If you disable hyperthreading / SMT, both values should be the same
-$processor       = Get-WMIObject Win32_Processor
-$numLogicalCores = $($processor | Measure-Object -Property NumberOfLogicalProcessors -sum).Sum
-$numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).Sum
-
-
-# Set the flag if Hyperthreading / SMT is enabled or not
-$isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
-
-
-# The Prime95 executable name and path
-$processName = 'prime95'
-$processPath = $PSScriptRoot + '\p95\'
-$primePath   = $processPath + $processName
-
-
-# The Prime95 results.txt file name for this run
-$primeResultsName = 'results-CoreCycler-' + (Get-Date -format yyyy-MM-dd-HH-mm-ss) + '-' + $settings.mode + '.txt'
-$primeResultsPath = $processPath + $primeResultsName
-
-
-# The Prime95 process
-$process = Get-Process $processName -ErrorAction SilentlyContinue
-
-
-# Limit the number of threads to 1 - 2
-$settings.numberOfThreads = [Math]::Max(1, [Math]::Min(2, $settings.numberOfThreads))
-$settings.numberOfThreads = $(if ($isHyperthreadingEnabled) { $settings.numberOfThreads } else { 1 })
-
-
-# The expected CPU usage for the running Prime95 process
-# The selected number of threads should be at 100%, so e.g. for 1 thread out of 24 threads this is 100/24*1= 4.17%
-# Used to determine if Prime95 is still running or has thrown an error
-$expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThreads, 2)
-
-
-# Store all the cores that have thrown an error in Prime95
-# These cores will be skipped on the next iteration
-[Int[]] $coresWithError = @()
-
-
-# Check the CPU usage each x seconds
-$cpuUsageCheckInterval = 30
-
-
-# Calculate the interval time for the CPU power check
-$cpuCheckIterations = [Math]::Floor($settings.runtimePerCore / $cpuUsageCheckInterval)
-$runtimeRemaining   = $settings.runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
-
-
-# The Prime95 CPU settings for the various test modes
-$prime95CPUSettings = @{
-    SSE = @{
-        CpuSupportsSSE  = 1
-        CpuSupportsSSE2 = 1
-        CpuSupportsAVX  = 0
-        CpuSupportsAVX2 = 0
-        CpuSupportsFMA3 = 0
-    }
-
-    AVX = @{
-        CpuSupportsSSE  = 1
-        CpuSupportsSSE2 = 1
-        CpuSupportsAVX  = 1
-        CpuSupportsAVX2 = 0
-        CpuSupportsFMA3 = 0
-    }
-
-    AVX2 = @{
-        CpuSupportsSSE  = 1
-        CpuSupportsSSE2 = 1
-        CpuSupportsAVX  = 1
-        CpuSupportsAVX2 = 1
-        CpuSupportsFMA3 = 1
-    }
-
-    CUSTOM = @{
-        CpuSupportsSSE  = $settings.customCpuSupportsSSE
-        CpuSupportsSSE2 = $settings.customCpuSupportsSSE2
-        CpuSupportsAVX  = $settings.customCpuSupportsAVX
-        CpuSupportsAVX2 = $settings.customCpuSupportsAVX2
-        CpuSupportsFMA3 = $settings.customCpuSupportsFMA3
-    }
-}
-
-
-# The various FFT sizes
-# Used to determine where an error likely happened
-# TODO
-$FFTSizes = @{
-    # Smallest FFT
-    # 4 ... 21
-    Smallest = @(4, 5, 6, 8, 10, 12, 14, 16, 20)
-
-    # Small FFT
-    # 36 ... 248
-    Small = @(40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240)
-
-    # Large FFT
-    # 426 ... 8192
-    # 426, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200,  ... 8192
-    Large = @()
-}
+# Global variables
+$curDateTime          = Get-Date -format yyyy-MM-dd_HH-mm-ss
+$settings             = $null
+$logFilePath          = $null
+$processWindowHandler = $null
+$processId            = $null
+$process              = $null
+$processCounterPath   = $null
+$coresWithError       = $null
 
 
 # Add code definitions so that we can close the Prime95 window even if it's minimized to the tray
@@ -300,11 +92,261 @@ Add-Type -TypeDefinition $CloseWindowDefinition
 
 <##
  # Write a message to the screen and to the log file
- # .PARAM void It merges all parameters into a single line
+ # .PARAM string $text The text to output
  # .RETURN void
  #>
 function Write-Text {
-    $args -join '' | Tee-Object -filepath $logfilePath -append
+    param(
+        $text
+    )
+    
+    Write-Host $text
+    Add-Content $logFilePath ($text)
+}
+
+
+<##
+ # Write a message to the screen with a specific color and to the log file
+ # .PARAM string $text The text to output
+ # .PARAM string $color The color
+ # .RETURN void
+ #>
+function Write-ColorText {
+    param(
+        $text,
+        $foregroundColor
+    )
+
+    # -ForegroundColor <ConsoleColor>
+    # -BackgroundColor <ConsoleColor>
+    # Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
+    
+    Write-Host $text -ForegroundColor $foregroundColor
+    Add-Content $logFilePath ($text)
+}
+
+
+<##
+ # Throw a fatal error
+ # .PARAM string $text The text to display
+ # .RETURN void
+ #>
+function Exit-WithFatalError {
+    param(
+        $text
+    )
+
+    Write-ColorText('FATAL ERROR: ' + $text) Red
+    Read-Host -Prompt 'Press Enter to exit'
+    exit
+}
+
+
+<##
+ # Get the settings
+ # .PARAM void
+ # .RETURN void
+ #>
+function Get-Settings {
+    # Default config settings
+    # Change the various settings in the config.ini file
+
+    $defaultSettings = @{
+
+        # The mode of the stress test
+        # 'SSE':    lightest load on the processor, lowest temperatures, highest boost clock
+        # 'AVX':    medium load on the processor, medium temperatures, medium boost clock
+        # 'AVX2':   heaviest on the processor, highest temperatures, lowest boost clock
+        # 'CUSTOM': you can define your own settings (see further below for setting the values)
+        mode = 'SSE'
+
+
+        # The FFT size preset to test
+        # These are basically the presets as present in Prime95
+        # Note: If "mode" is set to "CUSTOM", this setting will be ignored
+        # 'Smallest':  Smallest FFT: 4K to 21K     - tests L1/L2 caches, high power/heat/CPU stress
+        # 'Small':     Small FFT:    36K to 248K   - tests L1/L2/L3 caches, maximum power/heat/CPU stress
+        # 'Large':     Large FFT:    426K to 8192K - stresses memory controller and RAM (although memory testing is disabled here by default!)
+        # 'All':       All FFT:      4K to 8192K   - all of the above
+        FFTSize = 'Small'
+
+
+        # Set the runtime per core
+        # You can use a value in seconds or use 'h' for hours, 'm' for minutes and 's' for seconds
+        # Examples: 360 = 360 seconds
+        #           1h4m = 1 hour, 4 minutes
+        #           1.5m = 1.5 minutes = 90 seconds
+        # Default: 360
+        runtimePerCore = 360
+
+
+        # The number of threads to use for testing
+        # You can only choose between 1 and 2
+        # If Hyperthreading / SMT is disabled, this will automatically be set to 1
+        # Currently there's no automatic way to determine which core has thrown an error
+        # Setting this to 1 causes higher boost clock speed (due to less heat)
+        # Default is 1
+        # Maximum is 2
+        numberOfThreads = 1
+
+
+        # The max number of iterations, 10000 is basically unlimited
+        maxIterations = 10000
+
+
+        # Ignore certain cores
+        # These cores will not be tested
+        # The enumeration starts with a 0
+        # Example: $settings.coresToIgnore = @(0, 1, 2)
+        coresToIgnore = @()
+
+
+        # Restart the Prime95 process for each new core test
+        # So each core will have the same sequence of FFT sizes
+        # The sequence of FFT sizes for Small FFTs:
+        # 40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240
+        # Runtime on a 5900x: 5,x minutes
+        # Note: The screen never seems to turn off with this setting enabled
+        restartPrimeForEachCore = 0
+
+
+        # The name of the log file
+        # The $settings.mode and the $settings.FFTSize above will be added to the name (and a .log file ending)
+        logfile = 'CoreCycler'
+
+
+        # Set the custom settings here for the 'CUSTOM' mode
+        # Note: The automatic detection at which FFT size an error likely occurred
+        #       will not work if you change the FFT sizes
+        customCpuSupportsAVX  = 0         # Needs to be set to 1 for AVX mode (and AVX2)
+        customCpuSupportsAVX2 = 0         # Needs to be set to 1 for AVX2 mode
+        customCpuSupportsFMA3 = 0         # Also needs to be set to 1 for AVX2 mode on Ryzen
+        customMinTortureFFT   = 36        # The minimum FFT size to test
+        customMaxTortureFFT   = 248       # The maximum FFT size to test
+        customTortureMem      = 0         # The amount of memory to use in MB. 0 = In-Place
+        customTortureTime     = 1         # The max amount of minutes for each FFT size
+    }
+
+
+    # Set the default settings
+    $settings = $defaultSettings
+
+
+    # The full path and name of the log file
+    $Script:logfilePath = $PSScriptRoot + '\logs\' + $settings.logfile + '_' + $curDateTime + '_' + $settings.mode + '.log'
+
+
+    # If no config file exists, copy the config.default.ini to config.ini
+    if (!(Test-Path 'config.ini' -PathType leaf)) {
+        
+        if (!(Test-Path 'config.default.ini' -PathType leaf)) {
+            Exit-WithFatalError('Neither config.ini nor config.default.ini found!')
+        }
+
+        Copy-Item -Path 'config.default.ini' -Destination 'config.ini'
+    }
+
+
+    # Read the config file and overwrite the default settings
+    $userSettings = Get-Content -raw 'config.ini' | ConvertFrom-StringData
+
+    foreach ($entry in $userSettings.GetEnumerator()) {
+        # Special handling for coresToIgnore
+        if ($entry.Name -eq 'coresToIgnore') {
+            if ($entry.Value -and ![string]::IsNullOrEmpty($entry.Value) -and ![String]::IsNullOrWhiteSpace($entry.Value)) {
+                # Split the string by comma and add to the coresToIgnore entry
+                $entry.Value -split ',\s*' | ForEach-Object {
+                    $settings.coresToIgnore += [Int]$_
+                }
+            }
+        }
+
+        # Setting cannot be empty
+        elseif ($entry.Value -and ![string]::IsNullOrEmpty($entry.Value) -and ![String]::IsNullOrWhiteSpace($entry.Value)) {
+            # For anything but the mode, logfile, and FFTSize parameters, transform the value to an integer
+            if ($entry.Name -eq 'logfile' -or $entry.Name -eq 'mode' -or $entry.Name -eq 'FFTSize') {
+                $settings[$entry.Name] = [String]$entry.Value
+            }
+
+            # Parse the runtime per core (seconds, minutes, hours)
+            elseif ($entry.Name -eq 'runtimePerCore') {
+                # Parse the hours, minutes, seconds
+                if ($entry.Value.indexOf('h') -ge 0 -or $entry.Value.indexOf('m') -ge 0 -or $entry.Value.indexOf('s') -ge 0) {
+                    $hasMatched = $entry.Value -match '((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
+                    $seconds = [Double]$matches.hours * 60 * 60 + [Double]$matches.minutes * 60 + [Double]$matches.seconds
+                    $settings[$entry.Name] = [Int]$seconds
+                }
+
+                # Treat the value as seconds
+                else {
+                    $settings[$entry.Name] = [Int]$entry.Value
+                }
+            }
+
+            else {
+                $settings[$entry.Name] = [Int]$entry.Value
+            }
+        }
+
+        # If it is empty, just ignore and use the default setting
+    }
+
+
+    # Limit the number of threads to 1 - 2
+    $settings.numberOfThreads = [Math]::Max(1, [Math]::Min(2, $settings.numberOfThreads))
+    $settings.numberOfThreads = $(if ($isHyperthreadingEnabled) { $settings.numberOfThreads } else { 1 })
+
+
+    # Store in the global variable
+    $Script:settings = $settings
+}
+
+
+<##
+ # Get the formatted runtime per core string
+ # .PARAM int $seconds The runtime in seconds
+ # .RETURN string The formatted runtime string
+ #>
+function Get-FormattedRuntimePerCoreString {
+    param (
+        $seconds
+    )
+
+    $runtimePerCoreStringArray = @()
+    $timeSpan = [TimeSpan]::FromSeconds($seconds)
+
+    if ( $timeSpan.Hours -ge 1 ) {
+        $thisString = [String]$timeSpan.Hours + ' hour'
+
+        if ( $timeSpan.Hours -gt 1 ) {
+            $thisString += 's'
+        }
+
+        $runtimePerCoreStringArray += $thisString
+    }
+
+    if ( $timeSpan.Minutes -ge 1 ) {
+        $thisString = [String]$timeSpan.Minutes + ' minute'
+
+        if ( $timeSpan.Minutes -gt 1 ) {
+            $thisString += 's'
+        }
+
+        $runtimePerCoreStringArray += $thisString
+    }
+
+
+    if ( $timeSpan.Seconds -ge 1 ) {
+        $thisString = [String]$timeSpan.Seconds + ' second'
+
+        if ( $timeSpan.Seconds -gt 1 ) {
+            $thisString += 's'
+        }
+
+        $runtimePerCoreStringArray += $thisString
+    }
+
+    return ($runtimePerCoreStringArray -join ', ')
 }
 
 
@@ -398,9 +440,7 @@ function Initialize-Prime95 {
     $configFile2 = $processPath + 'prime.txt'
 
     if ($configType -ne 'CUSTOM' -and $configType -ne 'SSE' -and $configType -ne 'AVX' -and $configType -ne 'AVX2') {
-        Write-Text('ERROR: Invalid mode type provided!')
-        Read-Host -Prompt 'Press Enter to exit'
-        exit
+        Exit-WithFatalError('Invalid mode type provided!')
     }
 
     # Create the local.txt and overwrite if necessary
@@ -427,25 +467,24 @@ function Initialize-Prime95 {
     # Set the custom results.txt file name
     Set-Content $configFile2 ('results.txt=' + $primeResultsName)
     
-    
-    # Here you can define custom FFT sizes
+    # Custom settings
     if ($configType -eq 'CUSTOM') {
-        Add-Content $configFile2 ('MinTortureFFT=' + $settings.customMinTortureFFT)
-        Add-Content $configFile2 ('MaxTortureFFT=' + $settings.customMaxTortureFFT)
         Add-Content $configFile2 ('TortureMem='    + $settings.customTortureMem)
         Add-Content $configFile2 ('TortureTime='   + $settings.customTortureTime)
     }
     
     # Default settings
     else {
-        # FFT size 36K to 248K
         # No memory testing ("In-Place")
         # 1 minute per FFT size
-        Add-Content $configFile2 'MinTortureFFT=36'
-        Add-Content $configFile2 'MaxTortureFFT=248'
         Add-Content $configFile2 'TortureMem=0'
         Add-Content $configFile2 'TortureTime=1'
     }
+
+    # Set the FFT sizes
+    Add-Content $configFile2 ('MinTortureFFT=' + $minFFTSize)
+    Add-Content $configFile2 ('MaxTortureFFT=' + $maxFFTSize)
+    
 
     # Get the correct TortureWeak setting
     Add-Content $configFile2 ('TortureWeak=' + $(Get-TortureWeakValue))
@@ -478,9 +517,7 @@ function Start-Prime95 {
     Start-Sleep -Milliseconds 500
     
     if (!$Script:process) {
-        Write-Text('ERROR: Could not start process ' + $processName + '!')
-        Read-Host -Prompt 'Press Enter to exit'
-        exit
+        Exit-WithFatalError('Could not start process ' + $processName + '!')
     }
 
     # Get the main window handler
@@ -637,10 +674,10 @@ function Test-ProcessUsage {
         
         # Put out an error message
         $timestamp = Get-Date -format HH:mm:ss
-        Write-Text('ERROR: ' + $timestamp)
-        Write-Text('ERROR: Prime95 seems to have stopped with an error!')
-        Write-Text('ERROR: At Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
-        Write-Text('ERROR MESSAGE: ' + $primeError)
+        Write-ColorText('ERROR: ' + $timestamp) Magenta
+        Write-ColorText('ERROR: Prime95 seems to have stopped with an error!') Magenta
+        Write-ColorText('ERROR: At Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')') Magenta
+        Write-ColorText('ERROR MESSAGE: ' + $primeError) Magenta
         
         # DEBUG
         # Also add the 5 last rows of the results.txt file
@@ -648,32 +685,41 @@ function Test-ProcessUsage {
         #Write-Text(Get-Item -Path $primeResultsPath | Get-Content -Tail 5)
         
         # Try to determine the last run FFT size
-        # This will horribly fail if the FFT sizes were changed in the custom config
         # If the result.txt doesn't exist, assume that it was on the very first iteration
         if (!$resultFileHandle) {
-            $lastRunFFT = $FFTSizes.Small[0]
+            $lastRunFFT = $minFFTSize
         }
         
         # Get the last couple of rows and find the last passed FFT size
         else {
-            $lastFiveRows = $resultFileHandle | Get-Content -Tail 5
+            $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
             $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-            $hasMatched = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
-            $lastPassedFFT = [Int]$matches[1]   # $matches is a fixed(?) variable name for -match
+            $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+            $lastPassedFFT    = [Int]$matches[1]   # $matches is a fixed(?) variable name for -match
             
             
-            # If the last passed FFT size is the last entry of the FFT sizes, start at the beginning
-            if ($lastPassedFFT -eq $FFTSizes.Small[$FFTSizes.Small.Length-1]) {
-                $lastRunFFT = $FFTSizes.Small[0]
+            # TODO
+            # If the last passed FFT size is the max selected FFT size, start at the beginning
+            if ($lastPassedFFT -eq $maxFFTSize) {
+                $lastRunFFT = $minFFTSize
             }
+
+            # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
+            # In this case, we also assume that it successfully completed the max value and errored at the min FFT size
+            # Example: Smallest FFT max = 21, but the actual last size tested is 20K
+            elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
+                $lastRunFFT = $minFFTSize
+            }
+
+            # If it's not the max value and it does show up in the FFT array, select the next value
             else {
-                $lastRunFFT = $FFTSizes.Small[$FFTSizes.Small.indexOf([Int]$matches[1])+1]
+                $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
             }
         }
         
         # Educated guess
         if ($lastRunFFT) {
-            Write-Text('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K')
+            Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
         }
         
 
@@ -691,6 +737,223 @@ function Test-ProcessUsage {
 }
 
 
+
+<##
+ # The main functionality
+ #>
+# Get the default and user settings
+Get-Settings
+
+
+# The number of physical and logical cores
+# This also includes hyperthreading resp. SMT (Simultaneous Multi-Threading)
+# We currently only test the first core for each hyperthreaded "package",
+# so e.g. only 12 cores for a 24 threaded Ryzen 5900x
+# If you disable hyperthreading / SMT, both values should be the same
+$processor       = Get-WMIObject Win32_Processor
+$numLogicalCores = $($processor | Measure-Object -Property NumberOfLogicalProcessors -sum).Sum
+$numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).Sum
+
+
+# Set the flag if Hyperthreading / SMT is enabled or not
+$isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
+
+
+# The Prime95 executable name and path
+$processName = 'prime95'
+$processPath = $PSScriptRoot + '\p95\'
+$primePath   = $processPath + $processName
+
+
+# The Prime95 process
+$process = Get-Process $processName -ErrorAction SilentlyContinue
+
+
+# The expected CPU usage for the running Prime95 process
+# The selected number of threads should be at 100%, so e.g. for 1 thread out of 24 threads this is 100/24*1= 4.17%
+# Used to determine if Prime95 is still running or has thrown an error
+$expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThreads, 2)
+
+
+# Store all the cores that have thrown an error in Prime95
+# These cores will be skipped on the next iteration
+[Int[]] $coresWithError = @()
+
+
+# Check the CPU usage each x seconds
+$cpuUsageCheckInterval = 30
+
+
+# Calculate the interval time for the CPU power check
+$cpuCheckIterations = [Math]::Floor($settings.runtimePerCore / $cpuUsageCheckInterval)
+$runtimeRemaining   = $settings.runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
+
+
+# The Prime95 CPU settings for the various test modes
+$prime95CPUSettings = @{
+    SSE = @{
+        CpuSupportsSSE  = 1
+        CpuSupportsSSE2 = 1
+        CpuSupportsAVX  = 0
+        CpuSupportsAVX2 = 0
+        CpuSupportsFMA3 = 0
+    }
+
+    AVX = @{
+        CpuSupportsSSE  = 1
+        CpuSupportsSSE2 = 1
+        CpuSupportsAVX  = 1
+        CpuSupportsAVX2 = 0
+        CpuSupportsFMA3 = 0
+    }
+
+    AVX2 = @{
+        CpuSupportsSSE  = 1
+        CpuSupportsSSE2 = 1
+        CpuSupportsAVX  = 1
+        CpuSupportsAVX2 = 1
+        CpuSupportsFMA3 = 1
+    }
+
+    CUSTOM = @{
+        CpuSupportsSSE  = 1
+        CpuSupportsSSE2 = 1
+        CpuSupportsAVX  = $settings.customCpuSupportsAVX
+        CpuSupportsAVX2 = $settings.customCpuSupportsAVX2
+        CpuSupportsFMA3 = $settings.customCpuSupportsFMA3
+    }
+}
+
+
+# The various FFT sizes
+# Used to determine where an error likely happened
+# Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
+# AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192
+# AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192
+# SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192
+$FFTSizes = @{
+    SSE = @(
+        # Smallest FFT
+        4, 5, 6, 8, 10, 12, 14, 16, 20,
+        
+        # Not used in Prime95 presets
+        24, 28, 32,
+        
+        # Small FFT
+        40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240,
+
+        # Not used in Prime95 presets
+        256, 288, 320, 336, 384, 400,
+
+        # Large FFT
+        448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
+        2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
+        6400, 6720, 6912, 7168, 7680, 8000, 8192
+    )
+
+    AVX = @(
+        # Smallest FFT
+        4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+
+        # Not used in Prime95 presets
+        24, 25, 28, 32, 35,
+
+        # Small FFT
+        36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240,
+
+        # Not used in Prime95 presets
+        256, 288, 320, 336, 384, 400,
+
+        # Large FFT
+        448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
+        2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
+        6400, 6720, 6912, 7168, 7680, 8000, 8192
+    )
+
+
+    AVX2 = @(
+        # Smallest FFT
+        4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+
+        # Not used in Prime95 presets
+        24, 25, 28, 30, 32, 35,
+
+        # Small FFT
+        36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 144, 160, 168, 192, 200, 224, 240,
+
+        # Not used in Prime95 presets
+        256, 280, 288, 320, 336, 384, 400,
+
+        # Large FFT
+        448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
+        2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
+        6400, 6720, 7168, 7680, 8000, 8064, 8192
+    )
+}
+
+
+# The min and max values for the various presets
+# Note that the actually tested sizes differ from the originally provided min and max values
+# depending on the selected test mode (SSE, AVX, AVX2)
+$FFTMinMaxValues = @{
+    SSE = @{
+        Smallest = @{ Min =   4; Max =   20; }  # Originally   4 ...   21
+        Small    = @{ Min =  40; Max =  240; }  # Originally  36 ...  248
+        Large    = @{ Min = 448; Max = 8192; }  # Originally 426 ... 8192
+        All      = @{ Min =   4; Max = 8192; }  # Originally   4 ... 8192
+    }
+
+    AVX = @{
+        Smallest = @{ Min =   4; Max =   21; }  # Originally   4 ...   21
+        Small    = @{ Min =  36; Max =  240; }  # Originally  36 ...  248
+        Large    = @{ Min = 448; Max = 8192; }  # Originally 426 ... 8192
+        All      = @{ Min =   4; Max = 8192; }  # Originally   4 ... 8192
+    }
+
+    AVX2 = @{
+        Smallest = @{ Min =   4; Max =   21; }  # Originally   4 ...   21
+        Small    = @{ Min =  36; Max =  240; }  # Originally  36 ...  248
+        Large    = @{ Min = 448; Max = 8192; }  # Originally 426 ... 8192
+        All      = @{ Min =   4; Max = 8192; }  # Originally   4 ... 8192
+    }
+}
+
+
+# Get the correct min and max values for the selected FFT settings
+if ($settings.mode -eq 'CUSTOM') {
+    $minFFTSize = [Int]$settings.customMinTortureFFT
+    $maxFFTSize = [Int]$settings.customMaxTortureFFT
+}
+else {
+    $minFFTSize = $FFTMinMaxValues[$settings.mode][$settings.FFTSize].Min
+    $maxFFTSize = $FFTMinMaxValues[$settings.mode][$settings.FFTSize].Max
+}
+
+
+# Get the test mode, even if $settings.mode is set to CUSTOM
+$cpuTestMode = $settings.mode
+
+# If we're in CUSTOM mode, try to determine which setting preset it is
+if ($settings.mode -eq 'CUSTOM') {
+    $cpuTestMode = 'SSE'
+
+    if ($settings.customCpuSupportsAVX -eq 1) {
+        if ($settings.customCpuSupportsAVX2 -eq 1 -and $settings.customCpuSupportsFMA3 -eq 1) {
+            $cpuTestMode = 'AVX2'
+        }
+        else {
+            $cpuTestMode = 'AVX'
+        }
+    }
+}
+
+
+# The Prime95 results.txt file name for this run
+$primeResultsName = 'results_CoreCycler_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+$primeResultsPath = $processPath + $primeResultsName
+
+
+
 # Close all existing instances of Prime95 and start a new one with our config
 if ($process) {
     Close-Prime95
@@ -703,62 +966,67 @@ Initialize-Prime95 $settings.mode
 Start-Prime95
 
 
-
 # Get the current datetime
 $timestamp = Get-Date -format u
 
 
 # Start messages
-Write-Text('------------------------------------------')
-Write-Text('CoreCycler startet at ' + $timestamp)
-Write-Text('------------------------------------------')
+Write-ColorText('---------------------------------------------------------------------------') Green
+Write-ColorText('CoreCycler startet at ' + $timestamp) Green
+Write-ColorText('---------------------------------------------------------------------------') Green
 
 # Display the number of logical & physical cores
-Write-Text('Found ' + $numLogicalCores + ' logical and ' + $numPhysCores + ' physical cores')
-Write-Text('Hyperthreading / SMT is: ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' })))
-Write-Text('Selected number of threads: ' + $settings.numberOfThreads)
-Write-Text('Number of iterations: ' + $settings.maxIterations)
+Write-ColorText('Found ' + $numLogicalCores + ' logical and ' + $numPhysCores + ' physical cores') Cyan
+Write-ColorText('Hyperthreading / SMT is: ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
+Write-ColorText('Selected number of threads: ' + $settings.numberOfThreads) Cyan
+Write-ColorText('Number of iterations: ' + $settings.maxIterations) Cyan
 
 # And the selected mode (SSE, AVX, AVX2)
-Write-Text('Selected mode: ' + $settings.mode)
+Write-ColorText('Selected mode: ' + $settings.mode) Cyan
 
 if ($settings.mode -eq 'CUSTOM') {
-    Write-Text('Custom settings:')
-    Write-Text('CpuSupportsSSE  = ' + $settings.customCpuSupportsSSE)
-    Write-Text('CpuSupportsSSE2 = ' + $settings.customCpuSupportsSSE2)
-    Write-Text('CpuSupportsAVX  = ' + $settings.customCpuSupportsAVX)
-    Write-Text('CpuSupportsAVX2 = ' + $settings.customCpuSupportsAVX2)
-    Write-Text('CpuSupportsFMA3 = ' + $settings.customCpuSupportsFMA3)
-    Write-Text('MinTortureFFT   = ' + $settings.customMinTortureFFT)
-    Write-Text('MaxTortureFFT   = ' + $settings.customMaxTortureFFT)
-    Write-Text('TortureMem      = ' + $settings.customTortureMem)
-    Write-Text('TortureTime     = ' + $settings.customTortureTime)
+    Write-ColorText('Custom settings:') Cyan
+    Write-ColorText('CpuSupportsAVX  = ' + $settings.customCpuSupportsAVX) Cyan
+    Write-ColorText('CpuSupportsAVX2 = ' + $settings.customCpuSupportsAVX2) Cyan
+    Write-ColorText('CpuSupportsFMA3 = ' + $settings.customCpuSupportsFMA3) Cyan
+    Write-ColorText('MinTortureFFT   = ' + $settings.customMinTortureFFT) Cyan
+    Write-ColorText('MaxTortureFFT   = ' + $settings.customMaxTortureFFT) Cyan
+    Write-ColorText('TortureMem      = ' + $settings.customTortureMem) Cyan
+    Write-ColorText('TortureTime     = ' + $settings.customTortureTime) Cyan
+}
+else {
+    Write-ColorText('Selected FFT size: ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
 }
 
-Write-Text('------------------------------------------')
+Write-ColorText('---------------------------------------------------------------------------') Cyan
 
 
 # Print a message if we're ignoring certain cores
 if ($settings.coresToIgnore.Length -gt 0) {
     $settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
-    Write-Text('Ignored cores: ' + $settings.coresToIgnoreString)
-    Write-Text('---------------' + ('-' * $settings.coresToIgnoreString.Length))
+    Write-ColorText('Ignored cores: ' + $settings.coresToIgnoreString) Cyan
+    #Write-ColorText('---------------' + ('-' * $settings.coresToIgnoreString.Length)) Cyan
+    Write-ColorText('---------------------------------------------------------------------------') Cyan
 }
 
 
 # Display the results.txt file name for Prime95 for this run
-Write-Text('Prime95''s results are being stored in:')
-Write-Text($primeResultsPath)
+Write-ColorText('Prime95''s results are being stored in:') Cyan
+Write-ColorText($primeResultsPath) Cyan
+
+# And the name of the log file for this run
+Write-ColorText('') Cyan
+Write-ColorText('The path of the CoreCycler log file is:') Cyan
+Write-ColorText($logfilePath) Cyan
 
 
 # Try to get the affinity of the Prime95 process. If not found, abort
 try {
-    Write-Text('Current affinity of process: ' + $process.ProcessorAffinity)
+    $null = $process.ProcessorAffinity
+    #Write-Text('Current affinity of process: ' + $process.ProcessorAffinity)
 }
 catch {
-    Write-Text('ERROR: Process ' + $processName + ' not found!')
-    Read-Host -Prompt 'Press Enter to exit'
-    exit
+    Exit-WithFatalError('Process ' + $processName + ' not found!')
 }
 
 
@@ -778,16 +1046,19 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     }
 
 
-    Write-Text('')
-    Write-Text($timestamp + ' - Iteration ' + $iteration)
-    Write-Text('---------------------------')
+    Write-ColorText('') Yellow
+    Write-ColorText($timestamp + ' - Iteration ' + $iteration) Yellow
+    Write-ColorText('----------------------------------') Yellow
     
     # Iterate over each core
     # Named for loop
     :coreLoop for ($coreNumber = 0; $coreNumber -lt $numPhysCores; $coreNumber++) {
-        $timestamp = Get-Date -format HH:mm:ss
-        $affinity = 0
-        $cpuNumbersArray = @()
+        $startDateThisCore = (Get-Date)
+        $endDateThisCore   = $startDateThisCore + (New-TimeSpan -Seconds $settings.runtimePerCore)
+        $timestamp         = $startDateThisCore.ToString("HH:mm:ss")
+        $affinity          = 0
+        $cpuNumbersArray   = @()
+
 
         # Get the current CPU core(s)
 
@@ -841,21 +1112,29 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         # Set the affinity to a specific core
         try {
             $process.ProcessorAffinity = [System.IntPtr][Int]$affinity
-            Write-Text('Running for ' + $settings.runtimePerCore + ' seconds...')
-            
+            Write-Text('Running for ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore) + '...')
         }
         catch {
-            Write-Text('ERROR: Could not set the affinity to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')!')
             Close-Prime95
-            Read-Host -Prompt 'Press Enter to exit'
-            exit
+            Exit-WithFatalError('Could not set the affinity to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')!')
         }
-        
-        #Start-Sleep -Seconds $settings.runtimePerCore
-        
+
+
         # Make a check each x seconds for the CPU power usage
         for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
-            Start-Sleep -Seconds $cpuUsageCheckInterval
+            $nowDateTime = (Get-Date)
+            $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
+
+
+            # Make this the last iteration if the remaining time is close enough
+            if ($difference.TotalSeconds -le $cpuUsageCheckInterval) {
+                $checkNumber = $cpuCheckIterations
+                Start-Sleep -Seconds ($difference.TotalSeconds - 1)
+            }
+            else {
+                Start-Sleep -Seconds $cpuUsageCheckInterval
+            }
+            
 
             # Check if the process is still using enough CPU process power
             try {
