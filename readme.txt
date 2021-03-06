@@ -1,21 +1,38 @@
-CORECYCLER
-----------
-Stability test script for PBO & Curve Optimizer stability testing on AMD Ryzen processors
+--------------
+- CORECYCLER -
+--------------
+https://github.com/sp00n/corecycler
 
 
 
-QUICK INSTRUCTIONS
-------------------
+WHAT?
+-----
+A stability test script for PBO & Curve Optimizer stability testing on AMD Ryzen processors.
+
+
+
+HOW?
+----
 Double click the "Run CoreCycler.bat" file.
+
+
+
+DANGER!
+-------
+I do not take any responsibility if you damage your computer using this script! Temperatures with Prime95 can become 
+very high, especially if the cooling solution is suboptimal. And although Ryzen should automatically shut down if the 
+temperature becomes too high, it's really not advisable to let it come to this and you should try to stay below 90°C.
+Also, PBO technically voids the warranty of your CPU, so use it at your own risk!
 
 
 
 INCLUDED SOFTWARE
 -----------------
 The script itself is a PowerShell script, but it uses the included Prime95 version 30.4b9 to actually do the stress 
-testing. If you don't trust me (and you shouldn't!), you can move your own copy of Prime95 into the /p95 directory.
+testing. You can also move your own copy of Prime95 into the /p95 directory if you want to be on the safe side (good 
+choice!).
 To download Prime95, go to the official site at https://www.mersenne.org/download/ (however, the 30.4 version used 
-here is at the time of writing this only available through their forum).
+here is at the time of writing only available through their forum).
 
 
 
@@ -23,22 +40,31 @@ DEUTSCH
 -------
 Mit diesem kleinen Script kann man die Einstellungen des Curve Optimizer für jeden einzelnen Kern seiner CPU auf
 Stabilität überprüfen. Das Script startet Prime95 mit einem Worker-Thread und setzt die "Affinity" von Prime95
-abwechselnd auf den einzelnen Kern, d.h. es wird immer nur ein einziger Kern gleichzeitig belastet, wodurch sehr gut
-die Stabilität ausgetestet werden kann.
+abwechselnd auf die einzelnen Kerne, d.h. es wird immer nur ein einziger Kern gleichzeitig belastet, wodurch sehr gut
+die Stabilität der Curve Optimizer Einstellung ausgetestet werden kann.
 Die bisherigen Stabilitätstests mit PBO und dem Curve Optimizer waren entweder nicht zuverlässig (Cinebench, 
 Windows Repair) oder mit sehr viel Arbeit verbunden (manuell die Affinity über den Task Manager setzen, warten, neu 
-setzen, etc) oder gleich beides. Mit diesem Script braucht man eigentlich nur noch Zeit - allerdings sehr viel Zeit.
-Da immer nur ein Kern getestet wird, und man z.B. 12h "Prime-stable" erreichen will, müsste man jeden Kern für 12h 
-testen. Bei z.B. dem 5900X mit 12 Kernen / 24 Threads würde das dann 12*12, also 144 Stunden dauern, damit jeder Kern 
-für 12 Stunden auf Stabilität getestet wurde.
-Ein All-Core Test mit Prime95 ist leider nicht effektiv mit dem Curve Optimizer, da die Kerne dann nicht so hoch 
-takten können, und man so eventuelle Instabilitäten nicht erkennen kann. Bei meiner CPU konnte ich z.B. -30 auf allen 
-Kernen und +75 MHz Boost problemlos 24 Stunden mit Prime95 laufen lassen, während ich bei diesem Einzeltest dann einen 
-der Kerne nur auf -9 und Boost +0 stabil laufen lassen konnte (ein anderer dagegen lief auch dann noch mit -30 weiter).
+setzen, etc) oder gleich beides. Mit diesem Script braucht man eigentlich nur noch Zeit - davon allerdings doch recht 
+viel. Da immer nur ein Kern gleichzeitig getestet werden kann, bräuchte man für einen 12 Stunden "Prime-stable" 
+Stabilitätstest, wie man ihn bei normalen Overclocks gerne macht, bereits 12x12 = 144 Stunden bei einem 5900X. Bei 
+einem 5600X mit seinen 6 physischen Kernen dann entsprechend "nur" 6x12 = 72 Stunden.
+Solch ein All-Core Test mit Prime95 ist leider nicht effektiv mit dem Curve Optimizer, da die Kerne dann nicht so hoch 
+takten können, und man so eventuelle Instabilitäten nicht erkennen kann. Bei meiner CPU konnte ich z.B. den Curve 
+Optimizer auf -30 auf allen Kernen und +75 MHz Boost stellen und damit problemlos 24 Stunden Prime95 durchlaufen lassen,
+während ich bei diesem Einzeltest dann bei +0 MHz Boost einen der Kerne nur noch mit -9 stabil laufen lassen konnte 
+(ein anderer dagegen lief auch beim Einzeltest noch mit -30 weiter).
 
-In der config.ini kann man einige Parameter ändern, z.B. welcher Modus beim Testen ausgeführt wird (SSE, AVX, AVX2, 
-wobei SSE den höchsten Takt produziert), wie lange ein einzelner Kern getestet werden soll, bevor es zum nächsten geht, 
-ob bestimmte Kerne ignoriert werden sollen, etc. Für jedes Setting ist dort auch eine Beschreibung vorhanden.
+Beim ersten Start des Scripts wird automatisch eine config.ini angelegt (die config.default.ini wird kopiert). In 
+dieser kann man einige Parameter ändern, z.B. welcher Modus beim Testen ausgeführt wird (SSE, AVX, AVX2, CUSTOM, wobei 
+SSE den höchsten Takt produziert, da es die CPU am wenigsten belastet), wie lange ein einzelner Kern getestet werden 
+soll, bevor es zum nächsten geht, ob bestimmte Kerne ignoriert werden sollen, etc. Für jedes Setting ist in der Datei 
+auch eine Beschreibung vorhanden.
+
+Als Startpunkt am Anfang könnte man im Curve Optimizer jeden Kern auf z.B. auf -15 oder -20 setzen und dann schauen, 
+welcher Kern durchläuft und welcher davon einen Fehler wirft. Die Kerne mit Fehler könnte man dann z.B. um 2 oder 3 
+Punkte nach oben setzen (also z.B. von -15 auf -13), die fehlerfreien dagegen 2 oder 3 weiter ins Negative (-15 auf 
+-17). Ab einem gewissen Punkt kommt man aber nicht daran vorbei, nur noch um einen Punkt nach oben/unten zu korrigieren 
+und das Tool sehr lange laufen zu lassen, um auch die letzten Instabilitäten herauszufiltern.
 
 Es ist übrigens beabsichtigt, dass bei aktiviertem Hyperthreading / SMT nur der erste Thread eines jeden Kerns belastet 
 wird, da dabei ein höherer Takt erreicht wird, wie wenn beide (virtuellen) Threads eines Kerns belastet würden. Man 
@@ -47,25 +73,59 @@ belastet.
 
 
 
+
+
 ENGLISH
 -------
 This little script will run Prime95 with only one worker thread and sets the affinity of the Prime95 process 
-alternating to each physical core. This way you can test the stability of your Curve Optimizer setting for each core 
-individually, much more thoroughly than e.g. with Cinebench or the Windows Repair, and much easier than manually 
-setting the affinity of the process via the Task Manager.
-It will still need a lot of time though. If for example you're after a 12h "prime-stable" setup, you'd need to run 
-this script for 12*12 = 144 hours on a 5900X with 12 cores / 24 threads, because each core is tested individually, 
-and so each core also needs to complete this 12 hour test individually.
-Unfortunately such an all-core test with Prime95 is not effective with using the Curve Optimizer, because the cores 
-cannot boost as high if all cores are stressed, and therefore you won't be able to detect instabilities that occur at 
-a higher clock speed. For example, with my CPU I was able to run Prime95 for 24 hours with a -30 setting on all cores 
-and a Boost Override of +75. However, when using this script, I needed to go down to -9 on one core and set the Boost 
-to +0 to have it run stable (on the other hand, another core was still happy with -30).
+alternating to each physical core, cycling through all of them. This way you can test the stability of your Curve 
+Optimizer setting for each core individually, much more thoroughly than e.g. with Cinebench or the Windows Repair, and 
+much easier than manually setting the affinity of the process via the Task Manager.
+It will still need a lot of time though. If for example you're after a 12h "prime-stable" setup which is common for 
+regular overvlocks, you'd need to run this script for 12x12 = 144 hours on a 5900X with 12 physical cores, because 
+each core is tested individually, and so each core also needs to complete this 12 hour test individually. Respectively, 
+on a 5600X with its 6 physical cores this would be "only" 6x12 = 72 hours.
+Unfortunately such an all-core stress test with Prime95 is not effective for testing Curve Optimizer settings, because 
+the cores cannot boost as high if all of them are stres tested, and therefore you won't be able to detect instabilities 
+that occur at a higher clock speed. For example, with my CPU I was able to run a Prime95 all-core stress test for 
+24 hours with an additional Boost Override of +75 MHz and a Curve Optimizer setting of -30 on all cores. However, when 
+using this script, and with +0 MHz Boost Override, I needed to go down to -9 on one core to have it run stable (on the 
+other hand, another core was still happy with a -30 setting even in this case).
 
-Included is a config.ini file, in which you can change various settings, e.g. which mode Prime95 should run in (SSE, 
-AVX, AVX2, where SSE causes the highest boost clock), how long an individual core should be stressed for before it 
-cycles to the next one, if certain cores should be ignored, etc. Each setting also has a description in that file.
+When you start the script for the first time, it will copy the included config.default.ini to config.ini, in which you 
+then can change various settings, e.g. which mode Prime95 should run in (SSE, AVX, AVX2, CUSTOM, where SSE causes the 
+highest boost clock, because it's the lightest load on the processor of all the settings), how long an individual core 
+should be stressed for before it cycles to the next one, if certain cores should be ignored, etc. For each setting 
+there's also a description in the config.ini file.
+
+As a starting point you could set the Curve Optimizer to e.g. -15 or -20 for each core and then wait and see which core 
+runs through fine and which throws an error. Then you could increase the setting for those that have thrown an error by 
+e.g. 2 or 3 points (e.g. from -15 to -13) and decrease those that were fine by 2 or 3 further into the negative (-15 to 
+-17). Once you've crossed a certain point however there is no way around modifying the value by a single point up/down 
+and letting the script run for a long time to find the very last instabilities.
 
 By the way, it is intended that only one thread is stressed for each core if Hyperthreading / SMT is enabled, as the 
 boost clock is higher this way, compared to if both (virtual) threads would be stressed. However, there is a setting 
 in the config.ini to enable two threads as well.
+
+
+
+LICENSE AND ALL THAT STUFF
+--------------------------
+This script is provided under the "CC BY-NC-SA" Creative Commons license. Or to put it in their words:
+"This license lets others remix, adapt, and build upon your work non-commercially, as long as they credit you and 
+license their new creations under the identical terms."
+
+You can find the full license text here:
+https://creativecommons.org/licenses/by-nc-sa/4.0/
+https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+
+So feel free to share it, modify it and adapt it to your needs, but if you find any bugs, errors or have improvement 
+ideas, please let me know at 
+
+https://github.com/sp00n/corecycler
+
+
+Happy testing!
+sp00n

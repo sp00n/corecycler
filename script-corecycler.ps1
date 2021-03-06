@@ -2,17 +2,22 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.0
+    0.7.1
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
 .LINK
     https://github.com/sp00n/corecycler
+.LICENSE
+    Creative Commons "CC BY-NC-SA"
+    https://creativecommons.org/licenses/by-nc-sa/4.0/
+    https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
 .NOTE
     Please excuse my amateurish code in this file, it's my first attempt at writing in PowerShell ._.
 #>
 
 # Global variables
+$version              = '0.7.1'
 $curDateTime          = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings             = $null
 $logFilePath          = $null
@@ -972,7 +977,7 @@ $timestamp = Get-Date -format u
 
 # Start messages
 Write-ColorText('---------------------------------------------------------------------------') Green
-Write-ColorText('CoreCycler startet at ' + $timestamp) Green
+Write-ColorText('------------ CoreCycler v' + $version + ' startet at ' + $timestamp + ' ------------') Green
 Write-ColorText('---------------------------------------------------------------------------') Green
 
 # Display the number of logical & physical cores
