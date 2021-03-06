@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.1
+    0.7.2
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version              = '0.7.1'
+$version              = '0.7.2'
 $curDateTime          = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings             = $null
 $logFilePath          = $null
@@ -977,7 +977,7 @@ $timestamp = Get-Date -format u
 
 # Start messages
 Write-ColorText('---------------------------------------------------------------------------') Green
-Write-ColorText('------------ CoreCycler v' + $version + ' startet at ' + $timestamp + ' ------------') Green
+Write-ColorText('------------ CoreCycler v' + $version + ' started at ' + $timestamp + ' ------------') Green
 Write-ColorText('---------------------------------------------------------------------------') Green
 
 # Display the number of logical & physical cores
