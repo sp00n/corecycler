@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8
+    0.7.8.1
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.8'
+$version                = '0.7.8.1'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -189,7 +189,7 @@ function Get-PerformanceCounterLocalName {
     [UInt32]$BufferSize = $Buffer.Capacity
 
     $t = Add-Type -MemberDefinition $code -PassThru -Name PerfCounter -Namespace Utility
-    $rv = $t::PdhLookupPerfNameByIndex($ComputerName, $id, $Buffer, [Ref]$BufferSize)
+    $rv = $t::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref]$BufferSize)
 
     if ($rv -eq 0) {
         $Buffer.ToString().Substring(0, $BufferSize-1)
@@ -830,7 +830,12 @@ try {
     $counterNames['ReplaceString']    = "\% Processor Time"
 }
 catch {
-    Write-Host 'FATAL ERROR: Could not get the localized counter name!' -ForegroundColor Red
+    Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
+    Write-Host
+    Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
+    Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
+    Write-Host
+
     $Error
 
     Read-Host -Prompt 'Press Enter to exit'
@@ -878,6 +883,7 @@ $counter = Start-Job -ScriptBlock {
 if (!$counter) {
     Write-Host
     Write-Host 'FATAL ERROR: Could not access the Windows Performance Process Counter!' -ForegroundColor Red
+    Write-Host
     Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
     Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
     Write-Host
@@ -1120,7 +1126,7 @@ $timestamp = Get-Date -format u
 
 # Start messages
 Write-ColorText('---------------------------------------------------------------------------') Green
-Write-ColorText('------------ CoreCycler v' + $version + ' started at ' + $timestamp + ' ------------') Green
+Write-ColorText('----------- CoreCycler v' + $version + ' started at ' + $timestamp + ' -----------') Green
 Write-ColorText('---------------------------------------------------------------------------') Green
 
 # Display the number of logical & physical cores
