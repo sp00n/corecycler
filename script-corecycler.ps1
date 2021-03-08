@@ -238,6 +238,13 @@ function Get-Settings {
         runtimePerCore = 360
 
 
+        # Stop the whole testing process if an error occurred
+        # If set to 0 (default), the stress test programm will be restarted when an error
+        # occurs and the core that caused the error will be skipped on the next iteration
+        # Default: 0
+        stopOnError = 0
+
+
         # The number of threads to use for testing
         # You can only choose between 1 and 2
         # If Hyperthreading / SMT is disabled, this will automatically be set to 1
@@ -797,6 +804,27 @@ function Test-ProcessUsage {
         # Educated guess
         if ($lastRunFFT) {
             Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
+        }
+
+
+        # If the stopOnError flag is set, stop at this point
+        if ($settings.stopOnError) {
+            Write-Text('')
+            Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
+
+            # Display the results.txt file name for Prime95 for this run
+            Write-Text('')
+            Write-ColorText('Prime95''s results log file can be found at:') Cyan
+            Write-ColorText($primeResultsPath) Cyan
+
+            # And the name of the log file for this run
+            Write-Text('')
+            Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+            Write-ColorText($logfilePath) Cyan
+            Write-Text('')
+            
+            Read-Host -Prompt 'Press Enter to exit'
+            exit
         }
         
 
