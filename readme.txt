@@ -135,6 +135,10 @@ A: The tool requires the Windows Performance Process Counter (PerfProc) to work 
    I've also included a batch file in the /troubleshooting directory (enable_performance_counter.bat), which _should_ 
    perform all these actions for you, but no guarantees that it will actually work!
 
+Q: When starting the tool I only see a "FATAL ERROR: .NET could not be found or the version is too old!" message!
+A: This tool requires the .NET Framework with at least version 3.5. You can download it here:
+   https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10
+
 
 
 

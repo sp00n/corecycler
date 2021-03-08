@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.7
+    0.7.8
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.7'
+$version                = '0.7.8'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -100,9 +100,6 @@ $GetWindowDefinition = @'
     }
 '@
 
-Add-Type -TypeDefinition $GetWindowDefinition -Language CSharpVersion3
-
-
 $CloseWindowDefinition = @'
     using System;
     using System.Runtime.InteropServices;
@@ -114,8 +111,6 @@ $CloseWindowDefinition = @'
         public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
     }
 '@
-
-Add-Type -TypeDefinition $CloseWindowDefinition
 
 
 
@@ -849,6 +844,25 @@ catch {
 # This is a neat flag
 #requires -version 3.0
 
+
+# Check if .NET is installed
+$hasDotNet3_5 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v3.5' -ErrorAction SilentlyContinue).Install
+$hasDotNet4_0 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4.0\Client' -ErrorAction SilentlyContinue).Install
+$hasDotNet4_x = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue).Install
+
+if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
+    Write-Host
+    Write-Host 'FATAL ERROR: .NET could not be found or the version is too old!' -ForegroundColor Red
+    Write-Host 'At least version 3.5 of .NET is required!' -ForegroundColor Red
+    Write-Host
+    Write-Host 'You can download .NET 3.5 here:' -ForegroundColor Yellow
+    Write-Host 'https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10' -ForegroundColor Cyan
+    
+    Read-Host -Prompt 'Press Enter to exit'
+    exit
+}
+
+
 # Try to access the Performance Process Counter
 # It may be disabled
 
@@ -871,8 +885,14 @@ if (!$counter) {
     Write-Host ('"' + $counterNames['FullName'] + '"') -ForegroundColor Yellow
 
     Read-Host -Prompt 'Press Enter to exit'
-    exit        
+    exit
 }
+
+
+
+# Make the external code definitions available to PowerShell
+Add-Type -TypeDefinition $GetWindowDefinition
+Add-Type -TypeDefinition $CloseWindowDefinition
 
 
 # Get the default and the user settings
