@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.2
+    0.7.7
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,15 +17,39 @@
 #>
 
 # Global variables
-$version              = '0.7.2'
-$curDateTime          = Get-Date -format yyyy-MM-dd_HH-mm-ss
-$settings             = $null
-$logFilePath          = $null
-$processWindowHandler = $null
-$processId            = $null
-$process              = $null
-$processCounterPath   = $null
-$coresWithError       = $null
+$version                = '0.7.7'
+$curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
+$settings               = $null
+$logFilePath            = $null
+$processWindowHandler   = $null
+$processId              = $null
+$process                = $null
+$processCounterPathId   = $null
+$processCounterPathTime = $null
+$coresWithError         = $null
+
+# The Prime95 executable name and path
+$processName = 'prime95'
+$processPath = $PSScriptRoot + '\p95\'
+$primePath   = $processPath + $processName
+
+
+# Used to get around the localized counter names
+$counterNameIds = @{
+    'Process'          = 230          
+    'ID Process'       = 784
+    '% Processor Time' = 5972
+}
+
+# This holds the localized counter names
+$counterNames = @{
+    'Process'          = ''
+    'ID Process'       = ''
+    '% Processor Time' = ''
+    'FullName'         = ''
+    'SearchString'     = ''
+    'ReplaceString'    = ''
+}
 
 
 # Add code definitions so that we can close the Prime95 window even if it's minimized to the tray
@@ -141,9 +165,43 @@ function Exit-WithFatalError {
         $text
     )
 
-    Write-ColorText('FATAL ERROR: ' + $text) Red
+    if ($text) {
+        Write-ColorText('FATAL ERROR: ' + $text) Red
+    }
+
     Read-Host -Prompt 'Press Enter to exit'
     exit
+}
+
+
+<##
+ # Get the localized counter name
+ # Yes, they're localized. Way to go Microsoft!
+ # .SOURCE https://www.powershellmagazine.com/2013/07/19/querying-performance-counters-from-powershell/
+ # .PARAM Int $ID The id of the counter name. See the link above on how to get the IDs
+ # .RETURN String The localized name
+ #>
+function Get-PerformanceCounterLocalName {
+    param (
+        [UInt32]
+        $ID,
+        $ComputerName = $env:COMPUTERNAME
+    )
+
+    $code = '[DllImport("pdh.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern UInt32 PdhLookupPerfNameByIndex(string szMachineName, uint dwNameIndex, System.Text.StringBuilder szNameBuffer, ref uint pcchNameBufferSize);'
+
+    $Buffer = New-Object System.Text.StringBuilder(1024)
+    [UInt32]$BufferSize = $Buffer.Capacity
+
+    $t = Add-Type -MemberDefinition $code -PassThru -Name PerfCounter -Namespace Utility
+    $rv = $t::PdhLookupPerfNameByIndex($ComputerName, $id, $Buffer, [Ref]$BufferSize)
+
+    if ($rv -eq 0) {
+        $Buffer.ToString().Substring(0, $BufferSize-1)
+    }
+    else {
+        Throw 'Get-PerformanceCounterLocalName : Unable to retrieve localized name. Check computer name and performance counter ID.'
+    }
 }
 
 
@@ -431,6 +489,50 @@ function Get-Prime95WindowHandler {
 
 
 <##
+ # Open Prime95 and set global script variables
+ # .PARAM void
+ # .RETURN void
+ #>
+function Start-Prime95 {
+    # Minimized to the tray
+    $Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Hidden
+    
+    # Minimized to the task bar
+    #$Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Minimized
+
+    # This might be necessary to correctly read the process. Or not
+    Start-Sleep -Milliseconds 500
+    
+    if (!$Script:process) {
+        Exit-WithFatalError('Could not start process ' + $processName + '!')
+    }
+
+    # Get the main window handler
+    # This also works for windows minimized to the tray
+    Get-Prime95WindowHandler
+    
+    # This is to find the exact counter path, as you might have multiple processes with the same name
+    try {
+        # Start a background job to get around the cached Get-Counter value
+        $Script:processCounterPathId = Start-Job -ScriptBlock { 
+            $counterPathName = $args[0].'FullName'
+            $processId = $args[1]
+            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+        } -ArgumentList $counterNames, $processId | Wait-Job | Receive-Job
+
+        if (!$processCounterPathId) {
+            Exit-WithFatalError('Could not find the counter path for the Prime95 instance!')
+        }
+
+        $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+    }
+    catch {
+        #'Could not get the process path'
+    }
+}
+
+
+<##
  # Create the Prime95 config files (local.txt & prime.txt)
  # This depends on the $settings.mode variable
  # .PARAM string $configType The config type to set in the config files (SSE, AVX, AVX, CUSTOM)
@@ -503,39 +605,6 @@ function Initialize-Prime95 {
     Add-Content $configFile2 'ExitOnX=1'
     Add-Content $configFile2 '[PrimeNet]'
     Add-Content $configFile2 'Debug=0'
-}
-
-
-<##
- # Open Prime95 and set global script variables
- # .PARAM void
- # .RETURN void
- #>
-function Start-Prime95 {
-    # Minimized to the tray
-    $Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Hidden
-    
-    # Minized to the task bar
-    #$Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Minimized
-
-    # This might be necessary to correctly read the process. Or not
-    Start-Sleep -Milliseconds 500
-    
-    if (!$Script:process) {
-        Exit-WithFatalError('Could not start process ' + $processName + '!')
-    }
-
-    # Get the main window handler
-    # This also works for windows minimized to the tray
-    Get-Prime95WindowHandler
-    
-    # This is to find the exact counter path, as you might have multiple processes with the same name
-    try {
-        $Script:processCounterPath = ((Get-Counter "\Process(*)\ID Process" -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
-    }
-    catch {
-        #'Could not get the process path'
-    }
 }
 
 
@@ -621,7 +690,7 @@ function Test-ProcessUsage {
     # Check if the process is still using enough CPU process power
     if (!$primeError) {
         # Get the CPU percentage
-        $processCPUPercentage = [Math]::Round(((Get-Counter ($processCounterPath -replace "\\ID Process$","\% Processor Time") -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+        $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
         
         # It doesn't use enough CPU power, we assume that this core errored out
         # Try to restart Prime95
@@ -630,7 +699,7 @@ function Test-ProcessUsage {
             # Look for an "error" in the last 3 lines
             $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
 
-            # Found the "error" string
+            # Found the "error" string in the results.txt
             if ($primeResults.Length -gt 0) {
                 $primeError = $primeResults
             }
@@ -642,10 +711,19 @@ function Test-ProcessUsage {
 
                 # The second check
                 # Do the whole process path procedure again
-                $processId = $process.Id[0]
-                $processCounterPath = ((Get-Counter "\Process(*)\ID Process" -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
-                $processCPUPercentage = [Math]::Round(((Get-Counter ($processCounterPath -replace "\\ID Process$","\% Processor Time") -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+                $thisProcessId = $process.Id[0]
 
+                # Start a background job to get around the cached Get-Counter value
+                $thisProcessCounterPathId = Start-Job -ScriptBlock { 
+                    $counterPathName = $args[0].'FullName'
+                    $processId = $args[1]
+                    ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+                } -ArgumentList $counterNames, $thisProcessId | Wait-Job | Receive-Job
+
+                $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+                $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+
+                # Still below the minimum usage
                 if ($processCPUPercentage -le $minPrimeUsage) {
                     # We don't care about an error string here anymore
                     $primeError = 'The Prime95 process doesn''t use enough CPU power anymore (only ' + $processCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
@@ -703,7 +781,6 @@ function Test-ProcessUsage {
             $lastPassedFFT    = [Int]$matches[1]   # $matches is a fixed(?) variable name for -match
             
             
-            # TODO
             # If the last passed FFT size is the max selected FFT size, start at the beginning
             if ($lastPassedFFT -eq $maxFFTSize) {
                 $lastRunFFT = $minFFTSize
@@ -746,7 +823,59 @@ function Test-ProcessUsage {
 <##
  # The main functionality
  #>
-# Get the default and user settings
+
+
+# Get the localized counter names
+try {
+    $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
+    $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
+    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
+    $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
+    $counterNames['SearchString']     = "\\ID Process$"
+    $counterNames['ReplaceString']    = "\% Processor Time"
+}
+catch {
+    Write-Host 'FATAL ERROR: Could not get the localized counter name!' -ForegroundColor Red
+    $Error
+
+    Read-Host -Prompt 'Press Enter to exit'
+    exit
+}
+
+
+# Error Checks
+
+# PowerShell version too low
+# This is a neat flag
+#requires -version 3.0
+
+# Try to access the Performance Process Counter
+# It may be disabled
+
+# This is the original english call:
+# Get-Counter "\Process(*)\ID Process" -ErrorAction Stop
+# We're starting a background job so that the Get-Counter call is not cached, which causes problems later on
+$counter = Start-Job -ScriptBlock { 
+    $data = @($input)
+    (Get-Counter $data.'FullName' -ErrorAction SilentlyContinue).CounterSamples
+} -InputObject $counterNames | Wait-Job | Receive-Job
+
+
+if (!$counter) {
+    Write-Host
+    Write-Host 'FATAL ERROR: Could not access the Windows Performance Process Counter!' -ForegroundColor Red
+    Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
+    Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
+    Write-Host
+    Write-Host 'The localized counter name that was tried to access was:' -ForegroundColor Yellow
+    Write-Host ('"' + $counterNames['FullName'] + '"') -ForegroundColor Yellow
+
+    Read-Host -Prompt 'Press Enter to exit'
+    exit        
+}
+
+
+# Get the default and the user settings
 Get-Settings
 
 
@@ -762,12 +891,6 @@ $numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).S
 
 # Set the flag if Hyperthreading / SMT is enabled or not
 $isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
-
-
-# The Prime95 executable name and path
-$processName = 'prime95'
-$processPath = $PSScriptRoot + '\p95\'
-$primePath   = $processPath + $processName
 
 
 # The Prime95 process
@@ -1010,7 +1133,6 @@ Write-ColorText('---------------------------------------------------------------
 if ($settings.coresToIgnore.Length -gt 0) {
     $settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
     Write-ColorText('Ignored cores: ' + $settings.coresToIgnoreString) Cyan
-    #Write-ColorText('---------------' + ('-' * $settings.coresToIgnoreString.Length)) Cyan
     Write-ColorText('---------------------------------------------------------------------------') Cyan
 }
 

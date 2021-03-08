@@ -73,8 +73,6 @@ belastet.
 
 
 
-
-
 ENGLISH
 -------
 This little script will run Prime95 with only one worker thread and sets the affinity of the Prime95 process 
@@ -107,6 +105,36 @@ and letting the script run for a long time to find the very last instabilities.
 By the way, it is intended that only one thread is stressed for each core if Hyperthreading / SMT is enabled, as the 
 boost clock is higher this way, compared to if both (virtual) threads would be stressed. However, there is a setting 
 in the config.ini to enable two threads as well.
+
+
+
+TROUBLESHOOTING & FAQ
+---------------------
+Q: My computer crashes when running this program!
+A: Very likely your Curve Optimizer setting is unstable. Change the settings to a higher value (e.g. from -15 to -12) 
+   and try again.
+
+Q: Why are you using SSE? AVX stresses the CPU much more!
+A: Yes, AVX/AVX2 does stress the CPU more than the SSE mode. However it is exactly this additional load on the core 
+   wich prevents the boost clock from reaching its maximum (because it is temperature and load dependant), and so you 
+   can't really detect these edge cases which eventuall can cause an error sooner or later. So while being somewhat 
+   counterintuitive, the SSE mode with its lighter load is actually the one that finds the most stability problems.
+   However, you can change the mode to AVX or AVX2 in the config.ini if you're happy with only AVX/AVX2 stability.
+
+Q: When starting the tool I only see a "FATAL ERROR: Could not access the Windows Performance Process Counter!" message!
+A: The tool requires the Windows Performance Process Counter (PerfProc) to work correctly. It may have been disabled, 
+   you can check this with either 
+   lodctr.exe /q:PerfProc
+   or with 
+   reg.exe query HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\PerfProc\Performance /s
+   and look for a "Disable Performance Counters" entry with a value larger than 0.
+   There are various tutorials on how to re-enable the Performance Counter on the web, here are some links:
+   https://leansentry.zendesk.com/hc/en-us/articles/360038645792-How-to-Fix-performance-counter-issues
+   https://docs.microsoft.com/en-us/troubleshoot/windows-server/performance/manually-rebuild-performance-counters
+
+   I've also included a batch file in the /troubleshooting directory (enable_performance_counter.bat), which _should_ 
+   perform all these actions for you, but no guarantees that it will actually work!
+
 
 
 
