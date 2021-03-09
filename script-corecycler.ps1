@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8.5
+    0.7.8.6
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.8.5'
+$version                = '0.7.8.6'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -52,6 +52,20 @@ $counterNames = @{
     'SearchString'     = ''
     'ReplaceString'    = ''
 }
+
+
+# The number of physical and logical cores
+# This also includes hyperthreading resp. SMT (Simultaneous Multi-Threading)
+# We currently only test the first core for each hyperthreaded "package",
+# so e.g. only 12 cores for a 24 threaded Ryzen 5900x
+# If you disable hyperthreading / SMT, both values should be the same
+$processor       = Get-WMIObject Win32_Processor
+$numLogicalCores = $($processor | Measure-Object -Property NumberOfLogicalProcessors -sum).Sum
+$numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).Sum
+
+
+# Set the flag if Hyperthreading / SMT is enabled or not
+$isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
 
 
 # Add code definitions so that we can close the Prime95 window even if it's minimized to the tray
@@ -1052,19 +1066,6 @@ Add-Type -TypeDefinition $CloseWindowDefinition
 # Get the default and the user settings
 Get-Settings
 
-
-# The number of physical and logical cores
-# This also includes hyperthreading resp. SMT (Simultaneous Multi-Threading)
-# We currently only test the first core for each hyperthreaded "package",
-# so e.g. only 12 cores for a 24 threaded Ryzen 5900x
-# If you disable hyperthreading / SMT, both values should be the same
-$processor       = Get-WMIObject Win32_Processor
-$numLogicalCores = $($processor | Measure-Object -Property NumberOfLogicalProcessors -sum).Sum
-$numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).Sum
-
-
-# Set the flag if Hyperthreading / SMT is enabled or not
-$isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
 
 
 # The Prime95 process
