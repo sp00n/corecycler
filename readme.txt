@@ -142,6 +142,13 @@ Q: When starting the tool I only see a "FATAL ERROR: .NET could not be found or 
 A: This tool requires the .NET Framework with at least version 3.5. You can download it here:
    https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10
 
+Q: I have overclocked my RAM and I see errors when runnign this program, but I'm sure my CPU is fine!
+A: The errors may actually come from your overclocked RAM and not your CPU directly.
+   Best practice for overclocking is to separately test the memory overclock and the CPU overclock, i.e. test your CPU 
+   while your memory runs at stock speeds.
+   After you're sure that both overclocks are stable on their own, you can combine them and check for instabilities 
+   again.
+
 
 
 

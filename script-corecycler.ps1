@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8.1
+    0.7.8.5
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.8.1'
+$version                = '0.7.8.5'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -27,6 +27,8 @@ $process                = $null
 $processCounterPathId   = $null
 $processCounterPathTime = $null
 $coresWithError         = $null
+$previousError          = $null
+
 
 # The Prime95 executable name and path
 $processName = 'prime95'
@@ -147,6 +149,28 @@ function Write-ColorText {
     
     Write-Host $text -ForegroundColor $foregroundColor
     Add-Content $logFilePath ($text)
+}
+
+
+<##
+ # Write a message to the screen and to the log file
+ # Verbosity / Debug output
+ # .PARAM string $text The text to output
+ # .RETURN void
+ #>
+function Write-Verbose {
+    param(
+        $text
+    )
+    
+    if ($settings.verbosityMode) {
+        if ($settings.verbosityMode -gt 1) {
+            Write-Host('    + ' + $text)
+        }
+
+        Add-Content $logFilePath ('    + ' + $text)
+    }
+
 }
 
 
@@ -275,9 +299,23 @@ function Get-Settings {
         restartPrimeForEachCore = 0
 
 
+        # If the "restartPrimeForEachCore" flag is set, this setting will define the amount of seconds between the end of the
+        # run of one core and the start of another
+        # If "restartPrimeForEachCore" is 0, this setting has no effect
+        # Default: 15
+        delayBetweenCycles = 15
+
+
         # The name of the log file
         # The $settings.mode and the $settings.FFTSize above will be added to the name (and a .log file ending)
         logfile = 'CoreCycler'
+
+
+        # Set this to 1 to see a bit more text in the terminal
+        # 1: Write additional information to the log file
+        # 2: Also display the additional information in the terminal
+        # Default: 0
+        verbosityMode = 0
 
 
         # Set the custom settings here for the 'CUSTOM' mode
@@ -481,12 +519,26 @@ function Get-TortureWeakValue {
  #>
 function Get-Prime95WindowHandler {
     # 'Prime95 - Self-Test': worker running
-    # 'Prime95': worker not running
-    $windowObj = [Api.Apidef]::GetWindows() | Where-Object { $_.WinTitle -eq 'Prime95 - Self-Test' -or $_.WinTitle -eq 'Prime95' }
-    
+    # 'Prime95 - Not running': worker not running anymore
+    # 'Prime95 - Waiting for work': worker not running, tried to start, no worker started
+    # 'Prime95': worker not yet started
+    $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
+            $_.WinTitle -eq 'Prime95 - Self-Test' `
+        -or $_.WinTitle -eq 'Prime95 - Not running' `
+        -or $_.WinTitle -eq 'Prime95 - Waiting for work' `
+        -or $_.WinTitle -eq 'Prime95'
+    }
+
+    # There might be another window open with the name "Prime95"
+    # Select the correct one
+    $filteredWindowObj = $windowObj | Where-Object {(Get-Process -Id $_.ProcessId).Path -like '*prime95.exe'}
+
     # Override the global script variables
-    $Script:processWindowHandler = $windowObj.MainWindowHandle
-    $Script:processId = $windowObj.ProcessId
+    $Script:processWindowHandler = $filteredWindowObj.MainWindowHandle
+    $Script:processId = $filteredWindowObj.ProcessId
+
+    Write-Verbose('Prime95 window handler: ' + $processWindowHandler)
+    Write-Verbose('Prime95 process ID:     ' + $processId)
 }
 
 
@@ -496,6 +548,8 @@ function Get-Prime95WindowHandler {
  # .RETURN void
  #>
 function Start-Prime95 {
+    Write-Verbose('Starting Prime95')
+
     # Minimized to the tray
     $Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Hidden
     
@@ -527,6 +581,11 @@ function Start-Prime95 {
         }
 
         $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+
+        Write-Verbose('The Performance Process Counter Path for the ID:')
+        Write-Verbose($processCounterPathId)
+        Write-Verbose('The Performance Process Counter Path for the Time:')
+        Write-Verbose($processCounterPathTime)
     }
     catch {
         #'Could not get the process path'
@@ -616,6 +675,8 @@ function Initialize-Prime95 {
  # .RETURN void
  #>
 function Close-Prime95 {
+    Write-Verbose('Closing Prime95')
+
     # If there is no processWindowHandler id
     # Try to get it
     if (!$processWindowHandler) {
@@ -625,6 +686,8 @@ function Close-Prime95 {
     # If we now have a processWindowHandler, try to close the window
     if ($processWindowHandler) {
         $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+
+        Write-Verbose('Trying to gracefully close Prime95')
         
         # This returns false if no window is found with this handle
         if (![Win32]::SendMessage($processWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
@@ -643,9 +706,14 @@ function Close-Prime95 {
     $process = Get-Process $processName -ErrorAction SilentlyContinue
 
     if ($process) {
+        Write-Verbose('Could not gracefully close Prime95, killing the process')
+        
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
         Stop-Process $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    else {
+        Write-Verbose('Prime95 closed')
     }
 }
 
@@ -660,6 +728,8 @@ function Test-ProcessUsage {
     param (
         $coreNumber
     )
+
+    $timestamp = Get-Date -format HH:mm:ss
     
     # The minimum CPU usage for Prime95, below which it should be treated as an error
     # We need to account for the number of threads
@@ -676,29 +746,69 @@ function Test-ProcessUsage {
     # Set to a string if there was an error
     $primeError = $false
 
-    # Get the content of the result.txt file
+    # Get the content of the results.txt file
     $resultFileHandle = Get-Item -Path $primeResultsPath -ErrorAction SilentlyContinue
 
     # Does the process still exist?
     $process = Get-Process $processName -ErrorAction SilentlyContinue
     
 
-    # The process doesn't exist anymore, immediate error
+    # 1. The process doesn't exist anymore, immediate error
     if (!$process) {
         $primeError = 'The Prime95 process doesn''t exist anymore.'
     }
 
+    
+    # 2. Parse the results.txt file and look for an error message
+    if (!$primeError) {
+        # Look for a line with an "error" string in the last 3 lines
+        $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
+        
+        # Found the "error" string in the results.txt
+        if ($primeResults.Length -gt 0) {
+            # Get the line number of the last error message in the results.txt
+            $p95Errors = Select-String $primeResultsPath -Pattern ERROR
+            $lastError = $p95Errors | Select-Object -Last 1 -Property LineNumber, Line
 
-    # Check if the process is still using enough CPU process power
+            # If it's the same line number and message than the previous error, ignore it, it's a false positive
+            if ($lastError.LineNumber -eq $previousError.LineNumber -and $lastError.Line -eq $previousError.Line) {
+                Write-Verbose($timestamp)
+                Write-Verbose('Found an error, but it''s a false positive, because the line number and error message')
+                Write-Verbose('matches the previous error message.')
+
+                Write-Verbose('This error:')
+                Write-Verbose((Write-Output($lastError | Format-Table | Out-String)).Trim())
+
+                Write-Verbose('Previous error:')
+                Write-Verbose((Write-Output($previousError | Format-Table | Out-String)).Trim())
+            }
+
+            # This is a true error now
+            else {
+                # Store the error message for future use
+                $Script:previousError = $lastError
+
+                Write-Verbose($timestamp)
+                Write-Verbose('Found an error:')
+                Write-Verbose((Write-Output($lastError | Format-Table | Out-String)).Trim())
+
+                $primeError = $primeResults
+            }
+        }
+    }
+
+
+    # 3. Check if the process is still using enough CPU process power
     if (!$primeError) {
         # Get the CPU percentage
         $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
         
-        # It doesn't use enough CPU power, we assume that this core errored out
-        # Try to restart Prime95
+        Write-Verbose($timestamp + ' - ...checking CPU usage: ' + $processCPUPercentage + '%')
+
+        # It doesn't use enough CPU power
         if ($processCPUPercentage -le $minPrimeUsage) {
             # Try to read the error from Prime95's results.txt
-            # Look for an "error" in the last 3 lines
+            # Look for a line with an "error" string in the last 3 lines
             $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
 
             # Found the "error" string in the results.txt
@@ -709,7 +819,11 @@ function Test-ProcessUsage {
             # Error string not found
             # This might have been a false alarm, wait a bit and try again
             else {
-                Start-Sleep -Milliseconds 1000
+                $waitTime = 2000
+
+                Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
+
+                Start-Sleep -Milliseconds $waitTime
 
                 # The second check
                 # Do the whole process path procedure again
@@ -724,6 +838,8 @@ function Test-ProcessUsage {
 
                 $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
                 $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+
+                Write-Verbose($timestamp + ' - ...checking CPU usage again: ' + $thisProcessCPUPercentage + '%')
 
                 # Still below the minimum usage
                 if ($processCPUPercentage -le $minPrimeUsage) {
@@ -770,7 +886,7 @@ function Test-ProcessUsage {
         #Write-Text(Get-Item -Path $primeResultsPath | Get-Content -Tail 5)
         
         # Try to determine the last run FFT size
-        # If the result.txt doesn't exist, assume that it was on the very first iteration
+        # If the results.txt doesn't exist, assume that it was on the very first iteration
         if (!$resultFileHandle) {
             $lastRunFFT = $minFFTSize
         }
@@ -780,11 +896,15 @@ function Test-ProcessUsage {
             $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
             $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
             $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
-            $lastPassedFFT    = [Int]$matches[1]   # $matches is a fixed(?) variable name for -match
+            $lastPassedFFT    = if ($matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
             
-            
+            # No passed FFT was found, assume it's the first FFT size
+            if (!$lastPassedFFT) {
+                $lastRunFFT = $minFFTSize
+            }
+
             # If the last passed FFT size is the max selected FFT size, start at the beginning
-            if ($lastPassedFFT -eq $maxFFTSize) {
+            elseif ($lastPassedFFT -eq $maxFFTSize) {
                 $lastRunFFT = $minFFTSize
             }
 
@@ -963,10 +1083,12 @@ $expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThread
 
 
 # Check the CPU usage each x seconds
-$cpuUsageCheckInterval = 30
+# Note: 15 seconds may fail if there was an error and Prime95 was restarted -> false positive
+#       20 seconds may work fine, but it's probably best to wait for longer on the first check
+$cpuUsageCheckInterval = 10
 
 
-# Calculate the interval time for the CPU power check
+# Calculate the amount of interval checks for the CPU power check
 $cpuCheckIterations = [Math]::Floor($settings.runtimePerCore / $cpuUsageCheckInterval)
 $runtimeRemaining   = $settings.runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
 
@@ -1138,6 +1260,9 @@ $primeResultsPath = $processPath + $primeResultsName
 
 # Close all existing instances of Prime95 and start a new one with our config
 if ($process) {
+    Write-Verbose('There already exists an instance of Prime95, trying to close it')
+    Write-Verbose('ID: ' + $process.Id + ' - ProcessName: ' + $process.ProcessName)
+
     Close-Prime95
 }
 
@@ -1180,6 +1305,14 @@ else {
     Write-ColorText('Selected FFT size: ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
 }
 
+# Verbosity
+if ($settings.verbosityMode -eq 1) {
+    Write-ColorText('Verbose mode is ENABLED: Writing to log file') Cyan
+}
+elseif ($settings.verbosityMode -eq 2) {
+    Write-ColorText('Verbose mode is ENABLED: Displaying in terminal') Cyan
+}
+
 Write-ColorText('---------------------------------------------------------------------------') Cyan
 
 
@@ -1204,12 +1337,21 @@ Write-ColorText($logfilePath) Cyan
 # Try to get the affinity of the Prime95 process. If not found, abort
 try {
     $null = $process.ProcessorAffinity
-    #Write-Text('Current affinity of process: ' + $process.ProcessorAffinity)
+
+    Write-Verbose('')
+    Write-Verbose('The current affinity of the process: ' + $process.ProcessorAffinity)
 }
 catch {
     Exit-WithFatalError('Process ' + $processName + ' not found!')
 }
 
+
+# All the cores
+$allCores = @(0..($numPhysCores-1))
+$coresToTest = $allCores
+
+# Subtract ignored cores
+$coresToTest = $allCores | ? {$_ -notin $settings.coresToIgnore}
 
 
 # Repeat the whole check $settings.maxIterations times
@@ -1278,27 +1420,50 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             continue
         }
 
-
         # If $settings.restartPrimeForEachCore is set, restart Prime95 for each core
-        # TODO: this check will not work correctly if core 0 is added to the $settings.coresToIgnore array
-        if ($settings.restartPrimeForEachCore -and ($iteration -gt 1 -or $coreNumber -gt 0)) {
+        if ($settings.restartPrimeForEachCore -and ($iteration -gt 1 -or $coreNumber -gt $coresToTest[0])) {
             Close-Prime95
+
+            # If the delayBetweenCycles setting is set, wait for the defined amount
+            if ($settings.delayBetweenCycles -gt 0) {
+                Write-Text('Idling for ' + $settings.delayBetweenCycles + ' seconds before continuing to the next core...')
+
+                # Also adjust the expected end time for this delay
+                $endDateThisCore += New-TimeSpan -Seconds $settings.delayBetweenCycles
+
+                Start-Sleep -Seconds $settings.delayBetweenCycles
+            }
+
             Start-Prime95
         }
         
        
         # This core has not thrown an error yet, run the test
+        $timestamp = (Get-Date).ToString("HH:mm:ss")
         Write-Text($timestamp + ' - Set to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
         
         # Set the affinity to a specific core
         try {
+            Write-Verbose('Setting the affinity to ' + $affinity)
+
             $process.ProcessorAffinity = [System.IntPtr][Int]$affinity
-            Write-Text('Running for ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore) + '...')
         }
         catch {
-            Close-Prime95
-            Exit-WithFatalError('Could not set the affinity to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')!')
+            # Apparently setting the affinity can fail on the first try, so make another attempt
+            Write-Verbose('Setting the affinity has failed, trying again...')
+            Start-Sleep -Milliseconds 300
+
+            try {
+                $process.ProcessorAffinity = [System.IntPtr][Int]$affinity
+            }
+            catch {
+                Close-Prime95
+                Exit-WithFatalError('Could not set the affinity to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')!')                
+            }
         }
+
+        Write-Verbose('Successfully set the affinity to ' + $affinity)
+        Write-Text('Running for ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore) + '...')
 
 
         # Make a check each x seconds for the CPU power usage
@@ -1310,7 +1475,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             # Make this the last iteration if the remaining time is close enough
             if ($difference.TotalSeconds -le $cpuUsageCheckInterval) {
                 $checkNumber = $cpuCheckIterations
-                Start-Sleep -Seconds ($difference.TotalSeconds - 1)
+                $waitTime    = [Math]::Max(0, $difference.TotalSeconds - 1)
+                Start-Sleep -Seconds $waitTime
             }
             else {
                 Start-Sleep -Seconds $cpuUsageCheckInterval
@@ -1326,7 +1492,6 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             catch {
                 continue coreLoop
             }
-        
         }
         
         # Wait for the remaining runtime
@@ -1341,6 +1506,9 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         catch {
             continue
         }
+
+        $timestamp = (Get-Date).ToString("HH:mm:ss")
+        Write-Text($timestamp + ' - Completed the test on Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
     }
     
     
