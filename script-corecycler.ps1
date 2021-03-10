@@ -367,6 +367,22 @@ function Get-Settings {
     # Read the config file and overwrite the default settings
     $userSettings = Get-Content -raw 'config.ini' | ConvertFrom-StringData
 
+    # Check if the config.ini contained valid setting
+    # It may be corrupted if the computer immediately crashed due to unstable settings
+    try {
+        foreach ($entry in $userSettings.GetEnumerator()) {
+        }
+    }
+
+    # Couldn't get the a valid content from the config.ini, replace it with the default
+    catch {
+        Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
+
+        Copy-Item -Path 'config.default.ini' -Destination 'config.ini'
+        $userSettings = Get-Content -raw 'config.ini' | ConvertFrom-StringData
+    }
+
+
     foreach ($entry in $userSettings.GetEnumerator()) {
         # Special handling for coresToIgnore
         if ($entry.Name -eq 'coresToIgnore') {
@@ -1031,6 +1047,9 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
     Read-Host -Prompt 'Press Enter to exit'
     exit
 }
+
+# Clear the error variable, it may have been populated by the above calls
+$Error.clear()
 
 
 # Try to access the Performance Process Counter
