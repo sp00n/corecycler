@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8.6
+    0.7.8.7
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.8.6'
+$version                = '0.7.8.7'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -179,10 +179,10 @@ function Write-Verbose {
     
     if ($settings.verbosityMode) {
         if ($settings.verbosityMode -gt 1) {
-            Write-Host('    + ' + $text)
+            Write-Host('           ' + '      + ' + $text)
         }
 
-        Add-Content $logFilePath ('    + ' + $text)
+        Add-Content $logFilePath ('           ' + '      + ' + $text)
     }
 
 }
@@ -672,8 +672,8 @@ function Initialize-Prime95 {
     Add-Content $configFile2 ('TortureWeak=' + $(Get-TortureWeakValue))
     
     Add-Content $configFile2 'V24OptionsConverted=1'
-    Add-Content $configFile2 'WorkPreference=0'
     Add-Content $configFile2 'V30OptionsConverted=1'
+    Add-Content $configFile2 'WorkPreference=0'
     Add-Content $configFile2 'WGUID_version=2'
     Add-Content $configFile2 'StressTester=1'
     Add-Content $configFile2 'UsePrimenet=0'
@@ -963,11 +963,14 @@ function Test-ProcessUsage {
         
 
         # Try to restart Prime95 and continue with the next core
-        Write-Text('Trying to restart Prime95')
-        
-        
-        # Start Prime95 again
-        Start-Prime95
+        # Don't try to restart here if $settings.restartPrimeForEachCore is set
+        if (!$settings.restartPrimeForEachCore) {
+            $timestamp = Get-Date -format HH:mm:ss
+            Write-Text($timestamp + ' - Trying to restart Prime95')
+            
+            # Start Prime95 again
+            Start-Prime95
+        }
         
         
         # Throw an error to let the caller know there was an error
@@ -1133,9 +1136,9 @@ $prime95CPUSettings = @{
 # The various FFT sizes
 # Used to determine where an error likely happened
 # Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
-# AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192
+# SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 327688192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
 # AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192
-# SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192
+# AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192
 $FFTSizes = @{
     SSE = @(
         # Smallest FFT
@@ -1154,6 +1157,11 @@ $FFTSizes = @{
         448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
         2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
         6400, 6720, 6912, 7168, 7680, 8000, 8192
+
+        # Not used in Prime95 presets
+        # 32768 seems to be the maximum FFT size possible
+        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 20480, 
+        21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
     )
 
     AVX = @(
@@ -1173,6 +1181,9 @@ $FFTSizes = @{
         448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
         2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
         6400, 6720, 6912, 7168, 7680, 8000, 8192
+
+        # Not used in Prime95 presets
+        # TODO: after 8192 for AVX
     )
 
 
@@ -1193,6 +1204,9 @@ $FFTSizes = @{
         448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
         2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
         6400, 6720, 7168, 7680, 8000, 8064, 8192
+
+        # Not used in Prime95 presets
+        # TODO: after 8192 for AVX2
     )
 }
 
@@ -1380,7 +1394,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         $startDateThisCore = (Get-Date)
         $endDateThisCore   = $startDateThisCore + (New-TimeSpan -Seconds $settings.runtimePerCore)
         $timestamp         = $startDateThisCore.ToString("HH:mm:ss")
-        $affinity          = 0
+        $affinity          = [Int64]0
         $cpuNumbersArray   = @()
 
 
@@ -1427,7 +1441,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
 
             # If the delayBetweenCycles setting is set, wait for the defined amount
             if ($settings.delayBetweenCycles -gt 0) {
-                Write-Text('Idling for ' + $settings.delayBetweenCycles + ' seconds before continuing to the next core...')
+                Write-Text('           Idling for ' + $settings.delayBetweenCycles + ' seconds before continuing to the next core...')
 
                 # Also adjust the expected end time for this delay
                 $endDateThisCore += New-TimeSpan -Seconds $settings.delayBetweenCycles
@@ -1447,7 +1461,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         try {
             Write-Verbose('Setting the affinity to ' + $affinity)
 
-            $process.ProcessorAffinity = [System.IntPtr][Int]$affinity
+            $process.ProcessorAffinity = [System.IntPtr][Int64]$affinity
         }
         catch {
             # Apparently setting the affinity can fail on the first try, so make another attempt
@@ -1455,7 +1469,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             Start-Sleep -Milliseconds 300
 
             try {
-                $process.ProcessorAffinity = [System.IntPtr][Int]$affinity
+                $process.ProcessorAffinity = [System.IntPtr][Int64]$affinity
             }
             catch {
                 Close-Prime95
@@ -1464,7 +1478,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         }
 
         Write-Verbose('Successfully set the affinity to ' + $affinity)
-        Write-Text('Running for ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore) + '...')
+        Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore) + '...')
 
 
         # Make a check each x seconds for the CPU power usage
@@ -1515,7 +1529,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     
     # Print out the cores that have thrown an error so far
     if ($coresWithError.Length -gt 0) {
-        Write-Text('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', '))
+        Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
     }
 }
 
