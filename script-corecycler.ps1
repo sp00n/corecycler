@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8.7
+    0.7.8.8
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.8.7'
+$version                = '0.7.8.8'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -1007,8 +1007,8 @@ try {
     $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
     $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
     $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
-    $counterNames['SearchString']     = "\\ID Process$"
-    $counterNames['ReplaceString']    = "\% Processor Time"
+    $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
+    $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
 }
 catch {
     Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
