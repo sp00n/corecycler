@@ -82,15 +82,17 @@ $stressTestProgramsWithSameProcess = @(
 
 
 # Used to get around the localized counter names
-# To get the IDs, use the Get-PerformanceCounterID function
-$counterNameIds = @{
-    'Process'                 = 230
-    'ID Process'              = 784
-    '% Processor Time'        = 5972
-    'Processor Information'   = 5970
-    '% Processor Performance' = 6020
-    '% Processor Utility'     = 6024
-}
+$englishCounterNames = @(
+    'Process',
+    'ID Process',
+    '% Processor Time',
+    'Processor Information',
+    '% Processor Performance',
+    '% Processor Utility'
+)
+
+# This stores the Name:ID pairs of the english counter names
+$counterNameIds = @{}
 
 # This holds the localized counter names
 # Stores the strings returned by Get-PerformanceCounterLocalName
@@ -311,34 +313,36 @@ function Get-PerformanceCounterLocalName {
 
 
 <##
- # This is used to get the Performance Counter ID for a localized name
- # It's not really used in this script, but it remains here as a reference if the need arises to add more localizd Performance Counters
- # .SOURCE https://www.powershellmagazine.com/2013/07/19/querying-performance-counters-from-powershell/
- # .USAGE Get-PerformanceCounterID -Name 'Processor Information'
- # .PARAM String $Name The (localized) name of the counter name
- # .RETURN String The localized name
+ # This is used to get the Performance Counter IDs, which will be used to get the localized names
+ # .PARAM Array $englishCounterNames An arraay with the english names of the counters
+ # .RETURN Hash A hash with Name:ID pairs of the counters
  #>
-function Get-PerformanceCounterID {
+function Get-PerformanceCounterIDs {
     param (
         [Parameter(Mandatory=$true)]
-        $Name
+        [Array]
+        $englishCounterNames
     )
 
-    if ($script:perfHash -eq $null) {
-        Write-Progress -Activity 'Retrieving PerfIDs' -Status 'Working'
+    $key          = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\009'
+    $allCounters  = (Get-ItemProperty -Path $key -Name Counter).Counter
+    $numCounters  = $allCounters.Count
+    $countersHash = @{}
+    
+    # The string contains two-line pairs
+    # The first line is the ID
+    # The second line is the name
+    for ($i = 0; $i -lt $numCounters; $i += 2) {
+        $counterId   = [Int]$allCounters[$i]
+        $counterName = [String]$allCounters[$i+1]
 
-        $key = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\CurrentLanguage'
-        $counters = (Get-ItemProperty -Path $key -Name Counter).Counter
-        $script:perfHash = @{}
-        $all = $counters.Count
-
-        for($i = 0; $i -lt $all; $i+=2) {
-           Write-Progress -Activity 'Retrieving PerfIDs' -Status 'Working' -PercentComplete ($i*100/$all)
-           $script:perfHash.$($counters[$i+1]) = $counters[$i]
+        if ($englishCounterNames.Contains($counterName)) {
+            $countersHash[$counterName] = $counterId
         }
+
     }
 
-    $script:perfHash.$Name
+    return $countersHash
 }
 
 
@@ -352,19 +356,27 @@ function Get-Settings {
     # Change the various settings in the config.ini file
 
     $defaultSettings = @{
-        # The stress test program
-        # Currently only "PRIME95" is supported
-        # Default: 'PRIME95'
+        # The program to perform the actual stress test
+        # The following programs are available: PRIME95, AIDA64
+        # Note: For AIDA64, you need to manually download and extract the portable ENGINEER version and put it
+        #       in the /test_programs/aida64/ folder
+        # Default: PRIME95
         stressTestProgram = 'PRIME95'
 
 
         # The mode of the stress test
-        # 'SSE':    lightest load on the processor, lowest temperatures, highest boost clock
-        # 'AVX':    medium load on the processor, medium temperatures, medium boost clock
-        # 'AVX2':   heaviest on the processor, highest temperatures, lowest boost clock
-        # 'CUSTOM': you can define your own settings (see further below for setting the values)
-        # Default: 'SSE'
-        mode = 'SSE'
+        # Prime95 settings:
+        # SSE:    lightest load on the processor, lowest temperatures, highest boost clock
+        # AVX:    medium load on the processor, medium temperatures, medium boost clock
+        # AVX2:   heavy load on the processor, highest temperatures, lowest boost clock
+        # CUSTOM: you can define your own settings for Prime. See the "customs" section further below
+        # Aida64 settings:
+        # CACHE: Starts Aida64 with the "Cache" stress test
+        # RAM:   Starts Aida64 with the "Memory" stress test
+        #
+        # Default: SSE (for Prime95) resp. CACHE (for Aida64)
+        modePrime = SSE
+        modeAida  = CACHE
 
 
         # The FFT size preset to test
@@ -440,8 +452,8 @@ function Get-Settings {
         # Set this to 1 to see a bit more text in the terminal
         # 1: Write additional information to the log file
         # 2: Also display the additional information in the terminal
-        # Default: 0
-        verbosityMode = 0
+        # Default: 1
+        verbosityMode = 1
 
 
         # Set the custom settings here for the 'CUSTOM' mode
@@ -502,7 +514,7 @@ function Get-Settings {
 
 
     # Certain setting values are strings
-    $settingsWithStrings = @('stressTestProgram', 'logfile', 'mode', 'FFTSize')
+    $settingsWithStrings = @('stressTestProgram', 'logfile', 'mode', 'modePrime', 'modeAida', 'FFTSize')
 
     # Lowercase for certain settings
     $settingsToLowercase = @('stressTestProgram')
@@ -565,6 +577,15 @@ function Get-Settings {
     # Default the stress test program to prime95
     if (!$settings.stressTestProgram -or !$stressTestPrograms.Contains($settings.stressTestProgram)) {
         $settings.stressTestProgram = 'prime95'
+    }
+
+
+    # Set the general "mode" setting
+    if ($settings.stressTestProgram -eq 'prime95') {
+        $settings.mode = $settings.modePrime
+    }
+    elseif ($settings.stressTestProgram -eq 'aida64') {
+        $settings.mode = $settings.modeAida
     }
 
 
@@ -949,7 +970,7 @@ function Start-Aida64 {
     Write-Verbose('Starting Aida64')
 
     # Cache or RAM
-    $thisMode = 'Cache'
+    $thisMode = $settings.modeAida
 
     # Minimized to the tray
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Hidden
@@ -957,6 +978,9 @@ function Start-Aida64 {
     # Minimized to the task bar
     $Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Minimized
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru
+
+    #aida64.exe /SILENT /SST RAM
+    #aida64.exe /HIDETRAYMENU /SST RAM
 
     # Aida64 takes some additional time to load
     # Check for the stress test process, if it's loaded, we're ready to go
@@ -970,7 +994,6 @@ function Start-Aida64 {
             break
         }
     }
-
     
     
     if (!$Script:windowProcess) {
@@ -1377,15 +1400,24 @@ function Test-ProcessUsage {
 
 # Get the localized counter names
 try {
-    $counterNames['Process']                 = Get-PerformanceCounterLocalName $counterNameIds['Process']
-    $counterNames['ID Process']              = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
-    $counterNames['% Processor Time']        = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
+    $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
+
+    $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
+    $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
+    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
+    $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
+    $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
+    $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
+
+    # Examples
+    # English: ID Process
+    # German:  Prozesskennung
+    # English: % Processor Time
+    # German:  Prozessorzeit (%)
+
     #$counterNames['Processor Information' ]  = Get-PerformanceCounterLocalName $counterNameIds['Processor Information']
     #$counterNames['% Processor Performance'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Performance']
     #$counterNames['% Processor Utility']     = Get-PerformanceCounterLocalName $counterNameIds['% Processor Utility']
-    $counterNames['FullName']                = '\' + $counterNames['Process'] + '(*)\' + $counterNames['ID Process']
-    $counterNames['SearchString']            = '\\' + $counterNames['ID Process'] + '$'
-    $counterNames['ReplaceString']           = '\' + $counterNames['% Processor Time']
 }
 catch {
     Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
@@ -1513,201 +1545,203 @@ $runtimeRemaining   = $settings.runtimePerCore - ($cpuCheckIterations * $cpuUsag
 
 
 # The Prime95 CPU settings for the various test modes
-$prime95CPUSettings = @{
-    SSE = @{
-        CpuSupportsSSE  = 1
-        CpuSupportsSSE2 = 1
-        CpuSupportsAVX  = 0
-        CpuSupportsAVX2 = 0
-        CpuSupportsFMA3 = 0
-    }
-
-    AVX = @{
-        CpuSupportsSSE  = 1
-        CpuSupportsSSE2 = 1
-        CpuSupportsAVX  = 1
-        CpuSupportsAVX2 = 0
-        CpuSupportsFMA3 = 0
-    }
-
-    AVX2 = @{
-        CpuSupportsSSE  = 1
-        CpuSupportsSSE2 = 1
-        CpuSupportsAVX  = 1
-        CpuSupportsAVX2 = 1
-        CpuSupportsFMA3 = 1
-    }
-
-    CUSTOM = @{
-        CpuSupportsSSE  = 1
-        CpuSupportsSSE2 = 1
-        CpuSupportsAVX  = $settings.customCpuSupportsAVX
-        CpuSupportsAVX2 = $settings.customCpuSupportsAVX2
-        CpuSupportsFMA3 = $settings.customCpuSupportsFMA3
-    }
-}
-
-
-# The various FFT sizes for Prime95
-# Used to determine where an error likely happened
-# Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
-# SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000,        16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
-# AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752,        11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768
-# AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200 [...TODO]
-$FFTSizes = @{
-    SSE = @(
-        # Smallest FFT
-        4, 5, 6, 8, 10, 12, 14, 16, 20,
-        
-        # Not used in Prime95 presets
-        24, 28, 32,
-        
-        # Small FFT
-        40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240,
-
-        # Not used in Prime95 presets
-        256, 288, 320, 336, 384, 400,
-
-        # Large FFT
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
-        2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
-        6400, 6720, 6912, 7168, 7680, 8000, 8192
-
-        # Not used in Prime95 presets
-        # Now custom labeled "Huge"
-        # 32768 seems to be the maximum FFT size possible for SSE
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
-        22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
-    )
-
-    AVX = @(
-        # Smallest FFT
-        4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
-
-        # Not used in Prime95 presets
-        24, 25, 28, 32, 35,
-
-        # Small FFT
-        36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240,
-
-        # Not used in Prime95 presets
-        256, 288, 320, 336, 384, 400,
-
-        # Large FFT
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
-        2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
-        6400, 6720, 6912, 7168, 7680, 8000, 8192
-
-        # Not used in Prime95 presets
-        # Now custom labeled "Huge"
-        # 32768 seems to be the maximum FFT size possible for AVX
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
-        22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
-    )
-
-
-    AVX2 = @(
-        # Smallest FFT
-        4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
-
-        # Not used in Prime95 presets
-        24, 25, 28, 30, 32, 35,
-
-        # Small FFT
-        36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 144, 160, 168, 192, 200, 224, 240,
-
-        # Not used in Prime95 presets
-        256, 280, 288, 320, 336, 384, 400,
-
-        # Large FFT
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
-        2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
-        6400, 6720, 7168, 7680, 8000, 8064, 8192
-
-        # Not used in Prime95 presets
-        # Now custom labeled "Huge"
-        # 51200 seems to be the maximum FFT size possible for AVX2
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
-        21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
-
-        # An example of the randomization:
-        # 11200, 8960, 9216, 9600, 10240, 10752, 11520, 11200, 11520, 12288, 11200, 8192, 11520, 12288, 12800, 13440, 13824, 8960, 14336, 15360,
-        # 16000, 16128, 16384, 9216, 17920, 18432, 19200, 20480, 21504, 9600, 22400, 23040, 24576, 25600, 26880, 10240, 28672, 30720, 32000, 32768,
-        # 35840, 10752, 38400, 40960, 44800, 51200
-    )
-}
-
-
-# The min and max values for the various presets
-# Note that the actually tested sizes differ from the originally provided min and max values
-# depending on the selected test mode (SSE, AVX, AVX2)
-$FFTMinMaxValues = @{
-    SSE = @{
-        Smallest = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
-        Small    = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
-        Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Huge     = @{ Min = 8960; Max = 32768; }  # New addition
-        All      = @{ Min =    4; Max = 32768; }
-    }
-
-    AVX = @{
-        Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-        Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-        Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Huge     = @{ Min = 8960; Max = 32768; }  # New addition
-        All      = @{ Min =    4; Max = 32768; }
-    }
-
-    AVX2 = @{
-        Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-        Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-        Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Huge     = @{ Min = 8960; Max = 51200; }  # New addition
-        All      = @{ Min =    4; Max = 51200; }
-    }
-}
-
-
-# Get the correct min and max values for the selected FFT settings
-if ($settings.mode -eq 'CUSTOM') {
-    $minFFTSize = [Int]$settings.customMinTortureFFT
-    $maxFFTSize = [Int]$settings.customMaxTortureFFT
-}
-else {
-    $minFFTSize = $FFTMinMaxValues[$settings.mode][$settings.FFTSize].Min
-    $maxFFTSize = $FFTMinMaxValues[$settings.mode][$settings.FFTSize].Max
-}
-
-
-# Get the test mode, even if $settings.mode is set to CUSTOM
-$cpuTestMode = $settings.mode
-
-# If we're in CUSTOM mode, try to determine which setting preset it is
-if ($settings.mode -eq 'CUSTOM') {
-    $cpuTestMode = 'SSE'
-
-    if ($settings.customCpuSupportsAVX -eq 1) {
-        if ($settings.customCpuSupportsAVX2 -eq 1 -and $settings.customCpuSupportsFMA3 -eq 1) {
-            $cpuTestMode = 'AVX2'
+if ($settings.stressTestProgram -eq 'prime95') {
+    $prime95CPUSettings = @{
+        SSE = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = 0
+            CpuSupportsAVX2 = 0
+            CpuSupportsFMA3 = 0
         }
-        else {
-            $cpuTestMode = 'AVX'
+
+        AVX = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = 1
+            CpuSupportsAVX2 = 0
+            CpuSupportsFMA3 = 0
+        }
+
+        AVX2 = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = 1
+            CpuSupportsAVX2 = 1
+            CpuSupportsFMA3 = 1
+        }
+
+        CUSTOM = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = $settings.customCpuSupportsAVX
+            CpuSupportsAVX2 = $settings.customCpuSupportsAVX2
+            CpuSupportsFMA3 = $settings.customCpuSupportsFMA3
         }
     }
+
+
+    # The various FFT sizes for Prime95
+    # Used to determine where an error likely happened
+    # Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
+    # SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000,        16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
+    # AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752,        11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768
+    # AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200 [...TODO]
+    $FFTSizes = @{
+        SSE = @(
+            # Smallest FFT
+            4, 5, 6, 8, 10, 12, 14, 16, 20,
+            
+            # Not used in Prime95 presets
+            24, 28, 32,
+            
+            # Small FFT
+            40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240,
+
+            # Not used in Prime95 presets
+            256, 288, 320, 336, 384, 400,
+
+            # Large FFT
+            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
+            2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
+            6400, 6720, 6912, 7168, 7680, 8000, 8192
+
+            # Not used in Prime95 presets
+            # Now custom labeled "Huge"
+            # 32768 seems to be the maximum FFT size possible for SSE
+            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
+            22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
+        )
+
+        AVX = @(
+            # Smallest FFT
+            4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+
+            # Not used in Prime95 presets
+            24, 25, 28, 32, 35,
+
+            # Small FFT
+            36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240,
+
+            # Not used in Prime95 presets
+            256, 288, 320, 336, 384, 400,
+
+            # Large FFT
+            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
+            2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
+            6400, 6720, 6912, 7168, 7680, 8000, 8192
+
+            # Not used in Prime95 presets
+            # Now custom labeled "Huge"
+            # 32768 seems to be the maximum FFT size possible for AVX
+            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
+            22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
+        )
+
+
+        AVX2 = @(
+            # Smallest FFT
+            4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+
+            # Not used in Prime95 presets
+            24, 25, 28, 30, 32, 35,
+
+            # Small FFT
+            36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 144, 160, 168, 192, 200, 224, 240,
+
+            # Not used in Prime95 presets
+            256, 280, 288, 320, 336, 384, 400,
+
+            # Large FFT
+            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
+            2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
+            6400, 6720, 7168, 7680, 8000, 8064, 8192
+
+            # Not used in Prime95 presets
+            # Now custom labeled "Huge"
+            # 51200 seems to be the maximum FFT size possible for AVX2
+            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
+            21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
+
+            # An example of the randomization:
+            # 11200, 8960, 9216, 9600, 10240, 10752, 11520, 11200, 11520, 12288, 11200, 8192, 11520, 12288, 12800, 13440, 13824, 8960, 14336, 15360,
+            # 16000, 16128, 16384, 9216, 17920, 18432, 19200, 20480, 21504, 9600, 22400, 23040, 24576, 25600, 26880, 10240, 28672, 30720, 32000, 32768,
+            # 35840, 10752, 38400, 40960, 44800, 51200
+        )
+    }
+
+
+    # The min and max values for the various presets
+    # Note that the actually tested sizes differ from the originally provided min and max values
+    # depending on the selected test mode (SSE, AVX, AVX2)
+    $FFTMinMaxValues = @{
+        SSE = @{
+            Smallest = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
+            Small    = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
+            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
+            All      = @{ Min =    4; Max = 32768; }
+        }
+
+        AVX = @{
+            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
+            All      = @{ Min =    4; Max = 32768; }
+        }
+
+        AVX2 = @{
+            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge     = @{ Min = 8960; Max = 51200; }  # New addition
+            All      = @{ Min =    4; Max = 51200; }
+        }
+    }
+
+
+    # Get the correct min and max values for the selected FFT settings
+    if ($settings.mode -eq 'CUSTOM') {
+        $minFFTSize = [Int]$settings.customMinTortureFFT
+        $maxFFTSize = [Int]$settings.customMaxTortureFFT
+    }
+    else {
+        $minFFTSize = $FFTMinMaxValues[$settings.mode][$settings.FFTSize].Min
+        $maxFFTSize = $FFTMinMaxValues[$settings.mode][$settings.FFTSize].Max
+    }
+
+
+    # Get the test mode, even if $settings.mode is set to CUSTOM
+    $cpuTestMode = $settings.mode
+
+    # If we're in CUSTOM mode, try to determine which setting preset it is
+    if ($settings.mode -eq 'CUSTOM') {
+        $cpuTestMode = 'SSE'
+
+        if ($settings.customCpuSupportsAVX -eq 1) {
+            if ($settings.customCpuSupportsAVX2 -eq 1 -and $settings.customCpuSupportsFMA3 -eq 1) {
+                $cpuTestMode = 'AVX2'
+            }
+            else {
+                $cpuTestMode = 'AVX'
+            }
+        }
+    }
+
+
+    # The Prime95 results.txt file name for this run
+    $primeResultsName = 'Prime95_results_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    $primeResultsPath = $logFilePathAbsolute + $primeResultsName
+    #$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    #$primeLogPath = $logFilePathAbsolute + $primeLogName
 }
-
-
-# The Prime95 results.txt file name for this run
-$primeResultsName = 'Prime95_results_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
-$primeResultsPath = $logFilePathAbsolute + $primeResultsName
-#$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
-#$primeLogPath = $logFilePathAbsolute + $primeLogName
 
 
 
