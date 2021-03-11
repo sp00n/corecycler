@@ -41,7 +41,7 @@ $stressTestPrograms = @{
         'processName'        = 'prime95'
         'processNameExt'     = 'exe'
         'processNameForLoad' = 'prime95'
-        'processPath'        = 'p95'
+        'processPath'        = 'test_programs\p95'
         'absolutePath'       = $null
         'fullPathToExe'      = $null
         'displayName'        = $null
@@ -57,7 +57,7 @@ $stressTestPrograms = @{
         'processName'        = 'aida64'
         'processNameExt'     = 'exe'
         'processNameForLoad' = 'aida_bench64.dll'
-        'processPath'        = 'aida64'
+        'processPath'        = 'test_programs\aida64'
         'absolutePath'       = $null
         'fullPathToExe'      = $null
         'displayName'        = $null
@@ -373,9 +373,10 @@ function Get-Settings {
         # 'Smallest':  Smallest FFT: 4K to 21K     - tests L1/L2 caches, high power/heat/CPU stress
         # 'Small':     Small FFT:    36K to 248K   - tests L1/L2/L3 caches, maximum power/heat/CPU stress
         # 'Large':     Large FFT:    426K to 8192K - stresses memory controller and RAM (although memory testing is disabled here by default!)
+        # 'Huge':      New custom mode: anything above 8192K
         # 'All':       All FFT:      4K to 8192K   - all of the above
-        # Default: 'Small'
-        FFTSize = 'Small'
+        # Default: 'Huge'
+        FFTSize = 'Huge'
 
 
         # Set the runtime per core
@@ -853,7 +854,6 @@ function Initialize-Prime95 {
     Add-Content $configFile2 ('prime.ini='   + $stressTestPrograms['prime95']['processPath'] + '\prime.txt')
     Add-Content $configFile2 ('local.ini='   + $stressTestPrograms['prime95']['processPath'] + '\local.txt')
     Add-Content $configFile2 ('results.txt=' + $logFilePath + '\' + $primeResultsName)
-    Add-Content $configFile2 ('prime.log='   + $logFilePath + '\' + $primeLogName)
     
     # Custom settings
     if ($configType -eq 'CUSTOM') {
@@ -1282,43 +1282,50 @@ function Test-ProcessUsage {
             
             # Try to determine the last run FFT size
             # If the results.txt doesn't exist, assume that it was on the very first iteration
-            if (!$resultFileHandle) {
-                $lastRunFFT = $minFFTSize
-            }
-            
-            # Get the last couple of rows and find the last passed FFT size
-            else {
-                $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
-                $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
-                $lastPassedFFT    = if ($matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+            # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Small FFT sizes
+            #       So we cannot make an educated guess for these settings
+            if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['Small'].Max) {
+
+                if (!$resultFileHandle) {
+                    $lastRunFFT = $minFFTSize
+                }
                 
-                # No passed FFT was found, assume it's the first FFT size
-                if (!$lastPassedFFT) {
-                    $lastRunFFT = $minFFTSize
-                }
-
-                # If the last passed FFT size is the max selected FFT size, start at the beginning
-                elseif ($lastPassedFFT -eq $maxFFTSize) {
-                    $lastRunFFT = $minFFTSize
-                }
-
-                # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
-                # In this case, we also assume that it successfully completed the max value and errored at the min FFT size
-                # Example: Smallest FFT max = 21, but the actual last size tested is 20K
-                elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
-                    $lastRunFFT = $minFFTSize
-                }
-
-                # If it's not the max value and it does show up in the FFT array, select the next value
+                # Get the last couple of rows and find the last passed FFT size
                 else {
-                    $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
+                    $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
+                    $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
+                    $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+                    $lastPassedFFT    = if ($matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+                    
+                    # No passed FFT was found, assume it's the first FFT size
+                    if (!$lastPassedFFT) {
+                        $lastRunFFT = $minFFTSize
+                    }
+
+                    # If the last passed FFT size is the max selected FFT size, start at the beginning
+                    elseif ($lastPassedFFT -eq $maxFFTSize) {
+                        $lastRunFFT = $minFFTSize
+                    }
+
+                    # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
+                    # In this case, we also assume that it successfully completed the max value and errored at the min FFT size
+                    # Example: Smallest FFT max = 21, but the actual last size tested is 20K
+                    elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
+                        $lastRunFFT = $minFFTSize
+                    }
+
+                    # If it's not the max value and it does show up in the FFT array, select the next value
+                    else {
+                        $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
+                    }
                 }
-            }
-            
-            # Educated guess
-            if ($lastRunFFT) {
-                Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
+
+                # Educated guess
+                if ($lastRunFFT) {
+                    Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
+                }
+
+
             }
         }
 
@@ -1562,12 +1569,15 @@ $FFTSizes = @{
         256, 288, 320, 336, 384, 400,
 
         # Large FFT
+        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
         448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
         2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
         6400, 6720, 6912, 7168, 7680, 8000, 8192
 
         # Not used in Prime95 presets
-        # 32768 seems to be the maximum FFT size possible
+        # Now custom labeled "Huge"
+        # 32768 seems to be the maximum FFT size possible for SSE
+        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
         8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
         22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
     )
@@ -1586,11 +1596,15 @@ $FFTSizes = @{
         256, 288, 320, 336, 384, 400,
 
         # Large FFT
+        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
         448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
         2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
         6400, 6720, 6912, 7168, 7680, 8000, 8192
 
         # Not used in Prime95 presets
+        # Now custom labeled "Huge"
+        # 32768 seems to be the maximum FFT size possible for AVX
+        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
         8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
         22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
     )
@@ -1610,14 +1624,22 @@ $FFTSizes = @{
         256, 280, 288, 320, 336, 384, 400,
 
         # Large FFT
+        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
         448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
         2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
         6400, 6720, 7168, 7680, 8000, 8064, 8192
 
         # Not used in Prime95 presets
-        # TODO: this is still incomplete!
+        # Now custom labeled "Huge"
+        # 51200 seems to be the maximum FFT size possible for AVX2
+        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
         8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
         21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
+
+        # An example of the randomization:
+        # 11200, 8960, 9216, 9600, 10240, 10752, 11520, 11200, 11520, 12288, 11200, 8192, 11520, 12288, 12800, 13440, 13824, 8960, 14336, 15360,
+        # 16000, 16128, 16384, 9216, 17920, 18432, 19200, 20480, 21504, 9600, 22400, 23040, 24576, 25600, 26880, 10240, 28672, 30720, 32000, 32768,
+        # 35840, 10752, 38400, 40960, 44800, 51200
     )
 }
 
@@ -1630,7 +1652,7 @@ $FFTMinMaxValues = @{
         Smallest = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
         Small    = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
         Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Largest  = @{ Min = 8960; Max = 32768; }  # New addition
+        Huge     = @{ Min = 8960; Max = 32768; }  # New addition
         All      = @{ Min =    4; Max = 32768; }
     }
 
@@ -1638,7 +1660,7 @@ $FFTMinMaxValues = @{
         Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
         Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
         Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Largest  = @{ Min = 8960; Max = 32768; }  # New addition
+        Huge     = @{ Min = 8960; Max = 32768; }  # New addition
         All      = @{ Min =    4; Max = 32768; }
     }
 
@@ -1646,8 +1668,8 @@ $FFTMinMaxValues = @{
         Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
         Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
         Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Largest  = @{ Min = 8960; Max = 51200; }  # New addition / TODO
-        All      = @{ Min =    4; Max = 51200; }  # TODO
+        Huge     = @{ Min = 8960; Max = 51200; }  # New addition
+        All      = @{ Min =    4; Max = 51200; }
     }
 }
 
@@ -1684,8 +1706,8 @@ if ($settings.mode -eq 'CUSTOM') {
 # The Prime95 results.txt file name for this run
 $primeResultsName = 'Prime95_results_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
 $primeResultsPath = $logFilePathAbsolute + $primeResultsName
-$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
-$primeLogPath = $logFilePathAbsolute + $primeLogName
+#$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+#$primeLogPath = $logFilePathAbsolute + $primeLogName
 
 
 
@@ -1775,7 +1797,7 @@ Write-ColorText(' - CoreCycler:         ' + $logFileName) Cyan
 
 if ($settings.stressTestProgram -eq 'prime95') {
     Write-ColorText(' - Prime95 Results:    ' + $primeResultsName) Cyan
-    Write-ColorText(' - Prime95 Output:     ' + $primeLogName) Cyan
+    #Write-ColorText(' - Prime95 Output:     ' + $primeLogName) Cyan
 }
 
 Write-ColorText('---------------------------------------------------------------------------') Cyan
