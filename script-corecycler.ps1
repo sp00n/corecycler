@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8.8
+    0.7.8.9
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.8.8'
+$version                = '0.7.8.9'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -37,11 +37,14 @@ $primePath   = $processPath + $processName
 
 
 # Used to get around the localized counter names
-$counterNameIds = @{
-    'Process'          = 230          
-    'ID Process'       = 784
-    '% Processor Time' = 5972
-}
+$englishCounterNames = @(
+    'Process',
+    'ID Process',
+    '% Processor Time'
+)
+
+# This stores the Name:ID pairs of the english counter names
+$counterNameIds = @{}
 
 # This holds the localized counter names
 $counterNames = @{
@@ -204,6 +207,40 @@ function Exit-WithFatalError {
 
     Read-Host -Prompt 'Press Enter to exit'
     exit
+}
+
+
+<##
+ # This is used to get the Performance Counter IDs, which will be used to get the localized names
+ # .PARAM Array $englishCounterNames An arraay with the english names of the counters
+ # .RETURN Hash A hash with Name:ID pairs of the counters
+ #>
+function Get-PerformanceCounterIDs {
+    param (
+        [Parameter(Mandatory=$true)]
+        [Array]
+        $englishCounterNames
+    )
+
+    $key          = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\009'
+    $allCounters  = (Get-ItemProperty -Path $key -Name Counter).Counter
+    $numCounters  = $allCounters.Count
+    $countersHash = @{}
+    
+    # The string contains two-line pairs
+    # The first line is the ID
+    # The second line is the name
+    for ($i = 0; $i -lt $numCounters; $i += 2) {
+        $counterId   = [Int]$allCounters[$i]
+        $counterName = [String]$allCounters[$i+1]
+
+        if ($englishCounterNames.Contains($counterName)) {
+            $countersHash[$counterName] = $counterId
+        }
+
+    }
+
+    return $countersHash
 }
 
 
@@ -1003,12 +1040,20 @@ function Test-ProcessUsage {
 
 # Get the localized counter names
 try {
+    $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
+
     $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
     $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
     $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
     $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
     $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
     $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
+
+    # Examples
+    # English: ID Process
+    # German:  Prozesskennung
+    # English: % Processor Time
+    # German:  Prozessorzeit (%)
 }
 catch {
     Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
