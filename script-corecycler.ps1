@@ -2,10 +2,10 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8.8
+    0.8.0.0
 .DESCRIPTION
-    Sets the affinity of the Prime95 process to only one core and cycles through all the cores
-    to test the stability of a Curve Optimizer setting
+    Sets the affinity of the selected stress test program process to only one core and cycles through
+    all the cores to test the stability of a Curve Optimizer setting
 .LINK
     https://github.com/sp00n/corecycler
 .LICENSE
@@ -17,40 +17,93 @@
 #>
 
 # Global variables
-$version                = '0.7.8.8'
-$curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
-$settings               = $null
-$logFilePath            = $null
-$processWindowHandler   = $null
-$processId              = $null
-$process                = $null
-$processCounterPathId   = $null
-$processCounterPathTime = $null
-$coresWithError         = $null
-$previousError          = $null
+$version                   = '0.8.0.0'
+$curDateTime               = Get-Date -format yyyy-MM-dd_HH-mm-ss
+$logFilePath               = 'logs'
+$logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
+$logFileName               = $null
+$logFileFullPath           = $null
+$settings                  = $null
+$selectedStressTestProgram = $null
+$windowProcess             = $null
+$windowProcessId           = $null
+$stressTestProcess         = $null
+$stressTestProcessId       = $null
+$processCounterPathId      = $null
+$processCounterPathTime    = $null
+$coresWithError            = $null
+$previousError             = $null
 
 
-# The Prime95 executable name and path
-$processName = 'prime95'
-$processPath = $PSScriptRoot + '\p95\'
-$primePath   = $processPath + $processName
+# Stress test program executables and paths
+$stressTestPrograms = @{
+    'prime95' = @{
+        'processName'        = 'prime95'
+        'processNameExt'     = 'exe'
+        'processNameForLoad' = 'prime95'
+        'processPath'        = 'p95'
+        'absolutePath'       = $null
+        'fullPathToExe'      = $null
+        'displayName'        = $null
+        'windowNames'        = @(
+            '^Prime95 - Self-Test',
+            '^Prime95 - Not running',
+            '^Prime95 - Waiting for work',
+            '^Prime95'
+        )
+    }
+
+    'aida64' = @{
+        'processName'        = 'aida64'
+        'processNameExt'     = 'exe'
+        'processNameForLoad' = 'aida_bench64.dll'
+        'processPath'        = 'aida64'
+        'absolutePath'       = $null
+        'fullPathToExe'      = $null
+        'displayName'        = $null
+        'windowNames'        = @(
+            '^System Stability Test - AIDA64*'
+        )
+    }
+}
+
+foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
+    $stressTestPrograms[$testProgram.Name]['displayName'] = $testProgram.Name.Substring(0,1).ToUpper() + $testProgram.Name.Substring(1).ToLower()
+    $stressTestPrograms[$testProgram.Name]['absolutePath'] = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
+    $stressTestPrograms[$testProgram.Name]['fullPathToExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
+}
+
+
+# Programs where both the main window and the stress test are the same process
+$stressTestProgramsWithSameProcess = @(
+    'prime95'
+)
+
 
 
 # Used to get around the localized counter names
+# To get the IDs, use the Get-PerformanceCounterID function
 $counterNameIds = @{
-    'Process'          = 230          
-    'ID Process'       = 784
-    '% Processor Time' = 5972
+    'Process'                 = 230
+    'ID Process'              = 784
+    '% Processor Time'        = 5972
+    'Processor Information'   = 5970
+    '% Processor Performance' = 6020
+    '% Processor Utility'     = 6024
 }
 
 # This holds the localized counter names
+# Stores the strings returned by Get-PerformanceCounterLocalName
 $counterNames = @{
-    'Process'          = ''
-    'ID Process'       = ''
-    '% Processor Time' = ''
-    'FullName'         = ''
-    'SearchString'     = ''
-    'ReplaceString'    = ''
+    'Process'                 = ''
+    'ID Process'              = ''
+    '% Processor Time'        = ''
+    'Processor Information'   = ''
+    '% Processor Performance' = ''
+    '% Processor Utility'     = ''
+    'FullName'                = ''
+    'SearchString'            = ''
+    'ReplaceString'           = ''
 }
 
 
@@ -68,7 +121,7 @@ $numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).S
 $isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
 
 
-# Add code definitions so that we can close the Prime95 window even if it's minimized to the tray
+# Add code definitions so that we can close a window even if it's minimized to the tray
 # The regular PowerShell way unfortunetely doesn't work in this case
 $GetWindowDefinition = @'
     using System;
@@ -141,7 +194,7 @@ function Write-Text {
     )
     
     Write-Host $text
-    Add-Content $logFilePath ($text)
+    Add-Content $logFileFullPath ($text)
 }
 
 
@@ -162,7 +215,7 @@ function Write-ColorText {
     # Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
     
     Write-Host $text -ForegroundColor $foregroundColor
-    Add-Content $logFilePath ($text)
+    Add-Content $logFileFullPath ($text)
 }
 
 
@@ -182,15 +235,34 @@ function Write-Verbose {
             Write-Host('           ' + '      + ' + $text)
         }
 
-        Add-Content $logFilePath ('           ' + '      + ' + $text)
+        Add-Content $logFileFullPath ('           ' + '      + ' + $text)
     }
 
 }
 
 
 <##
- # Throw a fatal error
- # .PARAM string $text The text to display
+ # Exit the script
+ # .PARAM string $text (optional) The text to display
+ # .RETURN void
+ #>
+function Exit-Script {
+    param(
+        $text
+    )
+
+    if ($text) {
+        Write-Text($text)
+    }
+
+    Read-Host -Prompt 'Press Enter to exit'
+    exit
+}
+
+
+<##
+ # Throw a fatal error and exit the script
+ # .PARAM string $text (optional) The text to display
  # .RETURN void
  #>
 function Exit-WithFatalError {
@@ -239,6 +311,38 @@ function Get-PerformanceCounterLocalName {
 
 
 <##
+ # This is used to get the Performance Counter ID for a localized name
+ # It's not really used in this script, but it remains here as a reference if the need arises to add more localizd Performance Counters
+ # .SOURCE https://www.powershellmagazine.com/2013/07/19/querying-performance-counters-from-powershell/
+ # .USAGE Get-PerformanceCounterID -Name 'Processor Information'
+ # .PARAM String $Name The (localized) name of the counter name
+ # .RETURN String The localized name
+ #>
+function Get-PerformanceCounterID {
+    param (
+        [Parameter(Mandatory=$true)]
+        $Name
+    )
+
+    if ($script:perfHash -eq $null) {
+        Write-Progress -Activity 'Retrieving PerfIDs' -Status 'Working'
+
+        $key = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\CurrentLanguage'
+        $counters = (Get-ItemProperty -Path $key -Name Counter).Counter
+        $script:perfHash = @{}
+        $all = $counters.Count
+
+        for($i = 0; $i -lt $all; $i+=2) {
+           Write-Progress -Activity 'Retrieving PerfIDs' -Status 'Working' -PercentComplete ($i*100/$all)
+           $script:perfHash.$($counters[$i+1]) = $counters[$i]
+        }
+    }
+
+    $script:perfHash.$Name
+}
+
+
+<##
  # Get the settings
  # .PARAM void
  # .RETURN void
@@ -248,12 +352,18 @@ function Get-Settings {
     # Change the various settings in the config.ini file
 
     $defaultSettings = @{
+        # The stress test program
+        # Currently only "PRIME95" is supported
+        # Default: 'PRIME95'
+        stressTestProgram = 'PRIME95'
+
 
         # The mode of the stress test
         # 'SSE':    lightest load on the processor, lowest temperatures, highest boost clock
         # 'AVX':    medium load on the processor, medium temperatures, medium boost clock
         # 'AVX2':   heaviest on the processor, highest temperatures, lowest boost clock
         # 'CUSTOM': you can define your own settings (see further below for setting the values)
+        # Default: 'SSE'
         mode = 'SSE'
 
 
@@ -264,6 +374,7 @@ function Get-Settings {
         # 'Small':     Small FFT:    36K to 248K   - tests L1/L2/L3 caches, maximum power/heat/CPU stress
         # 'Large':     Large FFT:    426K to 8192K - stresses memory controller and RAM (although memory testing is disabled here by default!)
         # 'All':       All FFT:      4K to 8192K   - all of the above
+        # Default: 'Small'
         FFTSize = 'Small'
 
 
@@ -348,9 +459,11 @@ function Get-Settings {
     # Set the default settings
     $settings = $defaultSettings
 
-
-    # The full path and name of the log file
-    $Script:logfilePath = $PSScriptRoot + '\logs\' + $settings.logfile + '_' + $curDateTime + '_' + $settings.mode + '.log'
+    # Set the temporary name and path for the logfile
+    # We need it because of the Exit-WithFatalError calls below
+    # We don't have all the information yet though, so the name and path will be overwritten after all the user settings have been parsed
+    $Script:logFileName         = $settings.logfile + '_' + $curDateTime + '.log'
+    $Script:logFileFullPath     = $logFilePathAbsolute + $logFileName
 
 
     # If no config file exists, copy the config.default.ini to config.ini
@@ -378,11 +491,22 @@ function Get-Settings {
     catch {
         Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
 
+        if (!(Test-Path 'config.default.ini' -PathType leaf)) {
+            Exit-WithFatalError('Neither config.ini nor config.default.ini found!')
+        }
+
         Copy-Item -Path 'config.default.ini' -Destination 'config.ini'
         $userSettings = Get-Content -raw 'config.ini' | ConvertFrom-StringData
     }
 
 
+    # Certain setting values are strings
+    $settingsWithStrings = @('stressTestProgram', 'logfile', 'mode', 'FFTSize')
+
+    # Lowercase for certain settings
+    $settingsToLowercase = @('stressTestProgram')
+
+    # Go through each user setting
     foreach ($entry in $userSettings.GetEnumerator()) {
         # Special handling for coresToIgnore
         if ($entry.Name -eq 'coresToIgnore') {
@@ -396,9 +520,15 @@ function Get-Settings {
 
         # Setting cannot be empty
         elseif ($entry.Value -and ![string]::IsNullOrEmpty($entry.Value) -and ![String]::IsNullOrWhiteSpace($entry.Value)) {
-            # For anything but the mode, logfile, and FFTSize parameters, transform the value to an integer
-            if ($entry.Name -eq 'logfile' -or $entry.Name -eq 'mode' -or $entry.Name -eq 'FFTSize') {
-                $settings[$entry.Name] = [String]$entry.Value
+            
+            # String values
+            if ($settingsWithStrings.Contains($entry.Name)) {
+                if ($settingsToLowercase.Contains($entry.Name)) {
+                    $settings[$entry.Name] = ([String]$entry.Value).ToLower()
+                }
+                else {
+                    $settings[$entry.Name] = [String]$entry.Value
+                }
             }
 
             # Parse the runtime per core (seconds, minutes, hours)
@@ -416,6 +546,7 @@ function Get-Settings {
                 }
             }
 
+            # Regular values, treat as integer
             else {
                 $settings[$entry.Name] = [Int]$entry.Value
             }
@@ -430,8 +561,19 @@ function Get-Settings {
     $settings.numberOfThreads = $(if ($isHyperthreadingEnabled) { $settings.numberOfThreads } else { 1 })
 
 
+    # Default the stress test program to prime95
+    if (!$settings.stressTestProgram -or !$stressTestPrograms.Contains($settings.stressTestProgram)) {
+        $settings.stressTestProgram = 'prime95'
+    }
+
+
     # Store in the global variable
     $Script:settings = $settings
+
+
+    # Set the final full path and name of the log file
+    $Script:logFileName         = $settings.logfile + '_' + $curDateTime + '_' + $settings.stressTestProgram.ToUpper() + '_' + $settings.mode + '.log'
+    $Script:logFileFullPath     = $logFilePathAbsolute + $logFileName
 }
 
 
@@ -542,33 +684,72 @@ function Get-TortureWeakValue {
 
 
 <##
- # Get the main window handler for the Prime95 process
+ # Get the main window handler for the selected stress test program process
  # Even if minimized to the tray
  # .PARAM void
  # .RETURN void
  #>
-function Get-Prime95WindowHandler {
-    # 'Prime95 - Self-Test': worker running
-    # 'Prime95 - Not running': worker not running anymore
-    # 'Prime95 - Waiting for work': worker not running, tried to start, no worker started
-    # 'Prime95': worker not yet started
+function Get-StressTestWindowHandler {
+    $stressTestProcessId = $null
+
+    Write-Verbose('Trying to get the stress test program window handler');
+    Write-Verbose('Looking for these window names:')
+    Write-Verbose(($stressTestPrograms[$settings.stressTestProgram]['windowNames'] -Join ', '))
+
     $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
-            $_.WinTitle -eq 'Prime95 - Self-Test' `
-        -or $_.WinTitle -eq 'Prime95 - Not running' `
-        -or $_.WinTitle -eq 'Prime95 - Waiting for work' `
-        -or $_.WinTitle -eq 'Prime95'
+        $_.WinTitle -Match ($stressTestPrograms[$settings.stressTestProgram]['windowNames'] -Join '|')
     }
 
-    # There might be another window open with the name "Prime95"
+    #Write-Verbose('Found window objects:')
+    #Write-Text((Write-Output($windowObj | Format-Table | Out-String)).Trim())
+
+    $windowObj | ForEach-Object {
+        Write-Verbose('WinTitle:  ' + $_.WinTitle)
+        Write-Verbose('ProcessId: ' + $_.ProcessId)
+        
+        #$thisProcess = (Get-Process -Id $_.ProcessId)
+        #Write-Text('Process:   ')
+        #Write-Text((Write-Output($thisProcess | Format-Table | Out-String)).Trim())
+        
+        Write-Verbose('Process Path: ' + $_.Path)
+    }
+
+    # There might be another window open with the same name as the stress test program (e.g. an Explorer window)
     # Select the correct one
-    $filteredWindowObj = $windowObj | Where-Object {(Get-Process -Id $_.ProcessId).Path -like '*prime95.exe'}
+    $filteredWindowObj = $windowObj | Where-Object {(Get-Process -Id $_.ProcessId).Path -like ('*' + $fileName)}
+
+    # Also, the process performing the stress test can actually be different to the main window of the stress test program
+    if ($stressTestPrograms[$settings.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad']) {
+        Write-Verbose('The process performing the stress test is NOT the same as the main window!')
+        Write-Verbose('Searching for the stress test process id...')
+        
+        try {
+            $stressTestProcess   = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] -ErrorAction Stop
+            $stressTestProcessId = $stressTestProcess.Id
+
+            Write-Verbose('Found with ID: ' + $stressTestProcessId)
+        }
+        catch {
+            Exit-WithFatalError('Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] + ')')
+        }
+    }
+
+    # The stress test and the main window are the same process
+    else {
+        $stressTestProcess   = $windowProcess # This one already exists outside the function
+        $stressTestProcessId = $filteredWindowObj.ProcessId
+    }
+
 
     # Override the global script variables
     $Script:processWindowHandler = $filteredWindowObj.MainWindowHandle
-    $Script:processId = $filteredWindowObj.ProcessId
+    $Script:windowProcessId      = $filteredWindowObj.ProcessId
+    $Script:stressTestProcess    = $stressTestProcess
+    $Script:stressTestProcessId  = $stressTestProcessId
 
-    Write-Verbose('Prime95 window handler: ' + $processWindowHandler)
-    Write-Verbose('Prime95 process ID:     ' + $processId)
+    Write-Verbose('Stress test window handler:    ' + $processWindowHandler)
+    Write-Verbose('Stress test window process ID: ' + $windowProcessId)
+    Write-Verbose('Stress test process ID:        ' + $stressTestProcessId)
 }
 
 
@@ -581,21 +762,21 @@ function Start-Prime95 {
     Write-Verbose('Starting Prime95')
 
     # Minimized to the tray
-    $Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Hidden
+    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
-    #$Script:process = Start-Process -filepath $primePath -ArgumentList '-t' -PassThru -WindowStyle Minimized
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
     
-    if (!$Script:process) {
-        Exit-WithFatalError('Could not start process ' + $processName + '!')
+    if (!$Script:windowProcess) {
+        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['prime95']['processName'] + '!')
     }
 
     # Get the main window handler
     # This also works for windows minimized to the tray
-    Get-Prime95WindowHandler
+    Get-StressTestWindowHandler
     
     # This is to find the exact counter path, as you might have multiple processes with the same name
     try {
@@ -604,7 +785,7 @@ function Start-Prime95 {
             $counterPathName = $args[0].'FullName'
             $processId = $args[1]
             ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
-        } -ArgumentList $counterNames, $processId | Wait-Job | Receive-Job
+        } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
         if (!$processCounterPathId) {
             Exit-WithFatalError('Could not find the counter path for the Prime95 instance!')
@@ -634,8 +815,9 @@ function Initialize-Prime95 {
         $configType
     )
 
-    $configFile1 = $processPath + 'local.txt'
-    $configFile2 = $processPath + 'prime.txt'
+    $configFile1 = $stressTestPrograms['prime95']['absolutePath'] + 'local.txt'
+    $configFile2 = $stressTestPrograms['prime95']['absolutePath'] + 'prime.txt'
+
 
     if ($configType -ne 'CUSTOM' -and $configType -ne 'SSE' -and $configType -ne 'AVX' -and $configType -ne 'AVX2') {
         Exit-WithFatalError('Invalid mode type provided!')
@@ -661,9 +843,17 @@ function Initialize-Prime95 {
     
     # Create the prime.txt and overwrite if necessary
     $null = New-Item $configFile2 -ItemType File -Force
+
+    # There's an 80 character limit for the ini settings, so we're using an ugly workaround to put the log file into the /logs/ directory:
+    # - set the working dir to the logs directory
+    # - then set the paths to the prime.txt and local.txt relative to that logs directory
+    Set-Content $configFile2 ('WorkingDir='  + $PSScriptRoot)
     
     # Set the custom results.txt file name
-    Set-Content $configFile2 ('results.txt=' + $primeResultsName)
+    Add-Content $configFile2 ('prime.ini='   + $stressTestPrograms['prime95']['processPath'] + '\prime.txt')
+    Add-Content $configFile2 ('local.ini='   + $stressTestPrograms['prime95']['processPath'] + '\local.txt')
+    Add-Content $configFile2 ('results.txt=' + $logFilePath + '\' + $primeResultsName)
+    Add-Content $configFile2 ('prime.log='   + $logFilePath + '\' + $primeLogName)
     
     # Custom settings
     if ($configType -eq 'CUSTOM') {
@@ -694,6 +884,7 @@ function Initialize-Prime95 {
     Add-Content $configFile2 'StressTester=1'
     Add-Content $configFile2 'UsePrimenet=0'
     Add-Content $configFile2 'ExitOnX=1'
+    Add-Content $configFile2 'ResultsFileTimestampInterval=60'
     Add-Content $configFile2 '[PrimeNet]'
     Add-Content $configFile2 'Debug=0'
 }
@@ -710,12 +901,12 @@ function Close-Prime95 {
     # If there is no processWindowHandler id
     # Try to get it
     if (!$processWindowHandler) {
-        Get-Prime95WindowHandler
+        Get-StressTestWindowHandler
     }
     
     # If we now have a processWindowHandler, try to close the window
     if ($processWindowHandler) {
-        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
 
         Write-Verbose('Trying to gracefully close Prime95')
         
@@ -725,25 +916,188 @@ function Close-Prime95 {
         }
 
         # We've send the close request, let's wait up to 2 seconds
-        elseif ($process -and !$process.HasExited) {
+        elseif ($windowProcess -and !$windowProcess.HasExited) {
             #'Waiting for the exit'
-            $null = $process.WaitForExit(3000)
+            $null = $windowProcess.WaitForExit(3000)
         }
     }
     
     
     # If the window is still here at this point, just kill the process
-    $process = Get-Process $processName -ErrorAction SilentlyContinue
+    $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
 
-    if ($process) {
+    if ($windowProcess) {
         Write-Verbose('Could not gracefully close Prime95, killing the process')
         
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
-        Stop-Process $process.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process $windowProcess.Id -Force -ErrorAction SilentlyContinue
     }
     else {
         Write-Verbose('Prime95 closed')
+    }
+}
+
+
+
+<##
+ # Open Aida64
+ # .PARAM void
+ # .RETURN void
+ #>
+function Start-Aida64 {
+    Write-Verbose('Starting Aida64')
+
+    # Cache or RAM
+    $thisMode = 'Cache'
+
+    # Minimized to the tray
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Hidden
+    
+    # Minimized to the task bar
+    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Minimized
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru
+
+    # Aida64 takes some additional time to load
+    # Check for the stress test process, if it's loaded, we're ready to go
+    Write-Verbose('Waiting for Aida64 to load...')
+    for ($i = 1; $i -le 30; $i++) {
+        Start-Sleep -Milliseconds 500
+
+        $stressTestProcess  = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] -ErrorAction SilentlyContinue
+
+        if ($stressTestProcess) {
+            break
+        }
+    }
+
+    
+    
+    if (!$Script:windowProcess) {
+        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['aida64']['processName'] + '!')
+    }
+
+    # Get the main window handler
+    # This also works for windows minimized to the tray
+    Get-StressTestWindowHandler
+
+    # This is to find the exact counter path, as you might have multiple processes with the same name
+    try {
+        # Start a background job to get around the cached Get-Counter value
+        $Script:processCounterPathId = Start-Job -ScriptBlock { 
+            $counterPathName = $args[0].'FullName'
+            $processId = $args[1]
+            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+        } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
+
+        if (!$processCounterPathId) {
+            Exit-WithFatalError('Could not find the counter path for the Aida64 instance!')
+        }
+
+        $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+
+        Write-Verbose('The Performance Process Counter Path for the ID:')
+        Write-Verbose($processCounterPathId)
+        Write-Verbose('The Performance Process Counter Path for the Time:')
+        Write-Verbose($processCounterPathTime)
+    }
+    catch {
+        #'Could not get the process path'
+    }
+}
+
+
+<##
+ # Close Aida64
+ # .PARAM void
+ # .RETURN void
+ #>
+function Close-Aida64 {
+    Write-Verbose('Closing Aida64')
+
+    # If there is no processWindowHandler id
+    # Try to get it
+    if (!$processWindowHandler) {
+        Get-StressTestWindowHandler
+    }
+
+    # The stress test window cannot be closed gracefully, as it has no main window
+    # So just kill it
+    $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction SilentlyContinue
+    
+    if ($stressTestProcess) {
+        Stop-Process $stressTestProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    
+
+    # If we now have a processWindowHandler, first try to close the main window gracefully
+    if ($processWindowHandler) {
+        Write-Verbose('Trying to gracefully close Aida64')
+        
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
+
+        # This returns false if no window is found with this handle
+        if (![Win32]::SendMessage($processWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
+            #'Process Window not found!'
+        }
+
+        # We've send the close request, let's wait up to 3 seconds
+        elseif ($windowProcess -and !$windowProcess.HasExited) {
+            #'Waiting for the exit'
+            $null = $windowProcess.WaitForExit(3000)
+        }
+    }
+    
+    
+    # If the window is still here at this point, just kill the process
+    $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
+
+    if ($windowProcess) {
+        Write-Verbose('Could not gracefully close Aida64, killing the process')
+        
+        # Unfortunately this will leave any tray icons behind
+        Stop-Process $windowProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    else {
+        Write-Verbose('Aida64 closed')
+    }
+}
+
+
+<##
+ # Start the selected stress test program
+ # .PARAM void
+ # .RETURN void
+ #>
+function Start-StressTestProgram {
+    if ($settings.stressTestProgram -eq 'prime95') {
+        Start-Prime95
+    }
+    elseif ($settings.stressTestProgram -eq 'aida64') {
+        Write-Verbose('AIDA64 not fully implemented yet!')
+        Start-Aida64
+    }
+    else {
+        Exit-WithFatalError('No stress test program selected!')
+    }
+}
+
+
+<##
+ # Close the selected stress test program
+ # .PARAM void
+ # .RETURN void
+ #>
+function Close-StressTestProgram {
+    if ($settings.stressTestProgram -eq 'prime95') {
+        Close-Prime95
+    }
+    elseif ($settings.stressTestProgram -eq 'aida64') {
+        Write-Verbose('AIDA64 not fully implemented yet!')
+        Close-Aida64
+    }
+    else {
+        Exit-WithFatalError('No stress test program selected!')
     }
 }
 
@@ -761,7 +1115,7 @@ function Test-ProcessUsage {
 
     $timestamp = Get-Date -format HH:mm:ss
     
-    # The minimum CPU usage for Prime95, below which it should be treated as an error
+    # The minimum CPU usage for the stress test program, below which it should be treated as an error
     # We need to account for the number of threads
     # Min. 1.5%
     # 100/32=   3,125% for 1 thread out of 32 threads
@@ -770,27 +1124,32 @@ function Test-ProcessUsage {
     # 100/24*2= 8,334% for 2 threads out of 24 threads
     # 100/12=   8,334% for 1 thread out of 12 threads
     # 100/12*2= 16,67% for 2 threads out of 12 threads
-    $minPrimeUsage = [Math]::Max(1.5, $expectedUsage - [Math]::Round(100 / $numLogicalCores, 2))
+    $minProcessUsage = [Math]::Max(1.5, $expectedUsage - [Math]::Round(100 / $numLogicalCores, 2))
     
     
     # Set to a string if there was an error
-    $primeError = $false
+    $stressTestError = $false
 
     # Get the content of the results.txt file
-    $resultFileHandle = Get-Item -Path $primeResultsPath -ErrorAction SilentlyContinue
+    $resultFileHandle = $false
+
+    if ($settings.stressTestProgram -eq 'prime95') {
+        $resultFileHandle = Get-Item -Path $primeResultsPath -ErrorAction SilentlyContinue
+    }
 
     # Does the process still exist?
-    $process = Get-Process $processName -ErrorAction SilentlyContinue
+    $stressTestProcess = Get-Process $processName -ErrorAction SilentlyContinue
     
 
     # 1. The process doesn't exist anymore, immediate error
-    if (!$process) {
-        $primeError = 'The Prime95 process doesn''t exist anymore.'
+    if (!$stressTestProcess) {
+        $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t exist anymore.'
     }
 
     
-    # 2. Parse the results.txt file and look for an error message
-    if (!$primeError) {
+    # 2. If using Prime95, parse the results.txt file and look for an error message
+    if (!$stressTestError -and $settings.stressTestProgram -eq 'prime95') {
+
         # Look for a line with an "error" string in the last 3 lines
         $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
         
@@ -822,33 +1181,37 @@ function Test-ProcessUsage {
                 Write-Verbose('Found an error:')
                 Write-Verbose((Write-Output($lastError | Format-Table | Out-String)).Trim())
 
-                $primeError = $primeResults
+                $stressTestError = $primeResults
             }
         }
     }
 
 
     # 3. Check if the process is still using enough CPU process power
-    if (!$primeError) {
+    if (!$stressTestError) {
         # Get the CPU percentage
         $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
         
         Write-Verbose($timestamp + ' - ...checking CPU usage: ' + $processCPUPercentage + '%')
 
         # It doesn't use enough CPU power
-        if ($processCPUPercentage -le $minPrimeUsage) {
-            # Try to read the error from Prime95's results.txt
-            # Look for a line with an "error" string in the last 3 lines
-            $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
+        if ($processCPUPercentage -le $minProcessUsage) {
 
-            # Found the "error" string in the results.txt
-            if ($primeResults.Length -gt 0) {
-                $primeError = $primeResults
+            # For Prime95
+            if ($settings.stressTestProgram -eq 'prime95') {
+                # Try to read the error from Prime95's results.txt
+                # Look for a line with an "error" string in the last 3 lines
+                $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
+
+                # Found the "error" string in the results.txt
+                if ($primeResults.Length -gt 0) {
+                    $stressTestError = $primeResults
+                }
             }
 
             # Error string not found
             # This might have been a false alarm, wait a bit and try again
-            else {
+            if (!$stressTestError) {
                 $waitTime = 2000
 
                 Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
@@ -872,16 +1235,16 @@ function Test-ProcessUsage {
                 Write-Verbose($timestamp + ' - ...checking CPU usage again: ' + $thisProcessCPUPercentage + '%')
 
                 # Still below the minimum usage
-                if ($processCPUPercentage -le $minPrimeUsage) {
+                if ($processCPUPercentage -le $minProcessUsage) {
                     # We don't care about an error string here anymore
-                    $primeError = 'The Prime95 process doesn''t use enough CPU power anymore (only ' + $processCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
+                    $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $processCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
                 }
             }
         }
     }
 
 
-    if ($primeError) {
+    if ($stressTestError) {
         # Store the core number in the array
         $Script:coresWithError += $coreNumber
 
@@ -899,61 +1262,64 @@ function Test-ProcessUsage {
         }
 
 
-        # Try to close the Prime95 process if it is still running
-        Close-Prime95
+        # Try to close the stress test program process if it is still running
+        Close-StressTestProgram
         
         
         # Put out an error message
         $timestamp = Get-Date -format HH:mm:ss
         Write-ColorText('ERROR: ' + $timestamp) Magenta
-        Write-ColorText('ERROR: Prime95 seems to have stopped with an error!') Magenta
+        Write-ColorText('ERROR: ' + $selectedStressTestProgram + ' seems to have stopped with an error!') Magenta
         Write-ColorText('ERROR: At Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')') Magenta
-        Write-ColorText('ERROR MESSAGE: ' + $primeError) Magenta
+        Write-ColorText('ERROR MESSAGE: ' + $stressTestError) Magenta
         
-        # DEBUG
-        # Also add the 5 last rows of the results.txt file
-        #Write-Text('LAST 5 ROWS OF RESULTS.TXT:')
-        #Write-Text(Get-Item -Path $primeResultsPath | Get-Content -Tail 5)
-        
-        # Try to determine the last run FFT size
-        # If the results.txt doesn't exist, assume that it was on the very first iteration
-        if (!$resultFileHandle) {
-            $lastRunFFT = $minFFTSize
-        }
-        
-        # Get the last couple of rows and find the last passed FFT size
-        else {
-            $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
-            $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-            $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
-            $lastPassedFFT    = if ($matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+
+        if ($settings.stressTestProgram -eq 'prime95') {
+            # DEBUG
+            # Also add the 5 last rows of the results.txt file
+            #Write-Text('LAST 5 ROWS OF RESULTS.TXT:')
+            #Write-Text(Get-Item -Path $primeResultsPath | Get-Content -Tail 5)
             
-            # No passed FFT was found, assume it's the first FFT size
-            if (!$lastPassedFFT) {
+            # Try to determine the last run FFT size
+            # If the results.txt doesn't exist, assume that it was on the very first iteration
+            if (!$resultFileHandle) {
                 $lastRunFFT = $minFFTSize
             }
-
-            # If the last passed FFT size is the max selected FFT size, start at the beginning
-            elseif ($lastPassedFFT -eq $maxFFTSize) {
-                $lastRunFFT = $minFFTSize
-            }
-
-            # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
-            # In this case, we also assume that it successfully completed the max value and errored at the min FFT size
-            # Example: Smallest FFT max = 21, but the actual last size tested is 20K
-            elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
-                $lastRunFFT = $minFFTSize
-            }
-
-            # If it's not the max value and it does show up in the FFT array, select the next value
+            
+            # Get the last couple of rows and find the last passed FFT size
             else {
-                $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
+                $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
+                $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
+                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+                $lastPassedFFT    = if ($matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+                
+                # No passed FFT was found, assume it's the first FFT size
+                if (!$lastPassedFFT) {
+                    $lastRunFFT = $minFFTSize
+                }
+
+                # If the last passed FFT size is the max selected FFT size, start at the beginning
+                elseif ($lastPassedFFT -eq $maxFFTSize) {
+                    $lastRunFFT = $minFFTSize
+                }
+
+                # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
+                # In this case, we also assume that it successfully completed the max value and errored at the min FFT size
+                # Example: Smallest FFT max = 21, but the actual last size tested is 20K
+                elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
+                    $lastRunFFT = $minFFTSize
+                }
+
+                # If it's not the max value and it does show up in the FFT array, select the next value
+                else {
+                    $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
+                }
             }
-        }
-        
-        # Educated guess
-        if ($lastRunFFT) {
-            Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
+            
+            # Educated guess
+            if ($lastRunFFT) {
+                Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
+            }
         }
 
 
@@ -962,35 +1328,36 @@ function Test-ProcessUsage {
             Write-Text('')
             Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
-            # Display the results.txt file name for Prime95 for this run
-            Write-Text('')
-            Write-ColorText('Prime95''s results log file can be found at:') Cyan
-            Write-ColorText($primeResultsPath) Cyan
+            if ($settings.stressTestProgram -eq 'prime95') {
+                # Display the results.txt file name for Prime95 for this run
+                Write-Text('')
+                Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                Write-ColorText($primeResultsPath) Cyan
+            }
 
             # And the name of the log file for this run
             Write-Text('')
             Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
-            Write-ColorText($logfilePath) Cyan
+            Write-ColorText($logfileFullPath) Cyan
             Write-Text('')
             
-            Read-Host -Prompt 'Press Enter to exit'
-            exit
+            Exit-Script
         }
         
 
-        # Try to restart Prime95 and continue with the next core
+        # Try to restart the stress test program and continue with the next core
         # Don't try to restart here if $settings.restartPrimeForEachCore is set
         if (!$settings.restartPrimeForEachCore) {
             $timestamp = Get-Date -format HH:mm:ss
-            Write-Text($timestamp + ' - Trying to restart Prime95')
+            Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
             
-            # Start Prime95 again
-            Start-Prime95
+            # Start the stress test program again
+            Start-StressTestProgram
         }
         
         
         # Throw an error to let the caller know there was an error
-        throw 'Prime95 seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')'
+        throw ($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
     }
 }
 
@@ -1003,12 +1370,15 @@ function Test-ProcessUsage {
 
 # Get the localized counter names
 try {
-    $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
-    $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
-    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
-    $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
-    $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
-    $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
+    $counterNames['Process']                 = Get-PerformanceCounterLocalName $counterNameIds['Process']
+    $counterNames['ID Process']              = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
+    $counterNames['% Processor Time']        = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
+    #$counterNames['Processor Information' ]  = Get-PerformanceCounterLocalName $counterNameIds['Processor Information']
+    #$counterNames['% Processor Performance'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Performance']
+    #$counterNames['% Processor Utility']     = Get-PerformanceCounterLocalName $counterNameIds['% Processor Utility']
+    $counterNames['FullName']                = '\' + $counterNames['Process'] + '(*)\' + $counterNames['ID Process']
+    $counterNames['SearchString']            = '\\' + $counterNames['ID Process'] + '$'
+    $counterNames['ReplaceString']           = '\' + $counterNames['% Processor Time']
 }
 catch {
     Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
@@ -1019,8 +1389,7 @@ catch {
 
     $Error
 
-    Read-Host -Prompt 'Press Enter to exit'
-    exit
+    Exit-Script
 }
 
 
@@ -1044,8 +1413,7 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
     Write-Host 'You can download .NET 3.5 here:' -ForegroundColor Yellow
     Write-Host 'https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10' -ForegroundColor Cyan
     
-    Read-Host -Prompt 'Press Enter to exit'
-    exit
+    Exit-WithFatalError
 }
 
 # Clear the error variable, it may have been populated by the above calls
@@ -1074,8 +1442,7 @@ if (!$counter) {
     Write-Host 'The localized counter name that was tried to access was:' -ForegroundColor Yellow
     Write-Host ('"' + $counterNames['FullName'] + '"') -ForegroundColor Yellow
 
-    Read-Host -Prompt 'Press Enter to exit'
-    exit
+    Exit-WithFatalError
 }
 
 
@@ -1088,19 +1455,41 @@ Add-Type -TypeDefinition $CloseWindowDefinition
 # Get the default and the user settings
 Get-Settings
 
+# The name of the selected stress test program
+$selectedStressTestProgram = $stressTestPrograms[$settings.stressTestProgram]['displayName']
+
+# Set the correct process name
+# Eventually this could be something different than just Prime95
+if ($stressTestPrograms.Contains($settings.stressTestProgram)) {
+    $processName = $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad']
+}
+
+# Default is Prime95
+else {
+    $processName = $stressTestPrograms['prime95']['processNameForLoad']
+}
 
 
-# The Prime95 process
-$process = Get-Process $processName -ErrorAction SilentlyContinue
+# Check if the stress test process is already running
+$stressTestProcess = Get-Process $processName -ErrorAction SilentlyContinue
+
+# Some programs share the same process for stress testing and for displaying the main window, and some not
+if ($stressTestProgramsWithSameProcess.Contains($settings.stressTestProgram)) {
+    $windowProcess = $stressTestProcess
+}
+else {
+    $windowProcess = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processName'] -ErrorAction SilentlyContinue
+}
 
 
-# The expected CPU usage for the running Prime95 process
+
+# The expected CPU usage for the running stress test process
 # The selected number of threads should be at 100%, so e.g. for 1 thread out of 24 threads this is 100/24*1= 4.17%
-# Used to determine if Prime95 is still running or has thrown an error
+# Used to determine if the stress test is still running or has thrown an error
 $expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThreads, 2)
 
 
-# Store all the cores that have thrown an error in Prime95
+# Store all the cores that have thrown an error in the stress test
 # These cores will be skipped on the next iteration
 [Int[]] $coresWithError = @()
 
@@ -1152,12 +1541,12 @@ $prime95CPUSettings = @{
 }
 
 
-# The various FFT sizes
+# The various FFT sizes for Prime95
 # Used to determine where an error likely happened
 # Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
-# SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 327688192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
-# AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192
-# AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192
+# SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000,        16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
+# AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752,        11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768
+# AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200 [...TODO]
 $FFTSizes = @{
     SSE = @(
         # Smallest FFT
@@ -1179,8 +1568,8 @@ $FFTSizes = @{
 
         # Not used in Prime95 presets
         # 32768 seems to be the maximum FFT size possible
-        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 20480, 
-        21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
+        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
+        22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
     )
 
     AVX = @(
@@ -1202,7 +1591,8 @@ $FFTSizes = @{
         6400, 6720, 6912, 7168, 7680, 8000, 8192
 
         # Not used in Prime95 presets
-        # TODO: after 8192 for AVX
+        8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
+        22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
     )
 
 
@@ -1225,7 +1615,9 @@ $FFTSizes = @{
         6400, 6720, 7168, 7680, 8000, 8064, 8192
 
         # Not used in Prime95 presets
-        # TODO: after 8192 for AVX2
+        # TODO: this is still incomplete!
+        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
+        21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
     )
 }
 
@@ -1235,24 +1627,27 @@ $FFTSizes = @{
 # depending on the selected test mode (SSE, AVX, AVX2)
 $FFTMinMaxValues = @{
     SSE = @{
-        Smallest = @{ Min =   4; Max =   20; }  # Originally   4 ...   21
-        Small    = @{ Min =  40; Max =  240; }  # Originally  36 ...  248
-        Large    = @{ Min = 448; Max = 8192; }  # Originally 426 ... 8192
-        All      = @{ Min =   4; Max = 8192; }  # Originally   4 ... 8192
+        Smallest = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
+        Small    = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
+        Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+        Largest  = @{ Min = 8960; Max = 32768; }  # New addition
+        All      = @{ Min =    4; Max = 32768; }
     }
 
     AVX = @{
-        Smallest = @{ Min =   4; Max =   21; }  # Originally   4 ...   21
-        Small    = @{ Min =  36; Max =  240; }  # Originally  36 ...  248
-        Large    = @{ Min = 448; Max = 8192; }  # Originally 426 ... 8192
-        All      = @{ Min =   4; Max = 8192; }  # Originally   4 ... 8192
+        Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+        Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+        Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+        Largest  = @{ Min = 8960; Max = 32768; }  # New addition
+        All      = @{ Min =    4; Max = 32768; }
     }
 
     AVX2 = @{
-        Smallest = @{ Min =   4; Max =   21; }  # Originally   4 ...   21
-        Small    = @{ Min =  36; Max =  240; }  # Originally  36 ...  248
-        Large    = @{ Min = 448; Max = 8192; }  # Originally 426 ... 8192
-        All      = @{ Min =   4; Max = 8192; }  # Originally   4 ... 8192
+        Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+        Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+        Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+        Largest  = @{ Min = 8960; Max = 51200; }  # New addition / TODO
+        All      = @{ Min =    4; Max = 51200; }  # TODO
     }
 }
 
@@ -1287,24 +1682,34 @@ if ($settings.mode -eq 'CUSTOM') {
 
 
 # The Prime95 results.txt file name for this run
-$primeResultsName = 'results_CoreCycler_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
-$primeResultsPath = $processPath + $primeResultsName
+$primeResultsName = 'Prime95_results_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+$primeResultsPath = $logFilePathAbsolute + $primeResultsName
+$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+$primeLogPath = $logFilePathAbsolute + $primeLogName
 
 
 
-# Close all existing instances of Prime95 and start a new one with our config
-if ($process) {
-    Write-Verbose('There already exists an instance of Prime95, trying to close it')
-    Write-Verbose('ID: ' + $process.Id + ' - ProcessName: ' + $process.ProcessName)
+# Close all existing instances of the stress test program and start a new one with our config
+if ($stressTestProcess -or $windowProcess) {
+    Write-Verbose('There already exists an instance of ' + $selectedStressTestProgram + ', trying to close it')
 
-    Close-Prime95
+    if ($windowProcess) {
+        Write-Verbose('Window Process ID: ' + $windowProcess.Id + ' - ProcessName: ' + $windowProcess.ProcessName)
+    }
+    if ($stressTestProcess) {
+        Write-Verbose('Stress Test ID: ' + $stressTestProcess.Id + ' - ProcessName: ' + $stressTestProcess.ProcessName)
+    }
+
+    Close-StressTestProgram
 }
 
-# Create the config file
-Initialize-Prime95 $settings.mode
+# Create the config file for Prime95
+if ($settings.stressTestProgram -eq 'prime95') {
+    Initialize-Prime95 $settings.mode
+}
 
-# Start Prime95
-Start-Prime95
+# Start the stress test program
+Start-StressTestProgram
 
 
 # Get the current datetime
@@ -1316,17 +1721,34 @@ Write-ColorText('---------------------------------------------------------------
 Write-ColorText('----------- CoreCycler v' + $version + ' started at ' + $timestamp + ' -----------') Green
 Write-ColorText('---------------------------------------------------------------------------') Green
 
-# Display the number of logical & physical cores
-Write-ColorText('Found ' + $numLogicalCores + ' logical and ' + $numPhysCores + ' physical cores') Cyan
-Write-ColorText('Hyperthreading / SMT is: ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
-Write-ColorText('Selected number of threads: ' + $settings.numberOfThreads) Cyan
-Write-ColorText('Number of iterations: ' + $settings.maxIterations) Cyan
+# Verbosity
+if ($settings.verbosityMode -eq 1) {
+    Write-ColorText('Verbose mode is ENABLED: Writing to log file') Cyan
+}
+elseif ($settings.verbosityMode -eq 2) {
+    Write-ColorText('Verbose mode is ENABLED: Displaying in terminal') Cyan
+}
 
-# And the selected mode (SSE, AVX, AVX2)
-Write-ColorText('Selected mode: ' + $settings.mode) Cyan
+# Display some initial information
+Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpper()) Cyan
+Write-ColorText('Selected test mode: ....... ' + $settings.mode) Cyan
+Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
+Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
+Write-ColorText('Selected number of threads: ' + $settings.numberOfThreads) Cyan
+Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore)) Cyan
+Write-ColorText('Number of iterations: ..... ' + $settings.maxIterations) Cyan
+
+# Print a message if we're ignoring certain cores
+if ($settings.coresToIgnore.Length -gt 0) {
+    $settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
+    Write-ColorText('Ignored cores: ............ ' + $settings.coresToIgnoreString) Cyan
+    Write-ColorText('---------------------------------------------------------------------------') Cyan
+}
 
 if ($settings.mode -eq 'CUSTOM') {
+    Write-ColorText('') Cyan
     Write-ColorText('Custom settings:') Cyan
+    Write-ColorText('----------------') Cyan
     Write-ColorText('CpuSupportsAVX  = ' + $settings.customCpuSupportsAVX) Cyan
     Write-ColorText('CpuSupportsAVX2 = ' + $settings.customCpuSupportsAVX2) Cyan
     Write-ColorText('CpuSupportsFMA3 = ' + $settings.customCpuSupportsFMA3) Cyan
@@ -1336,44 +1758,35 @@ if ($settings.mode -eq 'CUSTOM') {
     Write-ColorText('TortureTime     = ' + $settings.customTortureTime) Cyan
 }
 else {
-    Write-ColorText('Selected FFT size: ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
-}
-
-# Verbosity
-if ($settings.verbosityMode -eq 1) {
-    Write-ColorText('Verbose mode is ENABLED: Writing to log file') Cyan
-}
-elseif ($settings.verbosityMode -eq 2) {
-    Write-ColorText('Verbose mode is ENABLED: Displaying in terminal') Cyan
+    if ($settings.stressTestProgram -eq 'prime95') {
+        Write-ColorText('Selected FFT size: ........ ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
+    }
 }
 
 Write-ColorText('---------------------------------------------------------------------------') Cyan
 
 
-# Print a message if we're ignoring certain cores
-if ($settings.coresToIgnore.Length -gt 0) {
-    $settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
-    Write-ColorText('Ignored cores: ' + $settings.coresToIgnoreString) Cyan
-    Write-ColorText('---------------------------------------------------------------------------') Cyan
+
+
+# Display the log file location(s)
+Write-ColorText('The log files for this run are stored in:') Cyan
+Write-ColorText($logFilePathAbsolute) Cyan
+Write-ColorText(' - CoreCycler:         ' + $logFileName) Cyan
+
+if ($settings.stressTestProgram -eq 'prime95') {
+    Write-ColorText(' - Prime95 Results:    ' + $primeResultsName) Cyan
+    Write-ColorText(' - Prime95 Output:     ' + $primeLogName) Cyan
 }
 
-
-# Display the results.txt file name for Prime95 for this run
-Write-ColorText('Prime95''s results are being stored in:') Cyan
-Write-ColorText($primeResultsPath) Cyan
-
-# And the name of the log file for this run
-Write-ColorText('') Cyan
-Write-ColorText('The path of the CoreCycler log file is:') Cyan
-Write-ColorText($logfilePath) Cyan
+Write-ColorText('---------------------------------------------------------------------------') Cyan
+Write-Text('')
 
 
-# Try to get the affinity of the Prime95 process. If not found, abort
+# Try to get the affinity of the stress test program process. If not found, abort
 try {
-    $null = $process.ProcessorAffinity
+    $null = $stressTestProcess.ProcessorAffinity
 
-    Write-Verbose('')
-    Write-Verbose('The current affinity of the process: ' + $process.ProcessorAffinity)
+    Write-Verbose('The current affinity of the process: ' + $stressTestProcess.ProcessorAffinity)
 }
 catch {
     Exit-WithFatalError('Process ' + $processName + ' not found!')
@@ -1394,12 +1807,11 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
 
     # Check if all of the cores have thrown an error, and if so, abort
     if ($coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
-        # Also close the Prime95 process to not let it run unnecessarily
-        Close-Prime95
+        # Also close the stress test program process to not let it run unnecessarily
+        Close-StressTestProgram
         
         Write-Text($timestamp + ' - All Cores have thrown an error, aborting!')
-        Read-Host -Prompt 'Press Enter to exit'
-        exit
+        Exit-Script
     }
 
 
@@ -1454,9 +1866,9 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             continue
         }
 
-        # If $settings.restartPrimeForEachCore is set, restart Prime95 for each core
+        # If $settings.restartPrimeForEachCore is set, restart the stress test program for each core
         if ($settings.restartPrimeForEachCore -and ($iteration -gt 1 -or $coreNumber -gt $coresToTest[0])) {
-            Close-Prime95
+            Close-StressTestProgram
 
             # If the delayBetweenCycles setting is set, wait for the defined amount
             if ($settings.delayBetweenCycles -gt 0) {
@@ -1468,7 +1880,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
                 Start-Sleep -Seconds $settings.delayBetweenCycles
             }
 
-            Start-Prime95
+            Start-StressTestProgram
         }
         
        
@@ -1480,7 +1892,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         try {
             Write-Verbose('Setting the affinity to ' + $affinity)
 
-            $process.ProcessorAffinity = [System.IntPtr][Int64]$affinity
+            $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64]$affinity
         }
         catch {
             # Apparently setting the affinity can fail on the first try, so make another attempt
@@ -1488,10 +1900,10 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             Start-Sleep -Milliseconds 300
 
             try {
-                $process.ProcessorAffinity = [System.IntPtr][Int64]$affinity
+                $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64]$affinity
             }
             catch {
-                Close-Prime95
+                Close-StressTestProgram
                 Exit-WithFatalError('Could not set the affinity to Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')!')                
             }
         }
@@ -1556,5 +1968,5 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
 # The CoreCycler has finished
 $timestamp = Get-Date -format HH:mm:ss
 Write-Text($timestamp + ' - CoreCycler finished')
-Close-Prime95
-Read-Host -Prompt 'Press Enter to exit'
+Close-StressTestProgram
+Exit-Script

@@ -1,0 +1,9 @@
+There are no files here because AIDA64 is not a free program and I'm not sure I'm allowed to provide it as part of this script.
+You can get AIDA64 here: https://www.aida64.com/downloads
+
+!! IMPORTANT !!
+You NEED to get the PORTABLE ENGINEER version and extract the zip file into this directory (not within a sub directory, so the binary aida64.exe should be directly here).
+The trial version is available for 30 days.
+
+The "regular" EXTREME version will NOT work, you NEED the ENGINEER one (or theoretically Business and Network Audit will also work, but I haven't tested this).
+See here: https://www.aida64.com/support/faq/creating-report-using-command-line
