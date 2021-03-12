@@ -32,6 +32,7 @@ $stressTestProcessId       = $null
 $processCounterPathId      = $null
 $processCounterPathTime    = $null
 $coresWithError            = $null
+$coresWithErrorsCounter    = $null
 $previousError             = $null
 $stressTestLogFileName     = $null
 $stressTestLogFilePath     = $null
@@ -407,6 +408,12 @@ function Get-Settings {
         #           1.5m = 1.5 minutes = 90 seconds
         # Default: 360
         runtimePerCore = 360
+
+
+        # Skip a core that has thrown an error on the following iterations
+        # If set to 0, this will test a core on the next iterations even if has thrown an error before
+        # Default: 1
+        skipOnError = 0
 
 
         # Stop the whole testing process if an error occurred
@@ -1470,6 +1477,9 @@ function Test-ProcessUsage {
         # Store the core number in the array
         $Script:coresWithError += $coreNumber
 
+        # Count the number of errors per core
+        $Script:coresWithErrorsCounter[$coreNumber]++ 
+
         # If Hyperthreading / SMT is enabled and the number of threads larger than 1
         if ($isHyperthreadingEnabled -and ($settings.numberOfThreads -gt 1)) {
             $cpuNumbersArray = @($coreNumber, ($coreNumber + 1))
@@ -1770,6 +1780,14 @@ $expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThread
 [Int[]] $coresWithError = @()
 
 
+# Count the number of errors for each cores if the skipOnError setting is 0
+$coresWithErrorsCounter = @{}
+
+for ($i = 0; $i -lt $numPhysCores; $i++) {
+    $coresWithErrorsCounter[$i] = 0
+}
+
+
 # Check the CPU usage each x seconds
 # Note: 15 seconds may fail if there was an error and Prime95 was restarted -> false positive
 #       20 seconds may work fine, but it's probably best to wait for longer on the first check
@@ -2065,8 +2083,8 @@ Write-ColorText('---------------------------------------------------------------
 # Display the log file location(s)
 Write-ColorText('The log files for this run are stored in:') Cyan
 Write-ColorText($logFilePathAbsolute) Cyan
-Write-ColorText(' - CoreCycler:'.PadRight(17, ' ') + $logFileName) Cyan
-Write-ColorText(' - ' + $settings.stressTestProgram.ToUpper() + ':'.PadRight(17, ' ') + $stressTestLogFileName) Cyan
+Write-ColorText((' - CoreCycler:').PadRight(17, ' ') + $logFileName) Cyan
+Write-ColorText((' - ' + $stressTestPrograms[$testProgram.Name]['displayName'] + ':').PadRight(17, ' ') + $stressTestLogFileName) Cyan
 Write-ColorText('---------------------------------------------------------------------------') Cyan
 Write-Text('')
 
@@ -2095,7 +2113,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     $timestamp = Get-Date -format HH:mm:ss
 
     # Check if all of the cores have thrown an error, and if so, abort
-    if ($coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
+    # Only if the skipOnError setting is set
+    if ($settings.skipOnError -and $coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
         # Also close the stress test program process to not let it run unnecessarily
         Close-StressTestProgram
         
@@ -2185,7 +2204,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         }
 
         # If this core is stored in the error core array
-        if ($coresWithError -contains $coreNumber) {
+        if ($settings.skipOnError -and $coresWithError -contains $coreNumber) {
             Write-Text($timestamp + ' - Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
             continue
         }
@@ -2233,6 +2252,15 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         }
 
         Write-Verbose('Successfully set the affinity to ' + $affinity)
+
+        # If this core is stored in the error core array and the skipOnError setting is not set, display the amount of errors
+        if (!$settings.skipOnError -and $coresWithError -contains $coreNumber) {
+            $text  = '           Note: This core has previously thrown ' + $coresWithErrorsCounter[$coreNumber] + ' error'
+            $text += $(if ($coresWithErrorsCounter[$coreNumber] -gt 1) {'s'})
+            
+            Write-Text($text)
+        }
+
         Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore) + '...')
 
 
@@ -2284,7 +2312,40 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     
     # Print out the cores that have thrown an error so far
     if ($coresWithError.Length -gt 0) {
-        Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
+        if ($settings.skipOnError) {
+            Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
+        }
+        else {
+            Write-ColorText('The following cores have thrown an error:') Blue
+
+            $coreWithTwoDigitsHasError = $false
+
+            foreach ($entry in $coresWithErrorsCounter.GetEnumerator()) {
+                if ( $entry.Name -gt 9 -and $entry.Value -gt 0) {
+                    $coreWithTwoDigitsHasError = $true
+                    break
+                }
+            }
+            
+            foreach ($entry in ($coresWithErrorsCounter.GetEnumerator() | Sort Name)) {
+                # No error, skip
+                if ($entry.Value -lt 1) {
+                    continue
+                }
+
+                $corePadding = $(if ($coreWithTwoDigitsHasError) {' '} else {''})
+                $coreText  = $(if ($entry.Name -lt 10) {$corePadding})
+                $coreText += $entry.Name.ToString()
+
+                $textErrors      = 'error'
+                $textIterations  = 'iteration'
+
+                $textErrors     += $(if ($entry.Value -gt 1) {'s'})
+                $textIterations += $(if ($iteration -gt 1) {'s'})
+
+                Write-ColorText('    - Core ' + $coreText + ': ' + $entry.Value.ToString() + ' ' + $textErrors + ' in ' + $iteration + ' ' + $textIterations) Blue
+            }
+        }
     }
 }
 
