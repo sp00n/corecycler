@@ -375,8 +375,8 @@ function Get-Settings {
         # RAM:   Starts Aida64 with the "Memory" stress test
         #
         # Default: SSE (for Prime95) resp. CACHE (for Aida64)
-        modePrime = SSE
-        modeAida  = CACHE
+        modePrime = 'SSE'
+        modeAida  = 'CACHE'
 
 
         # The FFT size preset to test
@@ -1318,7 +1318,7 @@ function Test-ProcessUsage {
                     $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
                     $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
                     $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
-                    $lastPassedFFT    = if ($matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+                    $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
                     
                     # No passed FFT was found, assume it's the first FFT size
                     if (!$lastPassedFFT) {
@@ -1347,8 +1347,35 @@ function Test-ProcessUsage {
                 if ($lastRunFFT) {
                     Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
                 }
+                else {
+                    Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
+                }
 
+                Write-Verbose('The last 5 entries in the results.txt:')
+                Write-Verbose($lastFiveRows -Join ', ')
 
+                Write-Text('')
+            }
+
+            # We're above Smallest / Small FFT, no real FFT size fail detection possible due to randomization of the order by Prime95
+            else {
+                $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
+                $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
+                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+                $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+                
+                if ($lastPassedFFT) {
+                    Write-ColorText('ERROR: The last *passed* FFT size before the error was: ' + $lastPassedFFT + 'K') Magenta 
+                    Write-ColorText('ERROR: Unfortunately FFT size fail detection only works for Smallest or Small FFT sizes.') Magenta 
+                }
+                else {
+                    Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
+                }
+
+                Write-Verbose('The last 5 entries in the results.txt:')
+                Write-Verbose($lastFiveRows -Join ', ')
+
+                Write-Text('')
             }
         }
 
@@ -1737,8 +1764,10 @@ if ($settings.stressTestProgram -eq 'prime95') {
 
 
     # The Prime95 results.txt file name for this run
-    $primeResultsName = 'Prime95_results_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    $primeResultsName = 'Prime95_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
     $primeResultsPath = $logFilePathAbsolute + $primeResultsName
+    
+    # Unfortunately prime.log only logs communications with the PrimeNet server
     #$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
     #$primeLogPath = $logFilePathAbsolute + $primeLogName
 }
@@ -1827,10 +1856,10 @@ Write-ColorText('---------------------------------------------------------------
 # Display the log file location(s)
 Write-ColorText('The log files for this run are stored in:') Cyan
 Write-ColorText($logFilePathAbsolute) Cyan
-Write-ColorText(' - CoreCycler:         ' + $logFileName) Cyan
+Write-ColorText(' - CoreCycler: ' + $logFileName) Cyan
 
 if ($settings.stressTestProgram -eq 'prime95') {
-    Write-ColorText(' - Prime95 Results:    ' + $primeResultsName) Cyan
+    Write-ColorText(' - Prime95:    ' + $primeResultsName) Cyan
     #Write-ColorText(' - Prime95 Output:     ' + $primeLogName) Cyan
 }
 
