@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.8.9
+    0.7.9.0
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.8.9'
+$version                = '0.7.9.0'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -27,6 +27,7 @@ $process                = $null
 $processCounterPathId   = $null
 $processCounterPathTime = $null
 $coresWithError         = $null
+$coresWithErrorsDetails = $null
 $previousError          = $null
 
 
@@ -313,6 +314,12 @@ function Get-Settings {
         #           1.5m = 1.5 minutes = 90 seconds
         # Default: 360
         runtimePerCore = 360
+
+
+        # Skip a core that has thrown an error on the following iterations
+        # If set to 0, this will test a core on the next iterations even if has thrown an error before
+        # Default: 1
+        skipOnError = 1
 
 
         # Stop the whole testing process if an error occurred
@@ -924,6 +931,9 @@ function Test-ProcessUsage {
         # Store the core number in the array
         $Script:coresWithError += $coreNumber
 
+        # Count the number of errors per core
+        $Script:coresWithErrorsCounter[$coreNumber]++ 
+
         # If Hyperthreading / SMT is enabled and the number of threads larger than 1
         if ($isHyperthreadingEnabled -and ($settings.numberOfThreads -gt 1)) {
             $cpuNumbersArray = @($coreNumber, ($coreNumber + 1))
@@ -1183,6 +1193,14 @@ $expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThread
 [Int[]] $coresWithError = @()
 
 
+# Count the number of errors for each cores if the skipOnError setting is 0
+$coresWithErrorsCounter = @{}
+
+for ($i = 0; $i -lt $numPhysCores; $i++) {
+    $coresWithErrorsCounter[$i] = 0
+}
+
+
 # Check the CPU usage each x seconds
 # Note: 15 seconds may fail if there was an error and Prime95 was restarted -> false positive
 #       20 seconds may work fine, but it's probably best to wait for longer on the first check
@@ -1415,17 +1433,33 @@ Write-ColorText('---------------------------------------------------------------
 Write-ColorText('----------- CoreCycler v' + $version + ' started at ' + $timestamp + ' -----------') Green
 Write-ColorText('---------------------------------------------------------------------------') Green
 
-# Display the number of logical & physical cores
-Write-ColorText('Found ' + $numLogicalCores + ' logical and ' + $numPhysCores + ' physical cores') Cyan
-Write-ColorText('Hyperthreading / SMT is: ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
-Write-ColorText('Selected number of threads: ' + $settings.numberOfThreads) Cyan
-Write-ColorText('Number of iterations: ' + $settings.maxIterations) Cyan
+# Verbosity
+if ($settings.verbosityMode -eq 1) {
+    Write-ColorText('Verbose mode is ENABLED: Writing to log file') Cyan
+}
+elseif ($settings.verbosityMode -eq 2) {
+    Write-ColorText('Verbose mode is ENABLED: Displaying in terminal') Cyan
+}
 
-# And the selected mode (SSE, AVX, AVX2)
-Write-ColorText('Selected mode: ' + $settings.mode) Cyan
+# Display some initial information
+Write-ColorText('Selected test mode: ....... ' + $settings.mode) Cyan
+Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
+Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
+Write-ColorText('Selected number of threads: ' + $settings.numberOfThreads) Cyan
+Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore)) Cyan
+Write-ColorText('Number of iterations: ..... ' + $settings.maxIterations) Cyan
+
+# Print a message if we're ignoring certain cores
+if ($settings.coresToIgnore.Length -gt 0) {
+    $settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
+    Write-ColorText('Ignored cores: ............ ' + $settings.coresToIgnoreString) Cyan
+}
 
 if ($settings.mode -eq 'CUSTOM') {
+    Write-ColorText('') Cyan
+    Write-ColorText('---------------------------------------------------------------------------') Cyan
     Write-ColorText('Custom settings:') Cyan
+    Write-ColorText('----------------') Cyan
     Write-ColorText('CpuSupportsAVX  = ' + $settings.customCpuSupportsAVX) Cyan
     Write-ColorText('CpuSupportsAVX2 = ' + $settings.customCpuSupportsAVX2) Cyan
     Write-ColorText('CpuSupportsFMA3 = ' + $settings.customCpuSupportsFMA3) Cyan
@@ -1435,27 +1469,12 @@ if ($settings.mode -eq 'CUSTOM') {
     Write-ColorText('TortureTime     = ' + $settings.customTortureTime) Cyan
 }
 else {
-    Write-ColorText('Selected FFT size: ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
-}
-
-# Verbosity
-if ($settings.verbosityMode -eq 1) {
-    Write-ColorText('Verbose mode is ENABLED: Writing to log file') Cyan
-}
-elseif ($settings.verbosityMode -eq 2) {
-    Write-ColorText('Verbose mode is ENABLED: Displaying in terminal') Cyan
+    if ($settings.stressTestProgram -eq 'prime95') {
+        Write-ColorText('Selected FFT size: ........ ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
+    }
 }
 
 Write-ColorText('---------------------------------------------------------------------------') Cyan
-
-
-# Print a message if we're ignoring certain cores
-if ($settings.coresToIgnore.Length -gt 0) {
-    $settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
-    Write-ColorText('Ignored cores: ' + $settings.coresToIgnoreString) Cyan
-    Write-ColorText('---------------------------------------------------------------------------') Cyan
-}
-
 
 # Display the results.txt file name for Prime95 for this run
 Write-ColorText('Prime95''s results are being stored in:') Cyan
@@ -1465,13 +1484,12 @@ Write-ColorText($primeResultsPath) Cyan
 Write-ColorText('') Cyan
 Write-ColorText('The path of the CoreCycler log file is:') Cyan
 Write-ColorText($logfilePath) Cyan
-
+Write-ColorText('---------------------------------------------------------------------------') Cyan
 
 # Try to get the affinity of the Prime95 process. If not found, abort
 try {
     $null = $process.ProcessorAffinity
 
-    Write-Verbose('')
     Write-Verbose('The current affinity of the process: ' + $process.ProcessorAffinity)
 }
 catch {
@@ -1492,7 +1510,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     $timestamp = Get-Date -format HH:mm:ss
 
     # Check if all of the cores have thrown an error, and if so, abort
-    if ($coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
+    # Only if the skipOnError setting is set
+    if ($settings.skipOnError -and $coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
         # Also close the Prime95 process to not let it run unnecessarily
         Close-Prime95
         
@@ -1547,8 +1566,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             continue
         }
 
-        # If this core is stored in the error core array
-        if ($coresWithError -contains $coreNumber) {
+        # If this core is stored in the error core array, skip it
+        if ($settings.skipOnError -and $coresWithError -contains $coreNumber) {
             Write-Text($timestamp + ' - Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
             continue
         }
@@ -1596,6 +1615,15 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         }
 
         Write-Verbose('Successfully set the affinity to ' + $affinity)
+        
+        # If this core is stored in the error core array and the skipOnError setting is not set, display the amount of errors
+        if (!$settings.skipOnError -and $coresWithError -contains $coreNumber) {
+            $text  = '           Note: This core has previously thrown ' + $coresWithErrorsCounter[$coreNumber] + ' error'
+            $text += $(if ($coresWithErrorsCounter[$coreNumber] -gt 1) {'s'})
+
+            Write-Text($text)
+        }
+
         Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.runtimePerCore) + '...')
 
 
@@ -1647,7 +1675,31 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     
     # Print out the cores that have thrown an error so far
     if ($coresWithError.Length -gt 0) {
-        Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
+        if ($settings.skipOnError) {
+            Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
+        }
+        else {
+            Write-ColorText('The following cores have thrown an error:') Blue
+            
+            foreach ($entry in ($coresWithErrorsCounter.GetEnumerator() | Sort Name)) {
+                # No error, skip
+                if ($entry.Value -lt 1) {
+                    continue
+                }
+
+                $coreText  = $(if ($entry.Name -lt 10) {' '})
+                $coreText += $entry.Name.ToString()
+
+                $textErrors      = 'error'
+                $textIterations  = 'iteration'
+
+                $textErrors     += $(if ($entry.Value -gt 1) {'s'})
+                $textIterations += $(if ($iteration -gt 1) {'s'})
+
+                Write-ColorText('    - Core ' + $coreText + ': ' + $entry.Value.ToString() + ' ' + $textErrors + ' in ' + $iteration + ' ' + $textIterations) Blue
+            }
+        }
+        
     }
 }
 
