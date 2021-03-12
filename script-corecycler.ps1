@@ -33,6 +33,8 @@ $processCounterPathId      = $null
 $processCounterPathTime    = $null
 $coresWithError            = $null
 $previousError             = $null
+$stressTestLogFileName     = $null
+$stressTestLogFilePath     = $null
 
 
 # Stress test program executables and paths
@@ -68,8 +70,8 @@ $stressTestPrograms = @{
 }
 
 foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
-    $stressTestPrograms[$testProgram.Name]['displayName'] = $testProgram.Name.Substring(0,1).ToUpper() + $testProgram.Name.Substring(1).ToLower()
-    $stressTestPrograms[$testProgram.Name]['absolutePath'] = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
+    $stressTestPrograms[$testProgram.Name]['displayName']   = $testProgram.Name.Substring(0,1).ToUpper() + $testProgram.Name.Substring(1).ToLower()
+    $stressTestPrograms[$testProgram.Name]['absolutePath']  = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
     $stressTestPrograms[$testProgram.Name]['fullPathToExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
 }
 
@@ -203,20 +205,27 @@ function Write-Text {
 <##
  # Write a message to the screen with a specific color and to the log file
  # .PARAM string $text The text to output
- # .PARAM string $color The color
+ # .PARAM string $foregroundColor The foreground color
+ # .PARAM string $backgroundColor (optional) The background color
  # .RETURN void
  #>
 function Write-ColorText {
     param(
         $text,
-        $foregroundColor
+        $foregroundColor,
+        $backgroundColor
     )
 
     # -ForegroundColor <ConsoleColor>
     # -BackgroundColor <ConsoleColor>
     # Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
-    
-    Write-Host $text -ForegroundColor $foregroundColor
+    if ($backgroundColor) {
+        Write-Host $text -ForegroundColor $foregroundColor -BackgroundColor $backgroundColor
+    }
+    else {
+        Write-Host $text -ForegroundColor $foregroundColor
+    }
+
     Add-Content $logFileFullPath ($text)
 }
 
@@ -712,8 +721,13 @@ function Get-TortureWeakValue {
  # .RETURN void
  #>
 function Get-StressTestWindowHandler {
-    $stressTestProcessId = $null
+    param (
+        $testForStressTestProgram = $true
+    )
 
+    $stressTestProcess   = $null
+    $stressTestProcessId = $null
+    
     Write-Verbose('Trying to get the stress test program window handler');
     Write-Verbose('Looking for these window names:')
     Write-Verbose(($stressTestPrograms[$settings.stressTestProgram]['windowNames'] -Join ', '))
@@ -741,35 +755,42 @@ function Get-StressTestWindowHandler {
     $filteredWindowObj = $windowObj | Where-Object {(Get-Process -Id $_.ProcessId).Path -like ('*' + $fileName)}
 
     # Also, the process performing the stress test can actually be different to the main window of the stress test program
-    if ($stressTestPrograms[$settings.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad']) {
-        Write-Verbose('The process performing the stress test is NOT the same as the main window!')
-        Write-Verbose('Searching for the stress test process id...')
-        
-        try {
-            $stressTestProcess   = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] -ErrorAction Stop
-            $stressTestProcessId = $stressTestProcess.Id
+    # But search only for it if the flag to do so was set (which it is by default)
+    if ($testForStressTestProgram) {
+        if ($stressTestPrograms[$settings.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad']) {
+            Write-Verbose('The process performing the stress test is NOT the same as the main window!')
+            Write-Verbose('Searching for the stress test process id...')
+            
+            try {
+                Write-Verbose('Searching for "' + $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] + '"...')
+                $stressTestProcess   = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] -ErrorAction Stop
+                $stressTestProcessId = $stressTestProcess.Id
 
-            Write-Verbose('Found with ID: ' + $stressTestProcessId)
+                Write-Verbose('Found with ID: ' + $stressTestProcessId)
+            }
+            catch {
+                Exit-WithFatalError('Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] + ')')
+            }
         }
-        catch {
-            Exit-WithFatalError('Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] + ')')
+
+        # The stress test and the main window are the same process
+        else {
+            $stressTestProcess   = $windowProcess # This one already exists outside the function
+            $stressTestProcessId = $filteredWindowObj.ProcessId
         }
     }
-
-    # The stress test and the main window are the same process
     else {
-        $stressTestProcess   = $windowProcess # This one already exists outside the function
-        $stressTestProcessId = $filteredWindowObj.ProcessId
+        Write-Verbose('The flag to NOT search for the stress test programm process was set.')
     }
 
 
     # Override the global script variables
-    $Script:processWindowHandler = $filteredWindowObj.MainWindowHandle
-    $Script:windowProcessId      = $filteredWindowObj.ProcessId
-    $Script:stressTestProcess    = $stressTestProcess
-    $Script:stressTestProcessId  = $stressTestProcessId
+    $Script:windowProcessMainWindowHandler = $filteredWindowObj.MainWindowHandle
+    $Script:windowProcessId                = $filteredWindowObj.ProcessId
+    $Script:stressTestProcess              = $stressTestProcess
+    $Script:stressTestProcessId            = $stressTestProcessId
 
-    Write-Verbose('Stress test window handler:    ' + $processWindowHandler)
+    Write-Verbose('Stress test window handler:    ' + $windowProcessMainWindowHandler)
     Write-Verbose('Stress test window process ID: ' + $windowProcessId)
     Write-Verbose('Stress test process ID:        ' + $stressTestProcessId)
 }
@@ -829,14 +850,25 @@ function Start-Prime95 {
 <##
  # Create the Prime95 config files (local.txt & prime.txt)
  # This depends on the $settings.mode variable
- # .PARAM string $configType The config type to set in the config files (SSE, AVX, AVX, CUSTOM)
+ # .PARAM void
  # .RETURN void
  #>
 function Initialize-Prime95 {
-    param (
-        $configType
-    )
+    # Check if the prime95.exe exists
+    Write-Verbose('Checking if prime95.exe exists at:')
+    Write-Verbose($stressTestPrograms['prime95']['fullPathToExe'] + '.' + $stressTestPrograms['prime95']['processNameExt'])
 
+    if (!(Test-Path ($stressTestPrograms['prime95']['fullPathToExe'] + '.' + $stressTestPrograms['prime95']['processNameExt']) -PathType leaf)) {
+        Write-ColorText('FATAL ERROR: Could not find Prime95!') Red
+        Write-ColorText('Make sure to download and extract Prime95 into the following directory:') Red
+        Write-ColorText($stressTestPrograms['prime95']['absolutePath']) Yellow
+        Write-Text ''
+        Write-ColorText('You can download Prime95 from:') Red
+        Write-ColorText('https://www.mersenne.org/download/') Cyan
+        Exit-WithFatalError
+    }
+
+    $configType  = $settings.mode
     $configFile1 = $stressTestPrograms['prime95']['absolutePath'] + 'local.txt'
     $configFile2 = $stressTestPrograms['prime95']['absolutePath'] + 'prime.txt'
 
@@ -844,6 +876,10 @@ function Initialize-Prime95 {
     if ($configType -ne 'CUSTOM' -and $configType -ne 'SSE' -and $configType -ne 'AVX' -and $configType -ne 'AVX2') {
         Exit-WithFatalError('Invalid mode type provided!')
     }
+
+    # The Prime95 results.txt file name and path for this run
+    $Script:stressTestLogFileName = 'Prime95_' + $curDateTime + '_' + $configType + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
     # Create the local.txt and overwrite if necessary
     $null = New-Item $configFile1 -ItemType File -Force
@@ -855,11 +891,11 @@ function Initialize-Prime95 {
     Add-Content $configFile1 ('CoresPerTest=1')
     Add-Content $configFile1 ('CpuNumHyperthreads=' + $settings.numberOfThreads)
     Add-Content $configFile1 ('WorkerThreads='      + $settings.numberOfThreads)
-    Add-Content $configFile1 ('CpuSupportsSSE='     + $prime95CPUSettings[$settings.mode].CpuSupportsSSE)
-    Add-Content $configFile1 ('CpuSupportsSSE2='    + $prime95CPUSettings[$settings.mode].CpuSupportsSSE2)
-    Add-Content $configFile1 ('CpuSupportsAVX='     + $prime95CPUSettings[$settings.mode].CpuSupportsAVX)
-    Add-Content $configFile1 ('CpuSupportsAVX2='    + $prime95CPUSettings[$settings.mode].CpuSupportsAVX2)
-    Add-Content $configFile1 ('CpuSupportsFMA3='    + $prime95CPUSettings[$settings.mode].CpuSupportsFMA3)
+    Add-Content $configFile1 ('CpuSupportsSSE='     + $prime95CPUSettings[$configType].CpuSupportsSSE)
+    Add-Content $configFile1 ('CpuSupportsSSE2='    + $prime95CPUSettings[$configType].CpuSupportsSSE2)
+    Add-Content $configFile1 ('CpuSupportsAVX='     + $prime95CPUSettings[$configType].CpuSupportsAVX)
+    Add-Content $configFile1 ('CpuSupportsAVX2='    + $prime95CPUSettings[$configType].CpuSupportsAVX2)
+    Add-Content $configFile1 ('CpuSupportsFMA3='    + $prime95CPUSettings[$configType].CpuSupportsFMA3)
     
 
     
@@ -874,7 +910,7 @@ function Initialize-Prime95 {
     # Set the custom results.txt file name
     Add-Content $configFile2 ('prime.ini='   + $stressTestPrograms['prime95']['processPath'] + '\prime.txt')
     Add-Content $configFile2 ('local.ini='   + $stressTestPrograms['prime95']['processPath'] + '\local.txt')
-    Add-Content $configFile2 ('results.txt=' + $logFilePath + '\' + $primeResultsName)
+    Add-Content $configFile2 ('results.txt=' + $logFilePath + '\' + $stressTestLogFileName)
     
     # Custom settings
     if ($configType -eq 'CUSTOM') {
@@ -919,20 +955,20 @@ function Initialize-Prime95 {
 function Close-Prime95 {
     Write-Verbose('Closing Prime95')
 
-    # If there is no processWindowHandler id
+    # If there is no windowProcessMainWindowHandler id
     # Try to get it
-    if (!$processWindowHandler) {
-        Get-StressTestWindowHandler
+    if (!$windowProcessMainWindowHandler) {
+        Get-StressTestWindowHandler $false
     }
     
-    # If we now have a processWindowHandler, try to close the window
-    if ($processWindowHandler) {
+    # If we now have a windowProcessMainWindowHandler, try to close the window
+    if ($windowProcessMainWindowHandler) {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
 
         Write-Verbose('Trying to gracefully close Prime95')
         
         # This returns false if no window is found with this handle
-        if (![Win32]::SendMessage($processWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
+        if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
             #'Process Window not found!'
         }
 
@@ -960,6 +996,136 @@ function Close-Prime95 {
 }
 
 
+<##
+ # Initialize Aida64
+ # .PARAM void
+ # .RETURN void
+ #>
+function Initialize-Aida64 {
+    # Check if the aida64.exe exists
+    Write-Verbose('Checking if aida64.exe exists at:')
+    Write-Verbose($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt'])
+
+    if (!(Test-Path ($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt']) -PathType leaf)) {
+        Write-ColorText('FATAL ERROR: Could not find Aida64!') Red
+        Write-ColorText('Make sure to download and extract the PORTABLE ENGINEER(!) version of Aida64 into the following directory:') Red
+        Write-ColorText($stressTestPrograms['aida64']['absolutePath']) Yellow
+        Write-Text ''
+        Write-ColorText('You can download the PORTABLE ENGINEER(!) version of Aida64 from:') Red
+        Write-ColorText('https://www.aida64.com/downloads') Cyan
+        Exit-WithFatalError
+    }
+
+
+    $configType = $settings.mode
+
+
+    # Rename the aida64.exe.manifest to aida64.exe.manifest.bak so that we can start as a regular user
+    # By default AIDA64 requires admin rights for additional sensory information, which we don't need here
+    $pathManifest = $stressTestPrograms['aida64']['processPath'] + '\aida64.exe.manifest'
+    $pathBackup   = $stressTestPrograms['aida64']['processPath'] + '\aida64.exe.manifest.bak'
+    
+    if ((Test-Path $pathManifest -PathType leaf)) {
+        Write-Verbose('Trying to rename the aida64.exe.manifest file so that we can start AIDA64 as a regular user')
+        
+        if (!(Move-Item -Path $pathManifest -Destination $pathBackup -PassThru)) {
+            Exit-WithFatalError('Could not rename the aida64.exe.manifest file!')
+        }
+
+        Write-Verbose('Successfully renamed to aida64.exe.manifest.bak')
+    }
+
+    # The Aida64 log file name and path for this run
+    $Script:stressTestLogFileName = 'Aida64_' + $curDateTime + '_' + $settings.mode + '.csv'
+    $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+
+    # The aida64.ini
+    $configFile = $stressTestPrograms['aida64']['absolutePath'] + 'aida64.ini'
+
+
+    if ($configType -ne 'CACHE' -and $configType -ne 'RAM') {
+        Exit-WithFatalError('Invalid mode type provided!')
+    }
+
+    # Create the local.txt and overwrite if necessary
+    $null = New-Item $configFile -ItemType File -Force
+
+    Set-Content $configFile ('[Generic]')
+    
+    
+    Add-Content $configFile ('')
+    Add-Content $configFile ('NoGUI=0')
+    Add-Content $configFile ('LoadWithWindows=0')
+    Add-Content $configFile ('SplashScreen=0')
+    Add-Content $configFile ('MinimizeToTray=1')
+    Add-Content $configFile ('Language=en')
+    Add-Content $configFile ('ReportHeader=0')
+    Add-Content $configFile ('ReportFooter=0')
+    Add-Content $configFile ('ReportMenu=0')
+    Add-Content $configFile ('ReportDebugInfo=1')
+    Add-Content $configFile ('ReportDebugInfoCSV=0')
+    Add-Content $configFile ('ReportHostInFPC=0')
+    Add-Content $configFile ('HWMonLogToHTM=0')
+    Add-Content $configFile ('HWMonLogToCSV=1')
+    Add-Content $configFile ('HWMonLogProcesses=0')
+    Add-Content $configFile ('HWMonPersistentLog=1')
+    Add-Content $configFile ('HWMonLogFileOpenFreq=24')
+    Add-Content $configFile ('HWMonHTMLogFile=')
+
+    # HWMonCSVLogFile=H:\_Overclock\CoreCycler\logs\Aida64_DATE_TIME_ETC.csv
+    Add-Content $configFile ('HWMonCSVLogFile=' + $stressTestLogFilePath)
+
+    # Which items to include in the log file
+    
+    # Date & Time
+    $csvEntriesString  = 'SDATE STIME'
+                        
+    # The general CPU core clock
+    $csvEntriesString += ' SCPUCLK'
+
+    # The CPU clock for each physical core
+    $csvEntriesString += $(for ($i = 1; $i -le $numLogicalCores; $i++) { ' SCC-1-' + $i })
+
+    # The overall CPU utilization
+    $csvEntriesString += ' SCPUUTI'
+
+    # The CPU utilization for each logical core
+    $csvEntriesString += $(for ($i = 1; $i -le $numPhysCores; $i++) { ' SCPU' + $i + 'UTI'})
+
+    # Temperature sensors
+    # Here we might have a problem with different sensors on different motherboards
+    # TMOBO TCPU TCPUDIO TCHIP TPCHDIO TMOS TTEMP1 TTEMP2
+
+    # Motherboard, CPU, CPU Diode
+    $csvEntriesString += ' TMOBO TCPU TCPUDIO'
+
+    # Voltage sensors
+    # Here we might have a problem with different sensors on different motherboards
+    # VCPU VCPUVID VCPUNB VCPUVDD VCPUVDDNB
+    # Vcore, VID, VDD 
+    $csvEntriesString += ' VCPU VCPUVID VCPUVDD'
+
+    # Watt measurements
+    # PCPUPKG PCPUVDD PCPUVDDNB
+    # CPU Package, CPU VDD
+    $csvEntriesString += ' PCPUPKG PCPUVDD'
+
+    Add-Content $configFile ('HWMonLogItems=' + $csvEntriesString)
+
+    <#
+    HWMonLogItems=
+    SDATE STIME
+    SCPUCLK
+    SCC-1-1 SCC-1-2 SCC-1-3 SCC-1-4 SCC-1-5 SCC-1-6 SCC-1-7 SCC-1-8 SCC-1-9 SCC-1-10 SCC-1-11 SCC-1-12
+    SCPUUTI
+    SCPU1UTI SCPU2UTI SCPU3UTI SCPU4UTI SCPU5UTI SCPU6UTI SCPU7UTI SCPU8UTI SCPU9UTI SCPU10UTI SCPU11UTI SCPU12UTI SCPU13UTI SCPU14UTI SCPU15UTI SCPU16UTI SCPU17UTI SCPU18UTI SCPU19UTI SCPU20UTI SCPU21UTI SCPU22UTI SCPU23UTI SCPU24UTI
+    TMOBO TCPU TCPUDIO TCHIP TPCHDIO TMOS TTEMP1 TTEMP2
+    VCPU VCPUVID VCPUNB VCPUVDD VCPUVDDNB
+    CCPUVDD CCPUVDDNB
+    PCPUPKG PCPUVDD PCPUVDDNB
+    #>
+}
+
 
 <##
  # Open Aida64
@@ -985,6 +1151,7 @@ function Start-Aida64 {
     # Aida64 takes some additional time to load
     # Check for the stress test process, if it's loaded, we're ready to go
     Write-Verbose('Waiting for Aida64 to load...')
+
     for ($i = 1; $i -le 30; $i++) {
         Start-Sleep -Milliseconds 500
 
@@ -1038,42 +1205,48 @@ function Start-Aida64 {
 function Close-Aida64 {
     Write-Verbose('Closing Aida64')
 
-    # If there is no processWindowHandler id
+    # If there is no windowProcessMainWindowHandler id
     # Try to get it
-    if (!$processWindowHandler) {
-        Get-StressTestWindowHandler
+    if (!$windowProcessMainWindowHandler) {
+        Get-StressTestWindowHandler $false
     }
 
     # The stress test window cannot be closed gracefully, as it has no main window
     # So just kill it
-    $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction SilentlyContinue
-    
-    if ($stressTestProcess) {
-        Stop-Process $stressTestProcess.Id -Force -ErrorAction SilentlyContinue
+    if ($stressTestProcessId) {
+        $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction SilentlyContinue
+        
+        if ($stressTestProcess) {
+            Write-Verbose('Killing the stress test program process')
+            Stop-Process $stressTestProcess.Id -Force -ErrorAction SilentlyContinue
+        }
     }
-    
 
-    # If we now have a processWindowHandler, first try to close the main window gracefully
-    if ($processWindowHandler) {
+    # If we now have a windowProcessMainWindowHandler, first try to close the main window gracefully
+    if ($windowProcessMainWindowHandler) {
         Write-Verbose('Trying to gracefully close Aida64')
+        Write-Verbose('windowProcessId: ' + $windowProcessId)
         
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
 
         # This returns false if no window is found with this handle
-        if (![Win32]::SendMessage($processWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
+        if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
             #'Process Window not found!'
         }
 
         # We've send the close request, let's wait up to 3 seconds
         elseif ($windowProcess -and !$windowProcess.HasExited) {
             #'Waiting for the exit'
+            Write-Verbose('Sent the close message, waiting for the program to exit')
             $null = $windowProcess.WaitForExit(3000)
         }
     }
     
+    Write-Verbose('Checking if the main window process still exists:')
+    Write-Verbose('Get-Process ' + $stressTestPrograms['aida64']['processName'])
     
     # If the window is still here at this point, just kill the process
-    $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
+    $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction SilentlyContinue
 
     if ($windowProcess) {
         Write-Verbose('Could not gracefully close Aida64, killing the process')
@@ -1088,6 +1261,24 @@ function Close-Aida64 {
 
 
 <##
+ # Initialize the selected stress test program
+ # .PARAM void
+ # .RETURN void
+ #>
+function Initialize-StressTestProgram {
+    if ($settings.stressTestProgram -eq 'prime95') {
+        Initialize-Prime95 $settings.mode
+    }
+    elseif ($settings.stressTestProgram -eq 'aida64') {
+        Initialize-Aida64
+    }
+    else {
+        Exit-WithFatalError('No stress test program selected!')
+    }
+}
+
+
+<##
  # Start the selected stress test program
  # .PARAM void
  # .RETURN void
@@ -1097,7 +1288,6 @@ function Start-StressTestProgram {
         Start-Prime95
     }
     elseif ($settings.stressTestProgram -eq 'aida64') {
-        Write-Verbose('AIDA64 not fully implemented yet!')
         Start-Aida64
     }
     else {
@@ -1140,14 +1330,14 @@ function Test-ProcessUsage {
     
     # The minimum CPU usage for the stress test program, below which it should be treated as an error
     # We need to account for the number of threads
-    # Min. 1.5%
+    # Min. 1.0%
     # 100/32=   3,125% for 1 thread out of 32 threads
     # 100/32*2= 6,250% for 2 threads out of 32 threads
     # 100/24=   4,167% for 1 thread out of 24 threads
     # 100/24*2= 8,334% for 2 threads out of 24 threads
     # 100/12=   8,334% for 1 thread out of 12 threads
     # 100/12*2= 16,67% for 2 threads out of 12 threads
-    $minProcessUsage = [Math]::Max(1.5, $expectedUsage - [Math]::Round(100 / $numLogicalCores, 2))
+    $minProcessUsage = [Math]::Max(1.0, $expectedUsage - [Math]::Round(100 / $numLogicalCores, 2))
     
     
     # Set to a string if there was an error
@@ -1157,7 +1347,7 @@ function Test-ProcessUsage {
     $resultFileHandle = $false
 
     if ($settings.stressTestProgram -eq 'prime95') {
-        $resultFileHandle = Get-Item -Path $primeResultsPath -ErrorAction SilentlyContinue
+        $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction SilentlyContinue
     }
 
     # Does the process still exist?
@@ -1179,7 +1369,7 @@ function Test-ProcessUsage {
         # Found the "error" string in the results.txt
         if ($primeResults.Length -gt 0) {
             # Get the line number of the last error message in the results.txt
-            $p95Errors = Select-String $primeResultsPath -Pattern ERROR
+            $p95Errors = Select-String $stressTestLogFilePath -Pattern ERROR
             $lastError = $p95Errors | Select-Object -Last 1 -Property LineNumber, Line
 
             # If it's the same line number and message than the previous error, ignore it, it's a false positive
@@ -1232,7 +1422,9 @@ function Test-ProcessUsage {
                 }
             }
 
-            # Error string not found
+
+
+            # Error string still not found
             # This might have been a false alarm, wait a bit and try again
             if (!$stressTestError) {
                 $waitTime = 2000
@@ -1243,7 +1435,9 @@ function Test-ProcessUsage {
 
                 # The second check
                 # Do the whole process path procedure again
-                $thisProcessId = $process.Id[0]
+                $thisProcessId = $stressTestProcess.Id[0]
+
+                Write-Verbose('Process Id: ' + $thisProcessId)
 
                 # Start a background job to get around the cached Get-Counter value
                 $thisProcessCounterPathId = Start-Job -ScriptBlock { 
@@ -1259,8 +1453,13 @@ function Test-ProcessUsage {
 
                 # Still below the minimum usage
                 if ($processCPUPercentage -le $minProcessUsage) {
+                    Write-Verbose('           ...CPU usage: ' + $thisProcessCPUPercentage + '%')
+
                     # We don't care about an error string here anymore
                     $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $processCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
+                }
+                else{
+
                 }
             }
         }
@@ -1297,11 +1496,12 @@ function Test-ProcessUsage {
         Write-ColorText('ERROR MESSAGE: ' + $stressTestError) Magenta
         
 
+        # Prime95
         if ($settings.stressTestProgram -eq 'prime95') {
             # DEBUG
             # Also add the 5 last rows of the results.txt file
             #Write-Text('LAST 5 ROWS OF RESULTS.TXT:')
-            #Write-Text(Get-Item -Path $primeResultsPath | Get-Content -Tail 5)
+            #Write-Text(Get-Item -Path $stressTestLogFilePath | Get-Content -Tail 5)
             
             # Try to determine the last run FFT size
             # If the results.txt doesn't exist, assume that it was on the very first iteration
@@ -1380,6 +1580,12 @@ function Test-ProcessUsage {
         }
 
 
+        # Aida64
+        if ($settings.stressTestProgram -eq 'aida64') {
+
+        }
+
+
         # If the stopOnError flag is set, stop at this point
         if ($settings.stopOnError) {
             Write-Text('')
@@ -1389,7 +1595,7 @@ function Test-ProcessUsage {
                 # Display the results.txt file name for Prime95 for this run
                 Write-Text('')
                 Write-ColorText('Prime95''s results log file can be found at:') Cyan
-                Write-ColorText($primeResultsPath) Cyan
+                Write-ColorText($stressTestLogFilePath) Cyan
             }
 
             # And the name of the log file for this run
@@ -1404,9 +1610,13 @@ function Test-ProcessUsage {
 
         # Try to restart the stress test program and continue with the next core
         # Don't try to restart here if $settings.restartPrimeForEachCore is set
+        # because this will be taken care of in another routine
         if (!$settings.restartPrimeForEachCore) {
             $timestamp = Get-Date -format HH:mm:ss
             Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
+
+            # Close the stress test program if it still exists
+            Close-StressTestProgram
             
             # Start the stress test program again
             Start-StressTestProgram
@@ -1764,8 +1974,8 @@ if ($settings.stressTestProgram -eq 'prime95') {
 
 
     # The Prime95 results.txt file name for this run
-    $primeResultsName = 'Prime95_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
-    $primeResultsPath = $logFilePathAbsolute + $primeResultsName
+    #$primeResultsName = 'Prime95_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    #$primeResultsPath = $logFilePathAbsolute + $primeResultsName
     
     # Unfortunately prime.log only logs communications with the PrimeNet server
     #$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
@@ -1788,10 +1998,9 @@ if ($stressTestProcess -or $windowProcess) {
     Close-StressTestProgram
 }
 
-# Create the config file for Prime95
-if ($settings.stressTestProgram -eq 'prime95') {
-    Initialize-Prime95 $settings.mode
-}
+# Create the required config files for the stress test program
+Initialize-StressTestProgram
+
 
 # Start the stress test program
 Start-StressTestProgram
@@ -1856,13 +2065,8 @@ Write-ColorText('---------------------------------------------------------------
 # Display the log file location(s)
 Write-ColorText('The log files for this run are stored in:') Cyan
 Write-ColorText($logFilePathAbsolute) Cyan
-Write-ColorText(' - CoreCycler: ' + $logFileName) Cyan
-
-if ($settings.stressTestProgram -eq 'prime95') {
-    Write-ColorText(' - Prime95:    ' + $primeResultsName) Cyan
-    #Write-ColorText(' - Prime95 Output:     ' + $primeLogName) Cyan
-}
-
+Write-ColorText(' - CoreCycler:'.PadRight(17, ' ') + $logFileName) Cyan
+Write-ColorText(' - ' + $settings.stressTestProgram.ToUpper() + ':'.PadRight(17, ' ') + $stressTestLogFileName) Cyan
 Write-ColorText('---------------------------------------------------------------------------') Cyan
 Write-Text('')
 
@@ -1936,6 +2140,41 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         }
 
         $cpuNumberString = (($cpuNumbersArray | sort) -join ' and ')
+
+
+        # Apparently Aida64 doesn't like having the affinity set to 1?
+        # Possible workaround: Set it to 2 instead
+        # This also poses a problem when testing two threads on core 0, so we're skipping this core for the time being
+        if ($affinity -eq 1 -and $settings.stressTestProgram -eq 'aida64') {
+            Write-ColorText('           Warning!') Black Yellow
+
+            # If Hyperthreading / SMT is enabled
+            if ($isHyperthreadingEnabled) {
+                Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
+                Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
+                
+                $affinity = 2
+                $cpuNumberString = 1
+            }
+
+            # For disabled Hyperthreading / SMT, there's not much we can do. So skipping it
+            else {
+                Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on Core 0 only.') Black Yellow
+                Write-ColorText('           Normally we''d fall back to thread 2 on Core 0, but since Hyperthreading / SMT is disabled, we cannot do this.') Black Yellow
+                Write-ColorText('           Therefore we''re skipping this core.') Black Yellow
+
+                Write-Verbose('Skipping this core due to Aida64 not running correctly on Core 0 CPU 0 and Hyperthreading / SMT is disabled')
+                continue
+            }
+        }
+        elseif ($affinity -eq 3 -and $settings.stressTestProgram -eq 'aida64') {
+            Write-ColorText('           Warning!') Black Yellow
+            Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
+            Write-ColorText('           So you might see an error due to decreased CPU usage.') Black Yellow
+            #$affinity = 
+        }
+        
+
 
 
         # If this core is in the ignored cores array
