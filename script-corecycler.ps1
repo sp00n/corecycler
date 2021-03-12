@@ -1680,6 +1680,15 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         }
         else {
             Write-ColorText('The following cores have thrown an error:') Blue
+
+            $coreWithTwoDigitsHasError = $false
+
+            foreach ($entry in $coresWithErrorsCounter.GetEnumerator()) {
+                if ( $entry.Name -gt 9 -and $entry.Value -gt 0) {
+                    $coreWithTwoDigitsHasError = $true
+                    break
+                }
+            }
             
             foreach ($entry in ($coresWithErrorsCounter.GetEnumerator() | Sort Name)) {
                 # No error, skip
@@ -1687,7 +1696,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
                     continue
                 }
 
-                $coreText  = $(if ($entry.Name -lt 10) {' '})
+                $corePadding = $(if ($coreWithTwoDigitsHasError) {' '} else {''})
+                $coreText  = $(if ($entry.Name -lt 10) {$corePadding})
                 $coreText += $entry.Name.ToString()
 
                 $textErrors      = 'error'
