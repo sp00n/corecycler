@@ -356,6 +356,211 @@ function Get-PerformanceCounterIDs {
 }
 
 
+############################################################################## 
+## 
+## Invoke-WindowsApi.ps1 
+##
+## http://www.leeholmes.com/blog/2007/10/02/managing-ini-files-with-powershell/
+##
+## From PowerShell Cookbook (O’Reilly) 
+## by Lee Holmes (http://www.leeholmes.com/guide) 
+## 
+## Invoke a native Windows API call that takes and returns simple data types. 
+## 
+## ie: 
+## 
+## ## Prepare the parameter types and parameters for the  
+## CreateHardLink function 
+## $parameterTypes = [string], [string], [IntPtr] 
+## $parameters = [string] $filename, [string] $existingFilename, [IntPtr]::Zero 
+##  
+## ## Call the CreateHardLink method in the Kernel32 DLL 
+## $result = Invoke-WindowsApi "kernel32" ([bool]) "CreateHardLink" ` 
+##     $parameterTypes $parameters 
+## 
+############################################################################## 
+function Invoke-WindowsApi {
+    param(
+        [string] $dllName, 
+        [Type] $returnType, 
+        [string] $methodName,
+        [Type[]] $parameterTypes,
+        [Object[]] $parameters
+    )
+
+    ## Begin to build the dynamic assembly
+    $domain   = [AppDomain]::CurrentDomain
+    $name     = New-Object Reflection.AssemblyName 'PInvokeAssembly'
+    $assembly = $domain.DefineDynamicAssembly($name, 'Run')
+    $module   = $assembly.DefineDynamicModule('PInvokeModule')
+    $type     = $module.DefineType('PInvokeType', "Public,BeforeFieldInit")
+
+    ## Go through all of the parameters passed to us.  As we do this,
+    ## we clone the user's inputs into another array that we will use for
+    ## the P/Invoke call.  
+    $inputParameters = @()
+    $refParameters = @()
+
+    for ($counter = 1; $counter -le $parameterTypes.Length; $counter++) {
+       ## If an item is a PSReference, then the user 
+       ## wants an [out] parameter.
+       if ($parameterTypes[$counter - 1] -eq [Ref]) {
+          ## Remember which parameters are used for [Out] parameters
+          $refParameters += $counter
+
+          ## On the cloned array, we replace the PSReference type with the 
+          ## .Net reference type that represents the value of the PSReference, 
+          ## and the value with the value held by the PSReference.
+          $parameterTypes[$counter - 1] = $parameters[$counter - 1].Value.GetType().MakeByRefType()
+          $inputParameters += $parameters[$counter - 1].Value
+       }
+       else {
+          ## Otherwise, just add their actual parameter to the
+          ## input array.
+          $inputParameters += $parameters[$counter - 1]
+       }
+    }
+
+    ## Define the actual P/Invoke method, adding the [Out]
+    ## attribute for any parameters that were originally [Ref] 
+    ## parameters.
+    $method = $type.DefineMethod($methodName, 'Public,HideBySig,Static,PinvokeImpl', $returnType, $parameterTypes)
+    
+    foreach ($refParameter in $refParameters) {
+       [void] $method.DefineParameter($refParameter, "Out", $null)
+    }
+
+    ## Apply the P/Invoke constructor
+    $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
+    $attr = New-Object Reflection.Emit.CustomAttributeBuilder $ctor, $dllName
+    $method.SetCustomAttribute($attr)
+
+    ## Create the temporary type, and invoke the method.
+    $realType = $type.CreateType()
+    $realType.InvokeMember($methodName, 'Public,Static,InvokeMethod', $null, $null, $inputParameters)
+
+    ## Finally, go through all of the reference parameters, and update the
+    ## values of the PSReference objects that the user passed in.
+    foreach ($refParameter in $refParameters) {
+       $parameters[$refParameter - 1].Value = $inputParameters[$refParameter - 1]
+    }
+}
+
+
+<##
+ # Suspends a process
+ # .PARAM [System.Diagnostics.Process] $process The process to suspend
+ # .RETURN [Int] The number of suspended threads from this process. -1 if something failed
+ #>
+function Suspend-Process {
+    param(
+        [System.Diagnostics.Process]$process
+    )
+
+    Write-Verbose('Suspending process:')
+    Write-Verbose($process.Id + ' - ' + $process.ProcessName)
+
+    $numThreads = 0
+    $suspendCounts = 0
+
+
+    $process.Threads | ForEach-Object {
+        # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
+        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([int], [bool], [int]) @(0x0002, $false, $_.Id)
+        
+        if ($currentThreadId -eq [IntPtr]::Zero) {
+            continue
+        }
+
+        $numThreads++
+
+        Write-Verbose('  - Suspending thread id: ' + $currentThreadId)
+
+        # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread
+        # Do we also need Wow64SuspendThread?
+        # https://docs.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-wow64suspendthread
+        $previousSuspendCount = Invoke-WindowsApi "kernel32" ([int]) "SuspendThread" @([IntPtr]) @($currentThreadId)
+
+        Write-Verbose('Suspended thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 0)')
+
+        if ($previousSuspendCount -gt 0) {
+            Write-Verbose('The previous suspend count is larger than 0, this means the process was already suspended... (curious but not necessarily an error)')
+        }
+
+        # $previousSuspendCount should be 0 if the thread is suspended now
+        # If it > 0, then there is more than one suspended "state" on the thread. All of these need to be resumed to fully resume the thread/process
+        # If it is -1, the operation has failed
+        
+        if ($previousSuspendCount -ge 0) {
+            $suspendCounts++
+        }
+    }
+
+    if ($suspendCounts -eq $numThreads) {
+        return $suspendCounts
+    }
+    else {
+        return -1
+    }
+}
+
+
+<##
+ # Resumes a suspended process
+ # .PARAM System.Diagnostics.Process $process The process to resume
+ # .RETURN [Int] The number of resumed threads from this process. -1 if something failed
+ #>
+function Resume-Process {
+    param(
+        [System.Diagnostics.Process]$process
+    )
+
+    Write-Verbose('Resuming process:')
+    Write-Verbose($process.Id + ' - ' + $process.ProcessName)
+
+    $numThreads = 0
+    $resumeCounts = 0
+
+    $process.Threads | ForEach-Object {
+        # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
+        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([int], [bool], [int]) @(0x0002, $false, $_.Id)
+        
+        if ($currentThreadId -eq [IntPtr]::Zero) {
+            continue
+        }
+
+        $numThreads++
+
+        Write-Verbose('  - Resuming thread id: ' + $currentThreadId)
+
+        # $previousSuspendCount should be 1 if the thread is resumed now
+        # If it > 1, then there is more than one suspended "state" on the thread. All of these need to be resumed to fully resume the thread/process
+        # If it is -1, the operation has failed
+        do {
+            # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread
+            $previousSuspendCount = Invoke-WindowsApi "kernel32" ([int]) "ResumeThread" @([IntPtr]) @($currentThreadId)
+            
+            Write-Verbose('Resumed thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 1)')
+
+            if ($previousSuspendCount -gt 1) {
+                Write-Verbose('The previous suspend count is larger than 1, this means the process has multiple suspended states... (curious but not necessarily an error)')
+            }
+        } while ($previousSuspendCount -gt 1)
+
+        if ($previousSuspendCount -eq 1) {
+            $resumeCounts++
+        }
+    }
+
+    if ($resumeCounts -eq $numThreads) {
+        return $resumeCounts
+    }
+    else {
+        return -1
+    }
+}
+
+
 <##
  # Get the settings
  # .PARAM void
@@ -1026,6 +1231,9 @@ function Initialize-Aida64 {
 
     $configType = $settings.mode
 
+    # TODO: Do we want to offer a way to start Aida64 with admin rights?
+    $hasAdminRights = $false
+
 
     # Rename the aida64.exe.manifest to aida64.exe.manifest.bak so that we can start as a regular user
     # By default AIDA64 requires admin rights for additional sensory information, which we don't need here
@@ -1083,41 +1291,59 @@ function Initialize-Aida64 {
     Add-Content $configFile ('HWMonCSVLogFile=' + $stressTestLogFilePath)
 
     # Which items to include in the log file
+    # Unfortunately most of these require admin privileges
+    $csvEntriesArr = @()
     
     # Date & Time
-    $csvEntriesString  = 'SDATE STIME'
+    # Works without admin rights
+    $csvEntriesArr += 'SDATE STIME'
                         
     # The general CPU core clock
-    $csvEntriesString += ' SCPUCLK'
+    # Requires admin rights to display the true core clock. If no admin rights, will display the default base clock
+    $csvEntriesArr += 'SCPUCLK'
 
     # The CPU clock for each physical core
-    $csvEntriesString += $(for ($i = 1; $i -le $numLogicalCores; $i++) { ' SCC-1-' + $i })
+    # Requires admin rights
+    if ($hasAdminRights) {
+        $csvEntriesArr += $(for ($i = 1; $i -le $numLogicalCores; $i++) { 'SCC-1-' + $i })
+    }
 
     # The overall CPU utilization
-    $csvEntriesString += ' SCPUUTI'
+    # Works without admin rights
+    $csvEntriesArr += 'SCPUUTI'
 
     # The CPU utilization for each logical core
-    $csvEntriesString += $(for ($i = 1; $i -le $numPhysCores; $i++) { ' SCPU' + $i + 'UTI'})
+    # Works without admin rights
+    $csvEntriesArr += $(for ($i = 1; $i -le $numPhysCores; $i++) { 'SCPU' + $i + 'UTI' })
 
     # Temperature sensors
     # Here we might have a problem with different sensors on different motherboards
     # TMOBO TCPU TCPUDIO TCHIP TPCHDIO TMOS TTEMP1 TTEMP2
 
     # Motherboard, CPU, CPU Diode
-    $csvEntriesString += ' TMOBO TCPU TCPUDIO'
+    # Requires admin rights
+    if ($hasAdminRights) {
+        $csvEntriesArr += 'TMOBO TCPU TCPUDIO'
+    }
 
     # Voltage sensors
     # Here we might have a problem with different sensors on different motherboards
     # VCPU VCPUVID VCPUNB VCPUVDD VCPUVDDNB
-    # Vcore, VID, VDD 
-    $csvEntriesString += ' VCPU VCPUVID VCPUVDD'
+    # Vcore, VID, VDD
+    # Requires admin rights
+    if ($hasAdminRights) {
+        $csvEntriesArr += 'VCPU VCPUVID VCPUVDD'
+    }
 
     # Watt measurements
     # PCPUPKG PCPUVDD PCPUVDDNB
     # CPU Package, CPU VDD
-    $csvEntriesString += ' PCPUPKG PCPUVDD'
+    # Requires admin rights
+    if ($hasAdminRights) {
+        $csvEntriesArr += 'PCPUPKG PCPUVDD'
+    }
 
-    Add-Content $configFile ('HWMonLogItems=' + $csvEntriesString)
+    Add-Content $configFile ('HWMonLogItems=' + ($csvEntriesArr -Join ' '))
 
     <#
     HWMonLogItems=
@@ -1157,7 +1383,7 @@ function Start-Aida64 {
 
     # Aida64 takes some additional time to load
     # Check for the stress test process, if it's loaded, we're ready to go
-    Write-Verbose('Waiting for Aida64 to load...')
+    Write-Text('Waiting for Aida64 to load...')
 
     for ($i = 1; $i -le 30; $i++) {
         Start-Sleep -Milliseconds 500
@@ -2165,7 +2391,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         # Possible workaround: Set it to 2 instead
         # This also poses a problem when testing two threads on core 0, so we're skipping this core for the time being
         if ($affinity -eq 1 -and $settings.stressTestProgram -eq 'aida64') {
-            Write-ColorText('           Warning!') Black Yellow
+            Write-ColorText('           Notice!') Black Yellow
 
             # If Hyperthreading / SMT is enabled
             if ($isHyperthreadingEnabled) {
@@ -2187,7 +2413,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             }
         }
         elseif ($affinity -eq 3 -and $settings.stressTestProgram -eq 'aida64') {
-            Write-ColorText('           Warning!') Black Yellow
+            Write-ColorText('           Notice!') Black Yellow
             Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
             Write-ColorText('           So you might see an error due to decreased CPU usage.') Black Yellow
             #$affinity = 
