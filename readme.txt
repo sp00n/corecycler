@@ -149,6 +149,11 @@ A: The errors may actually come from your overclocked RAM and not your CPU direc
    After you're sure that both overclocks are stable on their own, you can combine them and check for instabilities 
    again.
 
+Q: My script freezes! It appears to be running but I see no new output!
+A: PowerShell scripts seem to freeze when you select some text or click with the mouse into the terminal window (which
+   selects the current position of your cursor). Try to hit Return and see if the execution continues.
+   See e.g. here: https://stackoverflow.com/questions/3204423/long-running-powershell-script-freezes
+
 
 
 
