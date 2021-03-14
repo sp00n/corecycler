@@ -34,6 +34,8 @@ $processCounterPathTime    = $null
 $coresWithError            = $null
 $coresWithErrorsCounter    = $null
 $previousError             = $null
+$stressTestConfigFileName  = $null
+$stressTestConfigFilePath  = $null
 $stressTestLogFileName     = $null
 $stressTestLogFilePath     = $null
 
@@ -59,7 +61,7 @@ $stressTestPrograms = @{
     'aida64' = @{
         'processName'        = 'aida64'
         'processNameExt'     = 'exe'
-        'processNameForLoad' = 'aida_bench64.dll'
+        'processNameForLoad' = 'aida_bench64.dll'   # This needs to be with file extension
         'processPath'        = 'test_programs\aida64'
         'absolutePath'       = $null
         'fullPathToExe'      = $null
@@ -68,6 +70,20 @@ $stressTestPrograms = @{
             '^System Stability Test - AIDA64*'
         )
     }
+
+    'ycruncher' = @{
+        'processName'        = '00-x86' # This is the test with the least amount of required CPU features, should be the least amount of stress and the highest clock
+        'processNameExt'     = 'exe'
+        'processNameForLoad' = '00-x86'
+        'processPath'        = 'test_programs\y-cruncher\Binaries'
+        'absolutePath'       = $null
+        'fullPathToExe'      = $null
+        'displayName'        = $null
+        'windowNames'        = @(
+            '^*00\-x86\.exe*'
+        )
+    }
+    
 }
 
 foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
@@ -79,7 +95,7 @@ foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
 
 # Programs where both the main window and the stress test are the same process
 $stressTestProgramsWithSameProcess = @(
-    'prime95'
+    'prime95', 'ycruncher'
 )
 
 
@@ -453,6 +469,8 @@ function Invoke-WindowsApi {
  # .RETURN [Int] The number of suspended threads from this process. -1 if something failed
  #>
 function Suspend-Process {
+    #Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcess" @([int]) @($processId)
+    
     param(
         [System.Diagnostics.Process]$process
     )
@@ -511,6 +529,8 @@ function Suspend-Process {
  # .RETURN [Int] The number of resumed threads from this process. -1 if something failed
  #>
 function Resume-Process {
+    #Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcessStop" @([int]) @($processId)
+
     param(
         [System.Diagnostics.Process]$process
     )
@@ -572,9 +592,10 @@ function Get-Settings {
 
     $defaultSettings = @{
         # The program to perform the actual stress test
-        # The following programs are available: PRIME95, AIDA64
+        # The following programs are available: PRIME95, AIDA64, YCRUNCHER
         # Note: For AIDA64, you need to manually download and extract the portable ENGINEER version and put it
         #       in the /test_programs/aida64/ folder
+        # TODO: YCRUNCHER
         # Default: PRIME95
         stressTestProgram = 'PRIME95'
 
@@ -1009,57 +1030,6 @@ function Get-StressTestWindowHandler {
 
 
 <##
- # Open Prime95 and set global script variables
- # .PARAM void
- # .RETURN void
- #>
-function Start-Prime95 {
-    Write-Verbose('Starting Prime95')
-
-    # Minimized to the tray
-    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
-    
-    # Minimized to the task bar
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
-
-    # This might be necessary to correctly read the process. Or not
-    Start-Sleep -Milliseconds 500
-    
-    if (!$Script:windowProcess) {
-        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['prime95']['processName'] + '!')
-    }
-
-    # Get the main window handler
-    # This also works for windows minimized to the tray
-    Get-StressTestWindowHandler
-    
-    # This is to find the exact counter path, as you might have multiple processes with the same name
-    try {
-        # Start a background job to get around the cached Get-Counter value
-        $Script:processCounterPathId = Start-Job -ScriptBlock { 
-            $counterPathName = $args[0].'FullName'
-            $processId = $args[1]
-            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
-        } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
-
-        if (!$processCounterPathId) {
-            Exit-WithFatalError('Could not find the counter path for the Prime95 instance!')
-        }
-
-        $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
-
-        Write-Verbose('The Performance Process Counter Path for the ID:')
-        Write-Verbose($processCounterPathId)
-        Write-Verbose('The Performance Process Counter Path for the Time:')
-        Write-Verbose($processCounterPathTime)
-    }
-    catch {
-        #'Could not get the process path'
-    }
-}
-
-
-<##
  # Create the Prime95 config files (local.txt & prime.txt)
  # This depends on the $settings.mode variable
  # .PARAM void
@@ -1156,6 +1126,57 @@ function Initialize-Prime95 {
     Add-Content $configFile2 'ResultsFileTimestampInterval=60'
     Add-Content $configFile2 '[PrimeNet]'
     Add-Content $configFile2 'Debug=0'
+}
+
+
+<##
+ # Open Prime95 and set global script variables
+ # .PARAM void
+ # .RETURN void
+ #>
+function Start-Prime95 {
+    Write-Verbose('Starting Prime95')
+
+    # Minimized to the tray
+    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
+    
+    # Minimized to the task bar
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
+
+    # This might be necessary to correctly read the process. Or not
+    Start-Sleep -Milliseconds 500
+    
+    if (!$Script:windowProcess) {
+        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['prime95']['processName'] + '!')
+    }
+
+    # Get the main window handler
+    # This also works for windows minimized to the tray
+    Get-StressTestWindowHandler
+    
+    # This is to find the exact counter path, as you might have multiple processes with the same name
+    try {
+        # Start a background job to get around the cached Get-Counter value
+        $Script:processCounterPathId = Start-Job -ScriptBlock { 
+            $counterPathName = $args[0].'FullName'
+            $processId = $args[1]
+            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+        } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
+
+        if (!$processCounterPathId) {
+            Exit-WithFatalError('Could not find the counter path for the Prime95 instance!')
+        }
+
+        $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+
+        Write-Verbose('The Performance Process Counter Path for the ID:')
+        Write-Verbose($processCounterPathId)
+        Write-Verbose('The Performance Process Counter Path for the Time:')
+        Write-Verbose($processCounterPathTime)
+    }
+    catch {
+        #'Could not get the process path'
+    }
 }
 
 
@@ -1494,6 +1515,180 @@ function Close-Aida64 {
 
 
 <##
+ # Create the Y-Cruncher config files (local.txt & prime.txt)
+ # This depends on the $settings.mode variable
+ # .PARAM void
+ # .RETURN void
+ #>
+function Initialize-YCruncher {
+    # Check if the selected binary exists
+    Write-Verbose('Checking if ' + $stressTestPrograms['ycruncher']['processName'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'] + ' exists at:')
+    Write-Verbose($stressTestPrograms['ycruncher']['fullPathToExe'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'])
+
+    if (!(Test-Path ($stressTestPrograms['ycruncher']['fullPathToExe'] + '.' + $stressTestPrograms['ycruncher']['processNameExt']) -PathType leaf)) {
+        Write-ColorText('FATAL ERROR: Could not find Y-Cruncher!') Red
+        Write-ColorText('Make sure to download and extract Y-Cruncher into the following directory:') Red
+        Write-ColorText($stressTestPrograms['ycruncher']['absolutePath']) Yellow
+        Write-Text ''
+        Write-ColorText('You can download Y-Cruncher from:') Red
+        Write-ColorText('http://www.numberworld.org/y-cruncher/#Download') Cyan
+        Exit-WithFatalError
+    }
+
+    $configType = $settings.mode
+    $configName = '1-Thread_60s_Tests-BKT-BBP-SFT-FFT-N32-N64-HNT-VST.cfg'
+    $configFile = $stressTestPrograms['ycruncher']['absolutePath'] + $configName
+
+    $Script:stressTestConfigFileName = $configName
+    $Script:stressTestConfigFilePath = $configFile
+
+    # TODO: More config types
+    #if ($configType -ne 'CUSTOM' -and $configType -ne 'SSE' -and $configType -ne 'AVX' -and $configType -ne 'AVX2') {
+    #    Exit-WithFatalError('Invalid mode type provided!')
+    #}
+
+    # The log file name and path for this run
+    $Script:stressTestLogFileName = 'Y-Cruncher_' + $curDateTime + '.txt'
+    $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+
+
+    # Create the config file and overwrite if necessary
+    $null = New-Item $configFile -ItemType File -Force
+
+    $configEntries = @(
+        '{'
+        '    Action : "StressTest"'
+        '    StressTest : {'
+        '        AllocateLocally : "true"'
+        '        LogicalCores : [2]'
+        '        TotalMemory : 13418572'
+        '        SecondsPerTest : 60'
+        '        SecondsTotal : 0'
+        '        StopOnError : "true"'
+        '        Tests : ['
+        '            "BKT"'
+        '            "BBP"'
+        '            "SFT"'
+        '            "FFT"'
+        '            "N32"'
+        '            "N64"'
+        '            "HNT"'
+        '            "VST"'
+        '        ]'
+        '    }'
+        '}'
+    )
+
+
+    Set-Content $configFile ''
+
+    foreach ($entry in $configEntries) {
+        Add-Content $configFile $entry
+    }
+}
+
+
+<##
+ # Open Y-Cruncher and set global script variables
+ # .PARAM void
+ # .RETURN void
+ #>
+function Start-YCruncher {
+    Write-Verbose('Starting Y-Cruncher')
+
+    # Minimized to the tray
+    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFileName) -PassThru -WindowStyle Hidden
+    
+    # Minimized to the task bar
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFileName) -PassThru -WindowStyle Minimized
+
+    # This might be necessary to correctly read the process. Or not
+    Start-Sleep -Milliseconds 500
+    
+    if (!$Script:windowProcess) {
+        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['ycruncher']['processName'] + '!')
+    }
+
+    # Get the main window handler
+    # This also works for windows minimized to the tray
+    Get-StressTestWindowHandler
+    
+    # This is to find the exact counter path, as you might have multiple processes with the same name
+    try {
+        # Start a background job to get around the cached Get-Counter value
+        $Script:processCounterPathId = Start-Job -ScriptBlock { 
+            $counterPathName = $args[0].'FullName'
+            $processId = $args[1]
+            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+        } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
+
+        if (!$processCounterPathId) {
+            Exit-WithFatalError('Could not find the counter path for the Y-Cruncher instance!')
+        }
+
+        $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+
+        Write-Verbose('The Performance Process Counter Path for the ID:')
+        Write-Verbose($processCounterPathId)
+        Write-Verbose('The Performance Process Counter Path for the Time:')
+        Write-Verbose($processCounterPathTime)
+    }
+    catch {
+        #'Could not get the process path'
+    }
+}
+
+
+<##
+ # Close Y-Cruncher
+ # .PARAM void
+ # .RETURN void
+ #>
+function Close-YCruncher {
+    Write-Verbose('Closing Y-Cruncher')
+
+    # If there is no windowProcessMainWindowHandler id
+    # Try to get it
+    if (!$windowProcessMainWindowHandler) {
+        Get-StressTestWindowHandler $false
+    }
+    
+    # If we now have a windowProcessMainWindowHandler, try to close the window
+    if ($windowProcessMainWindowHandler) {
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
+
+        Write-Verbose('Trying to gracefully close Y-Cruncher')
+        
+        # This returns false if no window is found with this handle
+        if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
+            #'Process Window not found!'
+        }
+
+        # We've send the close request, let's wait up to 2 seconds
+        elseif ($windowProcess -and !$windowProcess.HasExited) {
+            #'Waiting for the exit'
+            $null = $windowProcess.WaitForExit(3000)
+        }
+    }
+    
+    
+    # If the window is still here at this point, just kill the process
+    $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
+
+    if ($windowProcess) {
+        Write-Verbose('Could not gracefully close Y-Cruncher, killing the process')
+        
+        #'The process is still there, killing it'
+        # Unfortunately this will leave any tray icons behind
+        Stop-Process $windowProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    else {
+        Write-Verbose('Y-Cruncher closed')
+    }
+}
+
+
+<##
  # Initialize the selected stress test program
  # .PARAM void
  # .RETURN void
@@ -1504,6 +1699,9 @@ function Initialize-StressTestProgram {
     }
     elseif ($settings.stressTestProgram -eq 'aida64') {
         Initialize-Aida64
+    }
+    elseif ($settings.stressTestProgram -eq 'ycruncher') {
+        Initialize-YCruncher
     }
     else {
         Exit-WithFatalError('No stress test program selected!')
@@ -1523,6 +1721,9 @@ function Start-StressTestProgram {
     elseif ($settings.stressTestProgram -eq 'aida64') {
         Start-Aida64
     }
+    elseif ($settings.stressTestProgram -eq 'ycruncher') {
+        Start-YCruncher
+    }
     else {
         Exit-WithFatalError('No stress test program selected!')
     }
@@ -1539,8 +1740,10 @@ function Close-StressTestProgram {
         Close-Prime95
     }
     elseif ($settings.stressTestProgram -eq 'aida64') {
-        Write-Verbose('AIDA64 not fully implemented yet!')
         Close-Aida64
+    }
+    elseif ($settings.stressTestProgram -eq 'ycruncher') {
+        Close-YCruncher
     }
     else {
         Exit-WithFatalError('No stress test program selected!')
@@ -1818,6 +2021,12 @@ function Test-ProcessUsage {
 
         # Aida64
         if ($settings.stressTestProgram -eq 'aida64') {
+
+        }
+
+
+        # Y-Cruncher
+        if ($settings.stressTestProgram -eq 'ycruncher') {
 
         }
 
