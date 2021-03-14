@@ -470,7 +470,7 @@ function Invoke-WindowsApi {
  #>
 function Suspend-Process {
     #Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcess" @([int]) @($processId)
-    
+
     param(
         [System.Diagnostics.Process]$process
     )
@@ -1597,10 +1597,11 @@ function Start-YCruncher {
     Write-Verbose('Starting Y-Cruncher')
 
     # Minimized to the tray
-    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFileName) -PassThru -WindowStyle Hidden
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFileName) -PassThru -WindowStyle Minimized
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Minimized
+    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
