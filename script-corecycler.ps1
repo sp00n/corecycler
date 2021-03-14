@@ -72,15 +72,15 @@ $stressTestPrograms = @{
     }
 
     'ycruncher' = @{
-        'processName'        = '00-x86' # This is the test with the least amount of required CPU features, should be the least amount of stress and the highest clock
+        'processName'        = '' # Depends on the selected modeYCruncher
         'processNameExt'     = 'exe'
-        'processNameForLoad' = '00-x86'
+        'processNameForLoad' = '' # Depends on the selected modeYCruncher
         'processPath'        = 'test_programs\y-cruncher\Binaries'
         'absolutePath'       = $null
         'fullPathToExe'      = $null
         'displayName'        = $null
         'windowNames'        = @(
-            '^*00\-x86\.exe*'
+            '' # Depends on the selected modeYCruncher
         )
     }
     
@@ -600,19 +600,44 @@ function Get-Settings {
         stressTestProgram = 'PRIME95'
 
 
-        # The mode of the stress test
-        # Prime95 settings:
+        # The test mode for Prime95
         # SSE:    lightest load on the processor, lowest temperatures, highest boost clock
         # AVX:    medium load on the processor, medium temperatures, medium boost clock
         # AVX2:   heavy load on the processor, highest temperatures, lowest boost clock
         # CUSTOM: you can define your own settings for Prime. See the "customs" section further below
-        # Aida64 settings:
+        # Default: SSE
+        modePrime = 'SSE'
+
+
+        # The test mode for Aida64
         # CACHE: Starts Aida64 with the "Cache" stress test
         # RAM:   Starts Aida64 with the "Memory" stress test
+        # Default: CACHE
+        modeAida = 'CACHE'
+
+
+        # The test mode for Y-Cruncher
+        # See the \test_programs\y-cruncher\Binaries\Tuning.txt file for a detailed explanation
+        # "00-x86" - 86/IA-32 since Pentium (BSWAP, CMPXCHG, CPUID, RDTSC, possibly others...)
+        # "04-P4P" - SSE, SSE2, SSE3
+        # "05-A64 ~ Kasumi" - x64, SSE, SSE2, SSE3
+        # "07-PNR ~ Nagisa" - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
+        # "08-NHM ~ Ushio"  - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
+        # "11-SNB ~ Hina"   - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX
+        # "11-BD1 ~ Miyu"   - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA4, XOP
+        # "13-HSW ~ Airi"   - x64, ABM, BMI1, BMI2, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+        # "14-BDW ~ Kurumi" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+        # "17-ZN1 ~ Yukina" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+        # "16-KNL"          - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2 AVX512-(F/CD)
+        # "17-SKX ~ Kotori" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2 AVX512-(F/CD/VL/BW/DQ)
+        # "18-CNL ~ Shinoa" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2 AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI)
+        # "19-ZN2 ~ Kagari" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
         #
-        # Default: SSE (for Prime95) resp. CACHE (for Aida64)
-        modePrime = 'SSE'
-        modeAida  = 'CACHE'
+        # "00-x86" should produce the highest boost clock on most tests
+        # "19-ZN2 ~ Kagari" is optimized for Zen2/3, but produces more heat and a lower boost clock on most tests
+        #
+        # Default: 00-x86
+        modeYCruncher = '00-x86'
 
 
         # The FFT size preset to test
@@ -756,7 +781,7 @@ function Get-Settings {
 
 
     # Certain setting values are strings
-    $settingsWithStrings = @('stressTestProgram', 'logfile', 'mode', 'modePrime', 'modeAida', 'FFTSize')
+    $settingsWithStrings = @('stressTestProgram', 'logfile', 'mode', 'modePrime', 'modeAida', 'modeYCruncher', 'FFTSize')
 
     # Lowercase for certain settings
     $settingsToLowercase = @('stressTestProgram')
@@ -829,6 +854,18 @@ function Get-Settings {
     elseif ($settings.stressTestProgram -eq 'aida64') {
         $settings.mode = $settings.modeAida
     }
+    elseif ($settings.stressTestProgram -eq 'ycruncher') {
+        $settings.mode = $settings.modeYCruncher
+    }
+
+
+    # The selected mode for Y-Cruncher = the binary to execute
+    # Override the variables
+    $Script:stressTestPrograms['ycruncher']['processName']        = $settings.modeYCruncher
+    $Script:stressTestPrograms['ycruncher']['processNameForLoad'] = $settings.modeYCruncher
+    $Script:stressTestPrograms['ycruncher']['fullPathToExe']      = $stressTestPrograms['ycruncher']['absolutePath'] + $settings.modeYCruncher
+    $Script:stressTestPrograms['ycruncher']['windowNames']        = @('^*' + $settings.modeYCruncher + '.exe$')
+    
 
 
     # Store in the global variable
@@ -1595,6 +1632,8 @@ function Initialize-YCruncher {
  #>
 function Start-YCruncher {
     Write-Verbose('Starting Y-Cruncher')
+
+    $thisMode = $settings.modeYCruncher
 
     # Minimized to the tray
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Hidden
