@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0
+    0.8.0.0 RC1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                   = '0.8.0.0'
+$version                   = '0.8.0.0 RC1'
 $curDateTime               = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -43,13 +43,19 @@ $stressTestLogFilePath     = $null
 # Stress test program executables and paths
 $stressTestPrograms = @{
     'prime95' = @{
+        'displayName'        = 'Prime95'
         'processName'        = 'prime95'
         'processNameExt'     = 'exe'
         'processNameForLoad' = 'prime95'
         'processPath'        = 'test_programs\p95'
         'absolutePath'       = $null
         'fullPathToExe'      = $null
-        'displayName'        = $null
+        'testModes'          = @(
+            'SSE',
+            'AVX',
+            'AVX2',
+            'CUSTOM'
+        )
         'windowNames'        = @(
             '^Prime95 - Self-Test',
             '^Prime95 - Not running',
@@ -59,35 +65,53 @@ $stressTestPrograms = @{
     }
 
     'aida64' = @{
+        'displayName'        = 'Aida64'
         'processName'        = 'aida64'
         'processNameExt'     = 'exe'
         'processNameForLoad' = 'aida_bench64.dll'   # This needs to be with file extension
         'processPath'        = 'test_programs\aida64'
         'absolutePath'       = $null
         'fullPathToExe'      = $null
-        'displayName'        = $null
+        'testModes'          = @(
+            'CACHE',
+            'RAM'
+        )
         'windowNames'        = @(
             '^System Stability Test - AIDA64*'
         )
     }
 
     'ycruncher' = @{
+        'displayName'        = "Y-Cruncher"
         'processName'        = '' # Depends on the selected modeYCruncher
         'processNameExt'     = 'exe'
         'processNameForLoad' = '' # Depends on the selected modeYCruncher
         'processPath'        = 'test_programs\y-cruncher\Binaries'
         'absolutePath'       = $null
         'fullPathToExe'      = $null
-        'displayName'        = $null
+        'testModes'          = @(
+            '00-x86',
+            '04-P4P',
+            '05-A64 ~ Kasumi',
+            '08-NHM ~ Ushio',
+            '11-SNB ~ Hina',
+            '13-HSW ~ Airi',
+            '14-BDW ~ Kurumi',
+            '17-ZN1 ~ Yukina',
+            '19-ZN2 ~ Kagari',
+            
+            # The following settings would be available, but they don't run on Ryzen CPUs
+            '11-BD1 ~ Miyu',
+            '17-SKX ~ Kotori',
+            '18-CNL ~ Shinoa'
+        )
         'windowNames'        = @(
             '' # Depends on the selected modeYCruncher
         )
     }
-    
 }
 
 foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
-    $stressTestPrograms[$testProgram.Name]['displayName']   = $testProgram.Name.Substring(0,1).ToUpper() + $testProgram.Name.Substring(1).ToLower()
     $stressTestPrograms[$testProgram.Name]['absolutePath']  = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
     $stressTestPrograms[$testProgram.Name]['fullPathToExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
 }
@@ -260,10 +284,10 @@ function Write-Verbose {
     
     if ($settings.verbosityMode) {
         if ($settings.verbosityMode -gt 1) {
-            Write-Host('           ' + '      + ' + $text)
+            Write-Host(''.PadLeft(11, ' ') + '      + ' + $text)
         }
 
-        Add-Content $logFileFullPath ('           ' + '      + ' + $text)
+        Add-Content $logFileFullPath (''.PadLeft(11, ' ') + '      + ' + $text)
     }
 
 }
@@ -590,53 +614,61 @@ function Get-Settings {
     # Default config settings
     # Change the various settings in the config.ini file
 
+    # skipOnError -> skipCoreOnError
+    # restartPrimeForEachCore -> restartTestProgramForEachCore
+    # delayBetweenCycles -> delayBetweenCores
+
     $defaultSettings = @{
         # The program to perform the actual stress test
-        # The following programs are available: PRIME95, AIDA64, YCRUNCHER
+        # The following programs are available:
+        # PRIME95
+        # AIDA64
+        # YCRUNCHER
         # Note: For AIDA64, you need to manually download and extract the portable ENGINEER version and put it
         #       in the /test_programs/aida64/ folder
-        # TODO: YCRUNCHER
-        # Default: PRIME95
+        # Default: 'PRIME95'
         stressTestProgram = 'PRIME95'
 
 
-        # The test mode for Prime95
+        # Select the test modes for the stress test programs
+        # The various programs have different available settings
+
+        # The test modes for Prime95:
         # SSE:    lightest load on the processor, lowest temperatures, highest boost clock
         # AVX:    medium load on the processor, medium temperatures, medium boost clock
         # AVX2:   heavy load on the processor, highest temperatures, lowest boost clock
         # CUSTOM: you can define your own settings for Prime. See the "customs" section further below
-        # Default: SSE
+        # Default: 'SSE'
         modePrime = 'SSE'
 
 
-        # The test mode for Aida64
+        # The test modes for Aida64
         # CACHE: Starts Aida64 with the "Cache" stress test
         # RAM:   Starts Aida64 with the "Memory" stress test
-        # Default: CACHE
+        # Default: 'CACHE'
         modeAida = 'CACHE'
 
 
-        # The test mode for Y-Cruncher
+        # The test modes for Y-Cruncher:
         # See the \test_programs\y-cruncher\Binaries\Tuning.txt file for a detailed explanation
-        # "00-x86" - 86/IA-32 since Pentium (BSWAP, CMPXCHG, CPUID, RDTSC, possibly others...)
-        # "04-P4P" - SSE, SSE2, SSE3
+        # "00-x86"          - 86/IA-32 since Pentium (BSWAP, CMPXCHG, CPUID, RDTSC, possibly others...)
+        # "04-P4P"          - SSE, SSE2, SSE3
         # "05-A64 ~ Kasumi" - x64, SSE, SSE2, SSE3
-        # "07-PNR ~ Nagisa" - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
         # "08-NHM ~ Ushio"  - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
         # "11-SNB ~ Hina"   - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX
-        # "11-BD1 ~ Miyu"   - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA4, XOP
         # "13-HSW ~ Airi"   - x64, ABM, BMI1, BMI2, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
         # "14-BDW ~ Kurumi" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
         # "17-ZN1 ~ Yukina" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
-        # "16-KNL"          - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2 AVX512-(F/CD)
+        # "19-ZN2 ~ Kagari" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+        #
+        # The following settings would be available as well, but they don't run on Ryzen CPUs!
+        # "11-BD1 ~ Miyu"   - x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA4, XOP
         # "17-SKX ~ Kotori" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2 AVX512-(F/CD/VL/BW/DQ)
         # "18-CNL ~ Shinoa" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2 AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI)
-        # "19-ZN2 ~ Kagari" - x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
         #
         # "00-x86" should produce the highest boost clock on most tests
         # "19-ZN2 ~ Kagari" is optimized for Zen2/3, but produces more heat and a lower boost clock on most tests
-        #
-        # Default: 00-x86
+        # Default: '00-x86'
         modeYCruncher = '00-x86'
 
 
@@ -664,7 +696,7 @@ function Get-Settings {
         # Skip a core that has thrown an error on the following iterations
         # If set to 0, this will test a core on the next iterations even if has thrown an error before
         # Default: 1
-        skipOnError = 0
+        skipCoreOnError = 0
 
 
         # Stop the whole testing process if an error occurred
@@ -695,20 +727,17 @@ function Get-Settings {
         coresToIgnore = @()
 
 
-        # Restart the Prime95 process for each new core test
-        # So each core will have the same sequence of FFT sizes
-        # The sequence of FFT sizes for Small FFTs:
-        # 40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240
-        # Runtime on a 5900x: 5,x minutes
-        # Note: The screen never seems to turn off with this setting enabled
-        restartPrimeForEachCore = 0
+        # Restart the stress test process when a new core is selected
+        # This means each core will perform the same sequence of tests during the stress test
+        # Note: The monitor doesn't seem to turn off when this setting is enabled
+        restartTestProgramForEachCore = 0
 
 
-        # If the "restartPrimeForEachCore" flag is set, this setting will define the amount of seconds between the end of the
+        # If the "restartTestProgramForEachCore" flag is set, this setting will define the amount of seconds between the end of the
         # run of one core and the start of another
-        # If "restartPrimeForEachCore" is 0, this setting has no effect
+        # If "restartTestProgramForEachCore" is 0, this setting has no effect
         # Default: 15
-        delayBetweenCycles = 15
+        delayBetweenCores = 15
 
 
         # The name of the log file
@@ -865,7 +894,12 @@ function Get-Settings {
     $Script:stressTestPrograms['ycruncher']['processNameForLoad'] = $settings.modeYCruncher
     $Script:stressTestPrograms['ycruncher']['fullPathToExe']      = $stressTestPrograms['ycruncher']['absolutePath'] + $settings.modeYCruncher
     $Script:stressTestPrograms['ycruncher']['windowNames']        = @('^*' + $settings.modeYCruncher + '.exe$')
-    
+
+
+    # Sanity check the selected test mode
+    if (!$stressTestPrograms[$settings.stressTestProgram]['testModes'].Contains($settings.mode)) {
+        Exit-WithFatalError('The selected test mode "' + $settings.mode + '" is not available for ' + $stressTestPrograms[$settings.stressTestProgram]['displayName'] + '!')
+    }
 
 
     # Store in the global variable
@@ -1097,7 +1131,7 @@ function Initialize-Prime95 {
     }
 
     # The Prime95 results.txt file name and path for this run
-    $Script:stressTestLogFileName = 'Prime95_' + $curDateTime + '_' + $configType + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    $Script:stressTestLogFileName = 'Prime95_' + $curDateTime + '_' + $configType + '_' + $settings.FFTSize + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
     $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
     # Create the local.txt and overwrite if necessary
@@ -1573,7 +1607,8 @@ function Initialize-YCruncher {
     }
 
     $configType = $settings.mode
-    $configName = '1-Thread_60s_Tests-BKT-BBP-SFT-FFT-N32-N64-HNT-VST.cfg'
+    #$configName = '1-Thread_60s_Tests-BKT-BBP-SFT-FFT-N32-N64-HNT-VST.cfg'
+    $configName = '1-Thread_60s_Tests-BKT-BBP-SFT-FFT-N32-N64-HNT-VST-C17.cfg'
     $configFile = $stressTestPrograms['ycruncher']['absolutePath'] + $configName
 
     $Script:stressTestConfigFileName = $configName
@@ -1585,8 +1620,9 @@ function Initialize-YCruncher {
     #}
 
     # The log file name and path for this run
-    $Script:stressTestLogFileName = 'Y-Cruncher_' + $curDateTime + '.txt'
-    $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+    # TODO: Y-Cruncher doesn't seem to create any type of log :(
+    #$Script:stressTestLogFileName = 'Y-Cruncher_' + $curDateTime + '.txt'
+    #$Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
 
     # Create the config file and overwrite if necessary
@@ -1984,9 +2020,16 @@ function Test-ProcessUsage {
             
             # Try to determine the last run FFT size
             # If the results.txt doesn't exist, assume that it was on the very first iteration
-            # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Small FFT sizes
+            # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Large FFT sizes
             #       So we cannot make an educated guess for these settings
-            if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['Small'].Max) {
+            #if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['Large'].Max) {
+            
+            # This check is taken from the Prime95 source code:
+            # if (fftlen > max_small_fftlen * 2) num_large_lengths++;
+            # The max smallest FFT size is 240, so starting with 480 the order should get randomized
+            # Large FFTs are not randomized, Huge FFTs and All FFTs are
+            # TODO: this doesn't seem right
+            if ($minFFTSize -le ($FFTMinMaxValues[$settings.mode]['Small'] * 2)) {
 
                 if (!$resultFileHandle) {
                     $lastRunFFT = $minFFTSize
@@ -2036,7 +2079,7 @@ function Test-ProcessUsage {
                 Write-Text('')
             }
 
-            # We're above Smallest / Small FFT, no real FFT size fail detection possible due to randomization of the order by Prime95
+            # Only Smallest, Small and Large FFT presets follow the order, so no real FFT size fail detection is possible due to randomization of the order by Prime95
             else {
                 $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
                 $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
@@ -2045,7 +2088,7 @@ function Test-ProcessUsage {
                 
                 if ($lastPassedFFT) {
                     Write-ColorText('ERROR: The last *passed* FFT size before the error was: ' + $lastPassedFFT + 'K') Magenta 
-                    Write-ColorText('ERROR: Unfortunately FFT size fail detection only works for Smallest or Small FFT sizes.') Magenta 
+                    Write-ColorText('ERROR: Unfortunately FFT size fail detection only works for Smallest, Small or Large FFT sizes.') Magenta 
                 }
                 else {
                     Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
@@ -2094,9 +2137,9 @@ function Test-ProcessUsage {
         
 
         # Try to restart the stress test program and continue with the next core
-        # Don't try to restart here if $settings.restartPrimeForEachCore is set
-        # because this will be taken care of in another routine
-        if (!$settings.restartPrimeForEachCore) {
+        # Don't try to restart at this point if $settings.restartTestProgramForEachCore is set to 1
+        # This will be taken care of in another routine
+        if (!$settings.restartTestProgramForEachCore) {
             $timestamp = Get-Date -format HH:mm:ss
             Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
 
@@ -2127,7 +2170,7 @@ try {
     $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
     $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
     $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
-    $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
+    $counterNames['FullName']         = '\' + $counterNames['Process'] + '(*)\' + $counterNames['ID Process']
     $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
     $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
 
@@ -2255,7 +2298,7 @@ $expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.numberOfThread
 [Int[]] $coresWithError = @()
 
 
-# Count the number of errors for each cores if the skipOnError setting is 0
+# Count the number of errors for each cores if the skipCoreOnError setting is 0
 $coresWithErrorsCounter = @{}
 
 for ($i = 0; $i -lt $numPhysCores; $i++) {
@@ -2332,7 +2375,6 @@ if ($settings.stressTestProgram -eq 'prime95') {
             256, 288, 320, 336, 384, 400,
 
             # Large FFT
-            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
             448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
             2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
             6400, 6720, 6912, 7168, 7680, 8000, 8192
@@ -2340,7 +2382,7 @@ if ($settings.stressTestProgram -eq 'prime95') {
             # Not used in Prime95 presets
             # Now custom labeled "Huge"
             # 32768 seems to be the maximum FFT size possible for SSE
-            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
             8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
             22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
         )
@@ -2359,7 +2401,6 @@ if ($settings.stressTestProgram -eq 'prime95') {
             256, 288, 320, 336, 384, 400,
 
             # Large FFT
-            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
             448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
             2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
             6400, 6720, 6912, 7168, 7680, 8000, 8192
@@ -2367,7 +2408,7 @@ if ($settings.stressTestProgram -eq 'prime95') {
             # Not used in Prime95 presets
             # Now custom labeled "Huge"
             # 32768 seems to be the maximum FFT size possible for AVX
-            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
             8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
             22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
         )
@@ -2387,7 +2428,6 @@ if ($settings.stressTestProgram -eq 'prime95') {
             256, 280, 288, 320, 336, 384, 400,
 
             # Large FFT
-            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
             448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
             2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
             6400, 6720, 7168, 7680, 8000, 8064, 8192
@@ -2395,7 +2435,7 @@ if ($settings.stressTestProgram -eq 'prime95') {
             # Not used in Prime95 presets
             # Now custom labeled "Huge"
             # 51200 seems to be the maximum FFT size possible for AVX2
-            # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
+            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
             8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
             21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
 
@@ -2500,13 +2540,19 @@ Start-StressTestProgram
 
 
 # Get the current datetime
-$timestamp = Get-Date -format u
+$timestamp = Get-Date -format 'yyyy-MM-dd HH:mm:ss'
 
 
 # Start messages
-Write-ColorText('---------------------------------------------------------------------------') Green
-Write-ColorText('----------- CoreCycler v' + $version + ' started at ' + $timestamp + ' -----------') Green
-Write-ColorText('---------------------------------------------------------------------------') Green
+$headline     = ' CoreCycler v' + $version + ' started at ' + $timestamp + ' '
+$padding      = 80 - $headline.Length
+$paddingLeft  = [Math]::Ceiling($padding / 2)
+$paddingRight = [Math]::Floor($padding / 2)
+
+# Start messages
+Write-ColorText('--------------------------------------------------------------------------------') Green
+Write-ColorText(''.PadLeft($paddingLeft, '-') + $headline + ''.PadRight($paddingRight, '-')) Green
+Write-ColorText('--------------------------------------------------------------------------------') Green
 
 # Verbosity
 if ($settings.verbosityMode -eq 1) {
@@ -2529,7 +2575,7 @@ Write-ColorText('Number of iterations: ..... ' + $settings.maxIterations) Cyan
 if ($settings.coresToIgnore.Length -gt 0) {
     $settings.coresToIgnoreString = (($settings.coresToIgnore | sort) -join ', ')
     Write-ColorText('Ignored cores: ............ ' + $settings.coresToIgnoreString) Cyan
-    Write-ColorText('---------------------------------------------------------------------------') Cyan
+    Write-ColorText('--------------------------------------------------------------------------------') Cyan
 }
 
 if ($settings.mode -eq 'CUSTOM') {
@@ -2550,7 +2596,7 @@ else {
     }
 }
 
-Write-ColorText('---------------------------------------------------------------------------') Cyan
+Write-ColorText('--------------------------------------------------------------------------------') Cyan
 
 
 
@@ -2559,8 +2605,12 @@ Write-ColorText('---------------------------------------------------------------
 Write-ColorText('The log files for this run are stored in:') Cyan
 Write-ColorText($logFilePathAbsolute) Cyan
 Write-ColorText((' - CoreCycler:').PadRight(17, ' ') + $logFileName) Cyan
-Write-ColorText((' - ' + $stressTestPrograms[$testProgram.Name]['displayName'] + ':').PadRight(17, ' ') + $stressTestLogFileName) Cyan
-Write-ColorText('---------------------------------------------------------------------------') Cyan
+
+if ($stressTestLogFileName) {
+    Write-ColorText((' - ' + $stressTestPrograms[$settings.stressTestProgram]['displayName'] + ':').PadRight(17, ' ') + $stressTestLogFileName) Cyan
+}
+
+Write-ColorText('--------------------------------------------------------------------------------') Cyan
 Write-Text('')
 
 
@@ -2588,8 +2638,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     $timestamp = Get-Date -format HH:mm:ss
 
     # Check if all of the cores have thrown an error, and if so, abort
-    # Only if the skipOnError setting is set
-    if ($settings.skipOnError -and $coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
+    # Only if the skipCoreOnError setting is set
+    if ($settings.skipCoreOnError -and $coresWithError.Length -eq ($numPhysCores - $settings.coresToIgnore.Length)) {
         # Also close the stress test program process to not let it run unnecessarily
         Close-StressTestProgram
         
@@ -2679,23 +2729,23 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         }
 
         # If this core is stored in the error core array
-        if ($settings.skipOnError -and $coresWithError -contains $coreNumber) {
+        if ($settings.skipCoreOnError -and $coresWithError -contains $coreNumber) {
             Write-Text($timestamp + ' - Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
             continue
         }
 
-        # If $settings.restartPrimeForEachCore is set, restart the stress test program for each core
-        if ($settings.restartPrimeForEachCore -and ($iteration -gt 1 -or $coreNumber -gt $coresToTest[0])) {
+        # If $settings.restartTestProgramForEachCore is set, restart the stress test program for each core
+        if ($settings.restartTestProgramForEachCore -and ($iteration -gt 1 -or $coreNumber -gt $coresToTest[0])) {
             Close-StressTestProgram
 
-            # If the delayBetweenCycles setting is set, wait for the defined amount
-            if ($settings.delayBetweenCycles -gt 0) {
-                Write-Text('           Idling for ' + $settings.delayBetweenCycles + ' seconds before continuing to the next core...')
+            # If the delayBetweenCores setting is set, wait for the defined amount
+            if ($settings.delayBetweenCores -gt 0) {
+                Write-Text('           Idling for ' + $settings.delayBetweenCores + ' seconds before continuing to the next core...')
 
                 # Also adjust the expected end time for this delay
-                $endDateThisCore += New-TimeSpan -Seconds $settings.delayBetweenCycles
+                $endDateThisCore += New-TimeSpan -Seconds $settings.delayBetweenCores
 
-                Start-Sleep -Seconds $settings.delayBetweenCycles
+                Start-Sleep -Seconds $settings.delayBetweenCores
             }
 
             Start-StressTestProgram
@@ -2728,8 +2778,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
 
         Write-Verbose('Successfully set the affinity to ' + $affinity)
 
-        # If this core is stored in the error core array and the skipOnError setting is not set, display the amount of errors
-        if (!$settings.skipOnError -and $coresWithError -contains $coreNumber) {
+        # If this core is stored in the error core array and the skipCoreOnError setting is not set, display the amount of errors
+        if (!$settings.skipCoreOnError -and $coresWithError -contains $coreNumber) {
             $text  = '           Note: This core has previously thrown ' + $coresWithErrorsCounter[$coreNumber] + ' error'
             $text += $(if ($coresWithErrorsCounter[$coreNumber] -gt 1) {'s'})
             
@@ -2787,7 +2837,7 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
     
     # Print out the cores that have thrown an error so far
     if ($coresWithError.Length -gt 0) {
-        if ($settings.skipOnError) {
+        if ($settings.skipCoreOnError) {
             Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
         }
         else {
