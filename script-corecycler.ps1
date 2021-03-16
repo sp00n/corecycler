@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.9.1
+    0.7.9.2
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.9.1'
+$version                = '0.7.9.2'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -146,6 +146,30 @@ function Write-Text {
     
     Write-Host $text
     Add-Content $logFilePath ($text)
+}
+
+
+<##
+ # Write an error message to the screen and to the log file
+ # .PARAM array $errorArray An array with the text entries to output
+ # .RETURN void
+ #>
+function Write-ErrorText {
+    param(
+        $errorArray
+    )
+
+    foreach ($entry in $errorArray) {
+        $lines  = @()
+        $lines += $entry.Exception.Message
+        $lines += $entry.InvocationInfo.PositionMessage
+        $lines += ('    + CategoryInfo          : ' + $entry.CategoryInfo.Category + ': (' + $entry.CategoryInfo.TargetName + ':' + $entry.CategoryInfo.TargetType + ') [' + $entry.CategoryInfo.Activity + '], ' + $entry.CategoryInfo.Reason)
+        $lines += ('    + FullyQualifiedErrorId : ' + $entry.FullyQualifiedErrorId)
+        $string = $lines | Out-String
+
+        Write-Host $string -ForegroundColor Red
+        Add-Content $logFilePath ($string)
+    }
 }
 
 
@@ -598,16 +622,64 @@ function Get-Prime95WindowHandler {
     # 'Prime95 - Not running': worker not running anymore
     # 'Prime95 - Waiting for work': worker not running, tried to start, no worker started
     # 'Prime95': worker not yet started
+    $windowNames = @(
+        '^Prime95 \- Self\-Test$'
+        '^Prime95 \- Not running$'
+        '^Prime95 \- Waiting for work$'
+        '^Prime95$'
+    )
+
+    Write-Verbose('Trying to get the Prime95 window handler');
+    Write-Verbose('Looking for these window names:')
+    Write-Verbose(($windowNames -Join ', '))
+
     $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
-            $_.WinTitle -eq 'Prime95 - Self-Test' `
-        -or $_.WinTitle -eq 'Prime95 - Not running' `
-        -or $_.WinTitle -eq 'Prime95 - Waiting for work' `
-        -or $_.WinTitle -eq 'Prime95'
+        $_.WinTitle -match ($windowNames -Join '|')
     }
+
+    Write-Verbose('Found the following window(s) with these names:')
+
+    $windowObj | ForEach-Object {
+        $path = (Get-Process -Id $_.ProcessId).Path
+        Write-Verbose(' - WinTitle:     ' + $_.WinTitle)
+        Write-Verbose('   ProcessId:    ' + $_.ProcessId)
+        Write-Verbose('   Process Path: ' + $path)
+    }
+
 
     # There might be another window open with the name "Prime95"
     # Select the correct one
-    $filteredWindowObj = $windowObj | Where-Object {(Get-Process -Id $_.ProcessId).Path -like '*prime95.exe'}
+    Write-Verbose('Filtering the windows for ".*prime95\.exe$":')
+
+    $filteredWindowObj = $windowObj | Where-Object {
+        (Get-Process -Id $_.ProcessId).Path -match ('.*prime95\.exe$')
+    }
+
+    $filteredWindowObj | ForEach-Object {
+        $path = (Get-Process -Id $_.ProcessId).Path
+        Write-Verbose(' - WinTitle:     ' + $_.WinTitle)
+        Write-Verbose('   ProcessId:    ' + $_.ProcessId)
+        Write-Verbose('   Process Path: ' + $path)
+    }
+
+
+    # Multiple processes found with the same name AND process name
+    # Abort and let the user close these programs
+    if ($filteredWindowObj -is [Array]) {
+        Write-ColorText('FATAL ERROR: Could not find the correct Prime95 window!') Red
+        Write-ColorText('There exist multiple windows with the same name as the Prime95:') Red
+        
+        $filteredWindowObj | ForEach-Object {
+            $path = (Get-Process -Id $_.ProcessId).Path
+            Write-ColorText(' - Windows Title: ' + $_.WinTitle) Yellow
+            Write-ColorText('   Process Path:  ' + $path) Yellow
+            Write-ColorText('   Process Id:    ' + $_.ProcessId) Yellow
+        }
+
+        Write-ColorText('Please close these windows and try again.') Red
+        Exit-WithFatalError
+    }
+
 
     # Override the global script variables
     $Script:processWindowHandler = $filteredWindowObj.MainWindowHandle
@@ -762,6 +834,7 @@ function Close-Prime95 {
     # If we now have a processWindowHandler, try to close the window
     if ($processWindowHandler) {
         $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        $Error.Clear()
 
         Write-Verbose('Trying to gracefully close Prime95')
         
@@ -780,6 +853,7 @@ function Close-Prime95 {
     
     # If the window is still here at this point, just kill the process
     $process = Get-Process $processName -ErrorAction SilentlyContinue
+    $Error.Clear()
 
     if ($process) {
         Write-Verbose('Could not gracefully close Prime95, killing the process')
@@ -824,9 +898,11 @@ function Test-ProcessUsage {
 
     # Get the content of the results.txt file
     $resultFileHandle = Get-Item -Path $primeResultsPath -ErrorAction SilentlyContinue
+    $Error.Clear()
 
     # Does the process still exist?
     $process = Get-Process $processName -ErrorAction SilentlyContinue
+    $Error.Clear()
     
 
     # 1. The process doesn't exist anymore, immediate error
@@ -878,6 +954,7 @@ function Test-ProcessUsage {
     if (!$primeError) {
         # Get the CPU percentage
         $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+        $Error.Clear()
         
         Write-Verbose($timestamp + ' - ...checking CPU usage: ' + $processCPUPercentage + '%')
 
@@ -914,6 +991,7 @@ function Test-ProcessUsage {
 
                 $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
                 $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+                $Error.Clear()
 
                 Write-Verbose($timestamp + ' - ...checking CPU usage again: ' + $thisProcessCPUPercentage + '%')
 
@@ -948,10 +1026,6 @@ function Test-ProcessUsage {
         }
 
 
-        # Try to close the Prime95 process if it is still running
-        Close-Prime95
-        
-        
         # Put out an error message
         $timestamp = Get-Date -format HH:mm:ss
         Write-ColorText('ERROR: ' + $timestamp) Magenta
@@ -961,33 +1035,53 @@ function Test-ProcessUsage {
         
         # DEBUG
         # Also add the 5 last rows of the results.txt file
-        #Write-Verbose('LAST 5 ROWS OF RESULTS.TXT:')
-        #Write-Verbose(Get-Item -Path $primeResultsPath | Get-Content -Tail 5)
+        #Write-Text('LAST 5 ROWS OF RESULTS.TXT:')
+        #Write-Text(Get-Item -Path $stressTestLogFilePath | Get-Content -Tail 5)
         
         # Try to determine the last run FFT size
         # If the results.txt doesn't exist, assume that it was on the very first iteration
-        # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Small FFT sizes
+        # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Large FFT sizes
         #       So we cannot make an educated guess for these settings
-        if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['Small'].Max) {
+        #if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['Large'].Max) {
+        
+        # This check is taken from the Prime95 source code:
+        # if (fftlen > max_small_fftlen * 2) num_large_lengths++;
+        # The max smallest FFT size is 240, so starting with 480 the order should get randomized
+        # Large FFTs are not randomized, Huge FFTs and All FFTs are
+        # TODO: this doesn't seem right
+        #if ($minFFTSize -le ($FFTMinMaxValues[$settings.mode]['Small']['Min'] * 2)) {
+
+        #if ($settings.FFTSize -eq 'Smallest' -or $settings.FFTSize -eq 'Small' -or $settings.FFTSize -eq 'Large') {
+
+        # Temporary(?) solution
+        if ($maxFFTSize -le $FFTMinMaxValues['SSE']['Large']['Max']) {
+            Write-Verbose('The maximum FFT size is within the range where we can still make an educated guess about the failed FFT size')
+
+            # No results file exists yet
             if (!$resultFileHandle) {
+                Write-Verbose('No results.txt exists yet, assuming the error happened on the first FFT size')
                 $lastRunFFT = $minFFTSize
             }
             
             # Get the last couple of rows and find the last passed FFT size
             else {
+                Write-Verbose('Trying to find the last passed FFT sizes')
+
                 $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
                 $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
                 $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
                 
                 # No passed FFT was found, assume it's the first FFT size
                 if (!$lastPassedFFT) {
                     $lastRunFFT = $minFFTSize
+                    Write-Verbose('No passed FFT was found, assume it was the first FFT size: ' + $lastRunFFT)
                 }
 
                 # If the last passed FFT size is the max selected FFT size, start at the beginning
                 elseif ($lastPassedFFT -eq $maxFFTSize) {
                     $lastRunFFT = $minFFTSize
+                    Write-Verbose('The last passed FFT size is the max selected FFT size, use the min FFT size: ' + $lastRunFFT)
                 }
 
                 # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
@@ -995,14 +1089,16 @@ function Test-ProcessUsage {
                 # Example: Smallest FFT max = 21, but the actual last size tested is 20K
                 elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
                     $lastRunFFT = $minFFTSize
+                    Write-Verbose('The last passed FFT size does not show up in the FFTSizes array, assume it''s the first FFT size: ' + $lastRunFFT)
                 }
 
                 # If it's not the max value and it does show up in the FFT array, select the next value
                 else {
                     $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
+                    Write-Verbose('Last passed FFT size found: ' + $lastRunFFT)
                 }
             }
-            
+
             # Educated guess
             if ($lastRunFFT) {
                 Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
@@ -1016,25 +1112,36 @@ function Test-ProcessUsage {
 
             Write-Text('')
         }
+
+        # Only Smallest, Small and Large FFT presets follow the order, so no real FFT size fail detection is possible due to randomization of the order by Prime95
         else {
             $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
             $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-            $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+            $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
             $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
             
             if ($lastPassedFFT) {
                 Write-ColorText('ERROR: The last *passed* FFT size before the error was: ' + $lastPassedFFT + 'K') Magenta 
-                Write-ColorText('ERROR: Unfortunately FFT size fail detection only works for Smallest or Small FFT sizes.') Magenta 
+                Write-ColorText('ERROR: Unfortunately FFT size fail detection only works for Smallest, Small or Large FFT sizes.') Magenta 
             }
             else {
                 Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
             }
+
+            Write-Verbose('The max FFT size was outside of the range where it still follows a numerical order')
+            Write-Verbose('The selected max FFT size:         ' + $maxFFTSize)
+            Write-Verbose('The limit for the numerical order: ' + $FFTMinMaxValues['SSE']['Large']['Max'])
+
 
             Write-Verbose('The last 5 entries in the results.txt:')
             Write-Verbose($lastFiveRows -Join ', ')
 
             Write-Text('')
         }
+
+        # Try to close the stress test program process if it is still running
+        Write-Verbose('Trying to close Prime95 to re-start it')
+        Close-Prime95
 
 
         # If the stopOnError flag is set, stop at this point
@@ -1070,7 +1177,11 @@ function Test-ProcessUsage {
         
         
         # Throw an error to let the caller know there was an error
-        throw 'Prime95 seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')'
+        #throw ('Prime95 seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+        # Use a fixed value to be able to differentiate between a "real" error and this info
+        # System.ApplicationException
+        # System.Activities.WorkflowApplicationAbortedException
+        throw '999'
     }
 }
 
@@ -1081,35 +1192,8 @@ function Test-ProcessUsage {
  #>
 
 
-# Get the localized counter names
-try {
-    $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
-
-    $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
-    $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
-    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
-    $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
-    $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
-    $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
-
-    # Examples
-    # English: ID Process
-    # German:  Prozesskennung
-    # English: % Processor Time
-    # German:  Prozessorzeit (%)
-}
-catch {
-    Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
-    Write-Host
-    Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
-    Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
-    Write-Host
-
-    $Error
-
-    Read-Host -Prompt 'Press Enter to exit'
-    exit
-}
+# Get the default and the user settings
+Get-Settings
 
 
 # Error Checks
@@ -1138,6 +1222,37 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
 
 # Clear the error variable, it may have been populated by the above calls
 $Error.clear()
+
+
+# Trry to get the localized counter names
+try {
+    $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
+
+    $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
+    $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
+    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
+    $counterNames['FullName']         = "\" + $counterNames['Process'] + "(*)\" + $counterNames['ID Process']
+    $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
+    $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
+
+    # Examples
+    # English: ID Process
+    # German:  Prozesskennung
+    # English: % Processor Time
+    # German:  Prozessorzeit (%)
+}
+catch {
+    Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
+    Write-Host
+    Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
+    Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
+    Write-Host
+
+    $Error
+
+    Read-Host -Prompt 'Press Enter to exit'
+    exit
+}
 
 
 # Try to access the Performance Process Counter
@@ -1173,13 +1288,9 @@ Add-Type -TypeDefinition $GetWindowDefinition
 Add-Type -TypeDefinition $CloseWindowDefinition
 
 
-# Get the default and the user settings
-Get-Settings
-
-
-
 # The Prime95 process
 $process = Get-Process $processName -ErrorAction SilentlyContinue
+$Error.Clear()
 
 
 # The expected CPU usage for the running Prime95 process
@@ -1469,9 +1580,7 @@ if ($settings.mode -eq 'CUSTOM') {
     Write-ColorText('TortureTime     = ' + $settings.customTortureTime) Cyan
 }
 else {
-    if ($settings.stressTestProgram -eq 'prime95') {
-        Write-ColorText('Selected FFT size: ........ ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
-    }
+    Write-ColorText('Selected FFT size: ........ ' + $settings.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
 }
 
 Write-ColorText('---------------------------------------------------------------------------') Cyan
@@ -1651,7 +1760,17 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             
             # On error, the Prime95 process is not running anymore, so skip this core
             catch {
-                continue coreLoop
+                Write-Verbose('There has been some error in Test-ProcessUsage, checking')
+
+                if ($Error -and $Error[0].ToString() -eq '999') {
+                    Write-Verbose('Prime95 seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+                    continue coreLoop
+                }
+                else {
+                    Write-ColorText('FATAL ERROR:') Red
+                    Write-ErrorText $Error
+                    Exit-WithFatalError
+                }
             }
         }
         
@@ -1665,7 +1784,17 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         
         # On error, the Prime95 process is not running anymore, so skip this core
         catch {
-            continue
+            Write-Verbose('There has been some error in Test-ProcessUsage, checking')
+
+            if ($Error -and $Error[0] -eq '999') {
+                Write-Verbose('Prime95 seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+                continue
+            }
+            else {
+                Write-ColorText('FATAL ERROR:') Red
+                Write-ErrorText $Error
+                Exit-WithFatalError
+            }
         }
 
         $timestamp = (Get-Date).ToString("HH:mm:ss")
