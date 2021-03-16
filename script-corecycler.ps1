@@ -57,10 +57,10 @@ $stressTestPrograms = @{
             'CUSTOM'
         )
         'windowNames'        = @(
-            '^Prime95 - Self-Test',
-            '^Prime95 - Not running',
-            '^Prime95 - Waiting for work',
-            '^Prime95'
+            '^Prime95 \- Self\-Test$',
+            '^Prime95 \- Not running$',
+            '^Prime95 \- Waiting for work$',
+            '^Prime95$'
         )
     }
 
@@ -77,7 +77,7 @@ $stressTestPrograms = @{
             'RAM'
         )
         'windowNames'        = @(
-            '^System Stability Test - AIDA64*'
+            '^System Stability Test \- AIDA64*'
         )
     }
 
@@ -128,10 +128,12 @@ $stressTestProgramsWithSameProcess = @(
 $englishCounterNames = @(
     'Process',
     'ID Process',
-    '% Processor Time',
-    'Processor Information',
-    '% Processor Performance',
-    '% Processor Utility'
+    '% Processor Time'
+
+    # Possible future use
+    #'Processor Information',
+    #'% Processor Performance',
+    #'% Processor Utility'
 )
 
 # This stores the Name:ID pairs of the english counter names
@@ -240,6 +242,23 @@ function Write-Text {
     
     Write-Host $text
     Add-Content $logFileFullPath ($text)
+}
+
+
+<##
+ # Write an error message to the screen and to the log file
+ # .PARAM array $errorArray An array with the text entries to output
+ # .RETURN void
+ #>
+function Write-ErrorText {
+    param(
+        $errorArray
+    )
+
+    foreach ($entry in $errorArray) {
+        Write-Host $entry -ForegroundColor Red
+        Add-Content $logFileFullPath ($text)
+    }
 }
 
 
@@ -386,7 +405,7 @@ function Get-PerformanceCounterIDs {
         $counterId   = [Int]$allCounters[$i]
         $counterName = [String]$allCounters[$i+1]
 
-        if ($englishCounterNames.Contains($counterName)) {
+        if ($englishCounterNames.Contains($counterName) -and !$countersHash.ContainsKey($counterName)) {
             $countersHash[$counterName] = $counterId
         }
 
@@ -611,6 +630,8 @@ function Resume-Process {
  # .RETURN void
  #>
 function Get-Settings {
+    Write-Verbose('Parsing the user settings')
+
     # Default config settings
     # Change the various settings in the config.ini file
 
@@ -893,7 +914,7 @@ function Get-Settings {
     $Script:stressTestPrograms['ycruncher']['processName']        = $settings.modeYCruncher
     $Script:stressTestPrograms['ycruncher']['processNameForLoad'] = $settings.modeYCruncher
     $Script:stressTestPrograms['ycruncher']['fullPathToExe']      = $stressTestPrograms['ycruncher']['absolutePath'] + $settings.modeYCruncher
-    $Script:stressTestPrograms['ycruncher']['windowNames']        = @('^*' + $settings.modeYCruncher + '.exe$')
+    $Script:stressTestPrograms['ycruncher']['windowNames']        = @('^.*' + $settings.modeYCruncher + '\.exe$')
 
 
     # Sanity check the selected test mode
@@ -1037,26 +1058,51 @@ function Get-StressTestWindowHandler {
     Write-Verbose(($stressTestPrograms[$settings.stressTestProgram]['windowNames'] -Join ', '))
 
     $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
-        $_.WinTitle -Match ($stressTestPrograms[$settings.stressTestProgram]['windowNames'] -Join '|')
+        $_.WinTitle -match ($stressTestPrograms[$settings.stressTestProgram]['windowNames'] -Join '|')
     }
 
-    #Write-Verbose('Found window objects:')
-    #Write-Text((Write-Output($windowObj | Format-Table | Out-String)).Trim())
+    Write-Verbose('Found the following window(s) with these names:')
 
     $windowObj | ForEach-Object {
-        Write-Verbose('WinTitle:  ' + $_.WinTitle)
-        Write-Verbose('ProcessId: ' + $_.ProcessId)
-        
-        #$thisProcess = (Get-Process -Id $_.ProcessId)
-        #Write-Text('Process:   ')
-        #Write-Text((Write-Output($thisProcess | Format-Table | Out-String)).Trim())
-        
-        Write-Verbose('Process Path: ' + $_.Path)
+        $path = (Get-Process -Id $_.ProcessId).Path
+        Write-Verbose(' - WinTitle:     ' + $_.WinTitle)
+        Write-Verbose('   ProcessId:    ' + $_.ProcessId)
+        Write-Verbose('   Process Path: ' + $path)
     }
 
     # There might be another window open with the same name as the stress test program (e.g. an Explorer window)
     # Select the correct one
-    $filteredWindowObj = $windowObj | Where-Object {(Get-Process -Id $_.ProcessId).Path -like ('*' + $fileName)}
+    Write-Verbose('Filtering the windows for ".*' + $stressTestPrograms[$settings.stressTestProgram]['processName'] + '.' + $stressTestPrograms[$settings.stressTestProgram]['processNameExt'] + '$":')
+
+    $filteredWindowObj = $windowObj | Where-Object {
+        (Get-Process -Id $_.ProcessId).Path -match ('.*' + $stressTestPrograms[$settings.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.stressTestProgram]['processNameExt'] + '$')
+    }
+
+    $filteredWindowObj | ForEach-Object {
+        $path = (Get-Process -Id $_.ProcessId).Path
+        Write-Verbose(' - WinTitle:     ' + $_.WinTitle)
+        Write-Verbose('   ProcessId:    ' + $_.ProcessId)
+        Write-Verbose('   Process Path: ' + $path)
+    }
+
+
+    # Multiple processes found with the same name AND process name
+    # Abort and let the user close these programs
+    if ($filteredWindowObj -is [Array]) {
+        Write-ColorText('FATAL ERROR: Could not find the correct stress test window!') Red
+        Write-ColorText('There exist multiple windows with the same name as the the stress test program:') Red
+        
+        $filteredWindowObj | ForEach-Object {
+            $path = (Get-Process -Id $_.ProcessId).Path
+            Write-ColorText(' - Windows Title: ' + $_.WinTitle) Yellow
+            Write-ColorText('   Process Path:  ' + $path) Yellow
+            Write-ColorText('   Process Id:    ' + $_.ProcessId) Yellow
+        }
+
+        Write-ColorText('Please close these windows and try again.') Red
+        Exit-WithFatalError
+    }
+
 
     # Also, the process performing the stress test can actually be different to the main window of the stress test program
     # But search only for it if the flag to do so was set (which it is by default)
@@ -1257,7 +1303,7 @@ function Start-Prime95 {
  # .RETURN void
  #>
 function Close-Prime95 {
-    Write-Verbose('Closing Prime95')
+    Write-Verbose('Trying to close Prime95')
 
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
@@ -1268,6 +1314,7 @@ function Close-Prime95 {
     # If we now have a windowProcessMainWindowHandler, try to close the window
     if ($windowProcessMainWindowHandler) {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
+        $Error.Clear()
 
         Write-Verbose('Trying to gracefully close Prime95')
         
@@ -1286,6 +1333,7 @@ function Close-Prime95 {
     
     # If the window is still here at this point, just kill the process
     $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
+    $Error.Clear()
 
     if ($windowProcess) {
         Write-Verbose('Could not gracefully close Prime95, killing the process')
@@ -1480,7 +1528,8 @@ function Start-Aida64 {
     for ($i = 1; $i -le 30; $i++) {
         Start-Sleep -Milliseconds 500
 
-        $stressTestProcess  = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] -ErrorAction SilentlyContinue
+        $stressTestProcess = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processNameForLoad'] -ErrorAction SilentlyContinue
+        $Error.Clear()
 
         if ($stressTestProcess) {
             break
@@ -1528,7 +1577,7 @@ function Start-Aida64 {
  # .RETURN void
  #>
 function Close-Aida64 {
-    Write-Verbose('Closing Aida64')
+    Write-Verbose('Trying to close Aida64')
 
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
@@ -1540,6 +1589,7 @@ function Close-Aida64 {
     # So just kill it
     if ($stressTestProcessId) {
         $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction SilentlyContinue
+        $Error.Clear()
         
         if ($stressTestProcess) {
             Write-Verbose('Killing the stress test program process')
@@ -1553,6 +1603,7 @@ function Close-Aida64 {
         Write-Verbose('windowProcessId: ' + $windowProcessId)
         
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
+        $Error.Clear()
 
         # This returns false if no window is found with this handle
         if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
@@ -1572,6 +1623,7 @@ function Close-Aida64 {
     
     # If the window is still here at this point, just kill the process
     $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction SilentlyContinue
+    $Error.Clear()
 
     if ($windowProcess) {
         Write-Verbose('Could not gracefully close Aida64, killing the process')
@@ -1675,8 +1727,8 @@ function Start-YCruncher {
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Minimized
-    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru
+    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Minimized
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
@@ -1721,7 +1773,7 @@ function Start-YCruncher {
  # .RETURN void
  #>
 function Close-YCruncher {
-    Write-Verbose('Closing Y-Cruncher')
+    Write-Verbose('Trying to close Y-Cruncher')
 
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
@@ -1732,6 +1784,7 @@ function Close-YCruncher {
     # If we now have a windowProcessMainWindowHandler, try to close the window
     if ($windowProcessMainWindowHandler) {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
+        $Error.Clear()
 
         Write-Verbose('Trying to gracefully close Y-Cruncher')
         
@@ -1750,6 +1803,7 @@ function Close-YCruncher {
     
     # If the window is still here at this point, just kill the process
     $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
+    $Error.Clear()
 
     if ($windowProcess) {
         Write-Verbose('Could not gracefully close Y-Cruncher, killing the process')
@@ -1770,6 +1824,8 @@ function Close-YCruncher {
  # .RETURN void
  #>
 function Initialize-StressTestProgram {
+    Write-Verbose('Initalizing the stress test program')
+
     if ($settings.stressTestProgram -eq 'prime95') {
         Initialize-Prime95 $settings.mode
     }
@@ -1791,6 +1847,8 @@ function Initialize-StressTestProgram {
  # .RETURN void
  #>
 function Start-StressTestProgram {
+    Write-Verbose('Starting the stress test program')
+
     if ($settings.stressTestProgram -eq 'prime95') {
         Start-Prime95
     }
@@ -1812,6 +1870,8 @@ function Start-StressTestProgram {
  # .RETURN void
  #>
 function Close-StressTestProgram {
+    Write-Verbose('Trying to close the stress test program')
+
     if ($settings.stressTestProgram -eq 'prime95') {
         Close-Prime95
     }
@@ -1838,6 +1898,9 @@ function Test-ProcessUsage {
         $coreNumber
     )
 
+    # Clear any previous errors
+    $Error.Clear()
+
     $timestamp = Get-Date -format HH:mm:ss
     
     # The minimum CPU usage for the stress test program, below which it should be treated as an error
@@ -1860,10 +1923,12 @@ function Test-ProcessUsage {
 
     if ($settings.stressTestProgram -eq 'prime95') {
         $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction SilentlyContinue
+        $Error.Clear()
     }
 
     # Does the process still exist?
     $stressTestProcess = Get-Process $processName -ErrorAction SilentlyContinue
+    $Error.Clear()
     
 
     # 1. The process doesn't exist anymore, immediate error
@@ -1916,6 +1981,7 @@ function Test-ProcessUsage {
     if (!$stressTestError) {
         # Get the CPU percentage
         $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+        $Error.Clear()
         
         Write-Verbose($timestamp + ' - ...checking CPU usage: ' + $processCPUPercentage + '%')
 
@@ -1960,18 +2026,19 @@ function Test-ProcessUsage {
 
                 $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
                 $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
+                $Error.Clear()
 
                 Write-Verbose($timestamp + ' - ...checking CPU usage again: ' + $thisProcessCPUPercentage + '%')
 
                 # Still below the minimum usage
                 if ($processCPUPercentage -le $minProcessUsage) {
-                    Write-Verbose('           ...CPU usage: ' + $thisProcessCPUPercentage + '%')
+                    Write-Verbose('           ...still not enough usage, throw an error')
 
                     # We don't care about an error string here anymore
                     $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $processCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
                 }
-                else{
-
+                else {
+                    Write-Verbose('           ...the process seems to have recovered, continuing with stress testing')
                 }
             }
         }
@@ -1979,6 +2046,8 @@ function Test-ProcessUsage {
 
 
     if ($stressTestError) {
+        Write-Verbose('There has been an error with the stress test program!')
+
         # Store the core number in the array
         $Script:coresWithError += $coreNumber
 
@@ -1999,20 +2068,19 @@ function Test-ProcessUsage {
         }
 
 
-        # Try to close the stress test program process if it is still running
-        Close-StressTestProgram
-        
-        
         # Put out an error message
         $timestamp = Get-Date -format HH:mm:ss
         Write-ColorText('ERROR: ' + $timestamp) Magenta
         Write-ColorText('ERROR: ' + $selectedStressTestProgram + ' seems to have stopped with an error!') Magenta
         Write-ColorText('ERROR: At Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')') Magenta
         Write-ColorText('ERROR MESSAGE: ' + $stressTestError) Magenta
-        
 
+
+        # Try to get more detailed error information
         # Prime95
         if ($settings.stressTestProgram -eq 'prime95') {
+            Write-Verbose('The stress test program is Prime95, trying to look for an error message in the results.txt')
+
             # DEBUG
             # Also add the 5 last rows of the results.txt file
             #Write-Text('LAST 5 ROWS OF RESULTS.TXT:')
@@ -2029,27 +2097,39 @@ function Test-ProcessUsage {
             # The max smallest FFT size is 240, so starting with 480 the order should get randomized
             # Large FFTs are not randomized, Huge FFTs and All FFTs are
             # TODO: this doesn't seem right
-            if ($minFFTSize -le ($FFTMinMaxValues[$settings.mode]['Small'] * 2)) {
+            #if ($minFFTSize -le ($FFTMinMaxValues[$settings.mode]['Small']['Min'] * 2)) {
 
+            #if ($settings.FFTSize -eq 'Smallest' -or $settings.FFTSize -eq 'Small' -or $settings.FFTSize -eq 'Large') {
+
+            # Temporary(?) solution
+            if ($maxFFTSize -le $FFTMinMaxValues['SSE']['Large']['Max']) {
+                Write-Verbose('The maximum FFT size is within the range where we can still make an educated guess about the failed FFT size')
+
+                # No results file exists yet
                 if (!$resultFileHandle) {
+                    Write-Verbose('No results.txt exists yet, assuming the error happened on the first FFT size')
                     $lastRunFFT = $minFFTSize
                 }
                 
                 # Get the last couple of rows and find the last passed FFT size
                 else {
+                    Write-Verbose('Trying to find the last passed FFT sizes')
+
                     $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
                     $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-                    $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+                    $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
                     $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
                     
                     # No passed FFT was found, assume it's the first FFT size
                     if (!$lastPassedFFT) {
                         $lastRunFFT = $minFFTSize
+                        Write-Verbose('No passed FFT was found, assume it was the first FFT size: ' + $lastRunFFT)
                     }
 
                     # If the last passed FFT size is the max selected FFT size, start at the beginning
                     elseif ($lastPassedFFT -eq $maxFFTSize) {
                         $lastRunFFT = $minFFTSize
+                        Write-Verbose('The last passed FFT size is the max selected FFT size, use the min FFT size: ' + $lastRunFFT)
                     }
 
                     # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
@@ -2057,11 +2137,13 @@ function Test-ProcessUsage {
                     # Example: Smallest FFT max = 21, but the actual last size tested is 20K
                     elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
                         $lastRunFFT = $minFFTSize
+                        Write-Verbose('The last passed FFT size does not show up in the FFTSizes array, assume it''s the first FFT size: ' + $lastRunFFT)
                     }
 
                     # If it's not the max value and it does show up in the FFT array, select the next value
                     else {
                         $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
+                        Write-Verbose('Last passed FFT size found: ' + $lastRunFFT)
                     }
                 }
 
@@ -2083,7 +2165,7 @@ function Test-ProcessUsage {
             else {
                 $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
                 $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self-test (\d+)K passed'
+                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
                 $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
                 
                 if ($lastPassedFFT) {
@@ -2094,6 +2176,11 @@ function Test-ProcessUsage {
                     Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
                 }
 
+                Write-Verbose('The max FFT size was outside of the range where it still follows a numerical order')
+                Write-Verbose('The selected max FFT size:         ' + $maxFFTSize)
+                Write-Verbose('The limit for the numerical order: ' + $FFTMinMaxValues['SSE']['Large']['Max'])
+
+
                 Write-Verbose('The last 5 entries in the results.txt:')
                 Write-Verbose($lastFiveRows -Join ', ')
 
@@ -2103,16 +2190,21 @@ function Test-ProcessUsage {
 
 
         # Aida64
-        if ($settings.stressTestProgram -eq 'aida64') {
-
+        elseif ($settings.stressTestProgram -eq 'aida64') {
+            Write-Verbose('The stress test program is Aida64, no detailed error detection available')
         }
 
 
         # Y-Cruncher
-        if ($settings.stressTestProgram -eq 'ycruncher') {
-
+        elseif ($settings.stressTestProgram -eq 'ycruncher') {
+            Write-Verbose('The stress test program is Y-Cruncher, no detailed error detection available')
         }
 
+
+        # Try to close the stress test program process if it is still running
+        Write-Verbose('Trying to close the stress test program to re-start it')
+        Close-StressTestProgram
+        
 
         # If the stopOnError flag is set, stop at this point
         if ($settings.stopOnError) {
@@ -2140,19 +2232,22 @@ function Test-ProcessUsage {
         # Don't try to restart at this point if $settings.restartTestProgramForEachCore is set to 1
         # This will be taken care of in another routine
         if (!$settings.restartTestProgramForEachCore) {
+            Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
+
             $timestamp = Get-Date -format HH:mm:ss
             Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
 
-            # Close the stress test program if it still exists
-            Close-StressTestProgram
-            
             # Start the stress test program again
             Start-StressTestProgram
         }
         
         
         # Throw an error to let the caller know there was an error
-        throw ($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+        #throw ($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+        # Use a fixed value to be able to differentiate between a "real" error and this info
+        # System.ApplicationException
+        # System.Activities.WorkflowApplicationAbortedException
+        throw '999'
     }
 }
 
@@ -2163,38 +2258,8 @@ function Test-ProcessUsage {
  #>
 
 
-# Get the localized counter names
-try {
-    $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
-
-    $counterNames['Process']          = Get-PerformanceCounterLocalName $counterNameIds['Process']
-    $counterNames['ID Process']       = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
-    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
-    $counterNames['FullName']         = '\' + $counterNames['Process'] + '(*)\' + $counterNames['ID Process']
-    $counterNames['SearchString']     = '\\' + $counterNames['ID Process'] + '$'
-    $counterNames['ReplaceString']    = '\' + $counterNames['% Processor Time']
-
-    # Examples
-    # English: ID Process
-    # German:  Prozesskennung
-    # English: % Processor Time
-    # German:  Prozessorzeit (%)
-
-    #$counterNames['Processor Information' ]  = Get-PerformanceCounterLocalName $counterNameIds['Processor Information']
-    #$counterNames['% Processor Performance'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Performance']
-    #$counterNames['% Processor Utility']     = Get-PerformanceCounterLocalName $counterNameIds['% Processor Utility']
-}
-catch {
-    Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
-    Write-Host
-    Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
-    Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
-    Write-Host
-
-    $Error
-
-    Exit-Script
-}
+# Get the default and the user settings
+Get-Settings
 
 
 # Error Checks
@@ -2224,7 +2289,60 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
 $Error.clear()
 
 
-# Try to access the Performance Process Counter
+# Try top get the localized counter names
+try {
+    Write-Verbose('Trying to get the localized performance counter names')
+
+    $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
+    $counterNameIds.GetEnumerator().ForEach({ 
+        Write-Verbose(('ID of "' + $_.Name + '":').PadRight(43, ' ') + $_.Value)
+    })
+
+    $counterNames['Process'] = Get-PerformanceCounterLocalName $counterNameIds['Process']
+    Write-Verbose('The localized name for "Process":          ' + $counterNames['Process'])
+
+    $counterNames['ID Process'] = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
+    Write-Verbose('The localized name for "ID Process":       ' + $counterNames['ID Process'])
+
+    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
+    Write-Verbose('The localized name for "% Processor Time": ' + $counterNames['% Processor Time'])
+
+
+    $counterNames['FullName']      = '\' + $counterNames['Process'] + '(*)\' + $counterNames['ID Process']
+    $counterNames['SearchString']  = '\\' + $counterNames['ID Process'] + '$'
+    $counterNames['ReplaceString'] = '\' + $counterNames['% Processor Time']
+
+    Write-Verbose('FullName:                                  ' + $counterNames['FullName'])
+    Write-Verbose('SearchString:                              ' + $counterNames['SearchString'])
+    Write-Verbose('ReplaceString:                             ' + $counterNames['ReplaceString'])
+
+    # Examples
+    # English             German               Spanish                      French
+    # -------             ------               -------                      ------
+    # Process             Prozess              Proseco                      Processus
+    # ID Process          Prozesskennung       Id. de proseco               ID de processus
+    # % Processor Time    Prozessorzeit (%)    % de tiempo de procesador    % temps processeur
+    
+    
+    # These are additional counters that may or may not be used in the future   
+    #$counterNames['Processor Information' ]  = Get-PerformanceCounterLocalName $counterNameIds['Processor Information']
+    #$counterNames['% Processor Performance'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Performance']
+    #$counterNames['% Processor Utility']     = Get-PerformanceCounterLocalName $counterNameIds['% Processor Utility']
+}
+catch {
+    Write-Host 'FATAL ERROR: Could not get the localized Performance Process Counter name!' -ForegroundColor Red
+    Write-Host
+    Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
+    Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
+    Write-Host
+
+    $Error
+
+    Exit-Script
+}
+
+
+# Try to access the localized Performance Process Counters
 # It may be disabled
 
 # This is the original english call:
@@ -2250,14 +2368,10 @@ if (!$counter) {
 }
 
 
-
 # Make the external code definitions available to PowerShell
 Add-Type -TypeDefinition $GetWindowDefinition
 Add-Type -TypeDefinition $CloseWindowDefinition
 
-
-# Get the default and the user settings
-Get-Settings
 
 # The name of the selected stress test program
 $selectedStressTestProgram = $stressTestPrograms[$settings.stressTestProgram]['displayName']
@@ -2285,6 +2399,7 @@ else {
     $windowProcess = Get-Process $stressTestPrograms[$settings.stressTestProgram]['processName'] -ErrorAction SilentlyContinue
 }
 
+$Error.Clear()
 
 
 # The expected CPU usage for the running stress test process
@@ -2736,6 +2851,8 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
 
         # If $settings.restartTestProgramForEachCore is set, restart the stress test program for each core
         if ($settings.restartTestProgramForEachCore -and ($iteration -gt 1 -or $coreNumber -gt $coresToTest[0])) {
+            Write-Verbose('restartTestProgramForEachCore is set, restarting the test program...')
+
             Close-StressTestProgram
 
             # If the delayBetweenCores setting is set, wait for the defined amount
@@ -2813,7 +2930,17 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
             
             # On error, the Prime95 process is not running anymore, so skip this core
             catch {
-                continue coreLoop
+                Write-Verbose('There has been some error in Test-ProcessUsage, checking')
+
+                if ($Error -and $Error[0].ToString() -eq '999') {
+                    Write-Verbose($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+                    continue coreLoop
+                }
+                else {
+                    Write-ColorText('FATAL ERROR:') Red
+                    Write-ErrorText $Error
+                    Exit-WithFatalError
+                }
             }
         }
         
@@ -2827,7 +2954,17 @@ for ($iteration = 1; $iteration -le $settings.maxIterations; $iteration++) {
         
         # On error, the Prime95 process is not running anymore, so skip this core
         catch {
-            continue
+            Write-Verbose('There has been some error in Test-ProcessUsage, checking')
+
+            if ($Error -and $Error[0] -eq '999') {
+                Write-Verbose($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+                continue
+            }
+            else {
+                Write-ColorText('FATAL ERROR:') Red
+                Write-ErrorText $Error
+                Exit-WithFatalError
+            }
         }
 
         $timestamp = (Get-Date).ToString("HH:mm:ss")
