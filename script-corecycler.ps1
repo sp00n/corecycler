@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.7.9.0
+    0.7.9.1
 .DESCRIPTION
     Sets the affinity of the Prime95 process to only one core and cycles through all the cores
     to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                = '0.7.9.0'
+$version                = '0.7.9.1'
 $curDateTime            = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $settings               = $null
 $logFilePath            = $null
@@ -235,7 +235,7 @@ function Get-PerformanceCounterIDs {
         $counterId   = [Int]$allCounters[$i]
         $counterName = [String]$allCounters[$i+1]
 
-        if ($englishCounterNames.Contains($counterName)) {
+        if ($englishCounterNames.Contains($counterName) -and !$countersHash.ContainsKey($counterName)) {
             $countersHash[$counterName] = $counterId
         }
 
