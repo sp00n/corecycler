@@ -256,8 +256,15 @@ function Write-ErrorText {
     )
 
     foreach ($entry in $errorArray) {
-        Write-Host $entry -ForegroundColor Red
-        Add-Content $logFileFullPath ($text)
+        $lines  = @()
+        $lines += $entry.Exception.Message
+        $lines += $entry.InvocationInfo.PositionMessage
+        $lines += ('    + CategoryInfo          : ' + $entry.CategoryInfo.Category + ': (' + $entry.CategoryInfo.TargetName + ':' + $entry.CategoryInfo.TargetType + ') [' + $entry.CategoryInfo.Activity + '], ' + $entry.CategoryInfo.Reason)
+        $lines += ('    + FullyQualifiedErrorId : ' + $entry.FullyQualifiedErrorId)
+        $string = $lines | Out-String
+
+        Write-Host $string -ForegroundColor Red
+        Add-Content $logFilePath ($string)
     }
 }
 
@@ -1090,7 +1097,7 @@ function Get-StressTestWindowHandler {
     # Abort and let the user close these programs
     if ($filteredWindowObj -is [Array]) {
         Write-ColorText('FATAL ERROR: Could not find the correct stress test window!') Red
-        Write-ColorText('There exist multiple windows with the same name as the the stress test program:') Red
+        Write-ColorText('There exist multiple windows with the same name as the stress test program:') Red
         
         $filteredWindowObj | ForEach-Object {
             $path = (Get-Process -Id $_.ProcessId).Path
