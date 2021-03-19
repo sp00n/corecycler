@@ -1159,10 +1159,6 @@ function Get-TortureWeakValue {
  # .RETURN void
  #>
 function Get-StressTestWindowHandler {
-    param (
-        $testForStressTestProgram = $true
-    )
-
     $stressTestProcess   = $null
     $stressTestProcessId = $null
     
@@ -1254,32 +1250,27 @@ function Get-StressTestWindowHandler {
 
 
     # Also, the process performing the stress test can actually be different to the main window of the stress test program
-    # But search only for it if the flag to do so was set (which it is by default)
-    if ($testForStressTestProgram) {
-        if ($stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) {
-            Write-Verbose('The process performing the stress test is NOT the same as the main window!')
-            Write-Verbose('Searching for the stress test process id...')
-            
-            try {
-                Write-Verbose('Searching for "' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + '"...')
-                $stressTestProcess   = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Stop
-                $stressTestProcessId = $stressTestProcess.Id
+    # If so, search for it as well
+    if ($stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) {
+        Write-Verbose('The process performing the stress test is NOT the same as the main window!')
+        Write-Verbose('Searching for the stress test process id...')
+        
+        try {
+            Write-Verbose('Searching for "' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + '"...')
+            $stressTestProcess   = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Stop
+            $stressTestProcessId = $stressTestProcess.Id
 
-                Write-Verbose('Found with ID: ' + $stressTestProcessId)
-            }
-            catch {
-                Exit-WithFatalError('Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + ')')
-            }
+            Write-Verbose('Found with ID: ' + $stressTestProcessId)
         }
-
-        # The stress test and the main window are the same process
-        else {
-            $stressTestProcess   = $windowProcess # This one already exists outside the function
-            $stressTestProcessId = $filteredWindowObj.ProcessId
+        catch {
+            Exit-WithFatalError('Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + ')')
         }
     }
+
+    # The stress test and the main window are the same process
     else {
-        Write-Verbose('The flag to NOT search for the stress test programm process was set.')
+        $stressTestProcess   = $windowProcess # This one already exists outside the function
+        $stressTestProcessId = $filteredWindowObj.ProcessId
     }
 
 
@@ -1457,7 +1448,7 @@ function Close-Prime95 {
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
     if (!$windowProcessMainWindowHandler) {
-        Get-StressTestWindowHandler $false
+        Get-StressTestWindowHandler
     }
     
     # If we now have a windowProcessMainWindowHandler, try to close the window
@@ -1736,7 +1727,7 @@ function Close-Aida64 {
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
     if (!$windowProcessMainWindowHandler) {
-        Get-StressTestWindowHandler $false
+        Get-StressTestWindowHandler
     }
 
     # The stress test window cannot be closed gracefully, as it has no main window
@@ -1951,7 +1942,7 @@ function Close-YCruncher {
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
     if (!$windowProcessMainWindowHandler) {
-        Get-StressTestWindowHandler $false
+        Get-StressTestWindowHandler
     }
     
     # If we now have a windowProcessMainWindowHandler, try to close the window
