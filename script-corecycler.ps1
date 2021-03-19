@@ -445,6 +445,8 @@ function Get-PerformanceCounterIDs {
 ##     $parameterTypes $parameters 
 ## 
 ############################################################################## 
+# Unfortunately this introduces a memory leak when called multiple times in a row
+############################################################################## 
 function Invoke-WindowsApi {
     param(
         [string] $dllName, 
@@ -457,7 +459,12 @@ function Invoke-WindowsApi {
     ## Begin to build the dynamic assembly
     $domain   = [AppDomain]::CurrentDomain
     $name     = New-Object Reflection.AssemblyName 'PInvokeAssembly'
+
+    # TODO: This is potentially huge memory hog!
+    # Only really noticable when using Aida64 though
+    # Maybe this? https://stackoverflow.com/questions/2503645/reflect-emit-dynamic-type-memory-blowup
     $assembly = $domain.DefineDynamicAssembly($name, 'Run')
+    
     $module   = $assembly.DefineDynamicModule('PInvokeModule')
     $type     = $module.DefineType('PInvokeType', "Public,BeforeFieldInit")
 
@@ -510,27 +517,78 @@ function Invoke-WindowsApi {
     foreach ($refParameter in $refParameters) {
        $parameters[$refParameter - 1].Value = $inputParameters[$refParameter - 1]
     }
+
+
+    # Cleanup
+    # But it doesn't help
+    # So this might be an issue with .NET / C# itself?
+    # For example this? https://stackoverflow.com/questions/2503645/reflect-emit-dynamic-type-memory-blowup
+    $dllName         = $null
+    $returnType      = $null
+    $methodName      = $null
+    $parameters      = $null
+    $domain          = $null
+    $name            = $null
+    $assembly        = $null
+    $module          = $null
+    $type            = $null
+    $counter         = $null
+    $inputParameters = $null
+    $refParameters   = $null
+    $method          = $null
+    $ctor            = $null
+    $attr            = $null
+    $realType        = $null
+    $parameterTypes  = $null
+    $refParameter    = $null
+    
+    Remove-Variable -Force -Name 'dllName'
+    Remove-Variable -Force -Name 'returnType'
+    Remove-Variable -Force -Name 'methodName'
+    Remove-Variable -Force -Name 'parameters'
+    Remove-Variable -Force -Name 'domain'
+    Remove-Variable -Force -Name 'name'
+    Remove-Variable -Force -Name 'assembly'
+    Remove-Variable -Force -Name 'module'
+    Remove-Variable -Force -Name 'type'
+    Remove-Variable -Force -Name 'counter'
+    Remove-Variable -Force -Name 'inputParameters'
+    Remove-Variable -Force -Name 'refParameters'
+    Remove-Variable -Force -Name 'method'
+    Remove-Variable -Force -Name 'ctor'
+    Remove-Variable -Force -Name 'attr'
+    Remove-Variable -Force -Name 'realType'
+    Remove-Variable -Force -Name 'parameterTypes'
+    Remove-Variable -Force -Name 'refParameter'
+    
+    [System.GC]::Collect()
 }
 
 
 <##
  # Suspends a process
+ # Unfortunately this introduces a memory leak on multiple calls (resp. Invoke-WindowsApi does)
  # .PARAM [System.Diagnostics.Process] $process The process to suspend
  # .RETURN [Int] The number of suspended threads from this process. -1 if something failed
  #>
 function Suspend-Process {
-    #Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcess" @([int]) @($processId)
-
     param(
+        [Parameter(Mandatory=$true)]
         [System.Diagnostics.Process]$process
     )
 
+    if (!$process) {
+        return -2
+    }
+
     Write-Verbose('Suspending process:')
-    Write-Verbose($process.Id + ' - ' + $process.ProcessName)
+    Write-Verbose($process.Id.ToString() + ' - ' + $process.ProcessName.ToString())
 
     $numThreads = 0
     $suspendCounts = 0
-
+    $invokedThreadsArray = @()
+    $processedThreadsArray = @()
+    $previousSuspendCountArray = @()
 
     $process.Threads | ForEach-Object {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
@@ -542,27 +600,40 @@ function Suspend-Process {
 
         $numThreads++
 
-        Write-Verbose('  - Suspending thread id: ' + $currentThreadId)
+        $invokedThreadsArray += $currentThreadId
+
+        #Write-Verbose('  - Suspending thread id: ' + $currentThreadId)
 
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread
         # Do we also need Wow64SuspendThread?
         # https://docs.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-wow64suspendthread
         $previousSuspendCount = Invoke-WindowsApi "kernel32" ([int]) "SuspendThread" @([IntPtr]) @($currentThreadId)
 
-        Write-Verbose('Suspended thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 0)')
+        #Write-Verbose('    Suspended thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 0)')
+        
+        $processedThreadsArray     += $currentThreadId
+        $previousSuspendCountArray += $previousSuspendCount
 
         if ($previousSuspendCount -gt 0) {
-            Write-Verbose('The previous suspend count is larger than 0, this means the process was already suspended... (curious but not necessarily an error)')
+            #Write-Verbose('    The previous suspend count is larger than 0, this means the process was already suspended... (curious but not necessarily an error)')
         }
 
         # $previousSuspendCount should be 0 if the thread is suspended now
         # If it > 0, then there is more than one suspended "state" on the thread. All of these need to be resumed to fully resume the thread/process
         # If it is -1, the operation has failed
-        
         if ($previousSuspendCount -ge 0) {
             $suspendCounts++
         }
     }
+
+
+    Write-Verbose('Threads that were invoked:')
+    Write-Verbose('    ' + ($invokedThreadsArray -Join ', '))
+    Write-Verbose('Threads that were processed:')
+    Write-Verbose('    ' + ($processedThreadsArray -Join ', '))
+    Write-Verbose('Previous suspend counts (should be 0):')
+    Write-Verbose('    ' + ($previousSuspendCountArray -Join ', '))
+
 
     if ($suspendCounts -eq $numThreads) {
         return $suspendCounts
@@ -575,21 +646,28 @@ function Suspend-Process {
 
 <##
  # Resumes a suspended process
+ # Unfortunately this introduces a memory leak on multiple calls (resp. Invoke-WindowsApi does)
  # .PARAM System.Diagnostics.Process $process The process to resume
  # .RETURN [Int] The number of resumed threads from this process. -1 if something failed
  #>
 function Resume-Process {
-    #Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcessStop" @([int]) @($processId)
-
     param(
+        [Parameter(Mandatory=$true)]
         [System.Diagnostics.Process]$process
     )
 
+    if (!$process) {
+        return -2
+    }
+
     Write-Verbose('Resuming process:')
-    Write-Verbose($process.Id + ' - ' + $process.ProcessName)
+    Write-Verbose($process.Id.ToString() + ' - ' + $process.ProcessName.ToString())
 
     $numThreads = 0
     $resumeCounts = 0
+    $invokedThreadsArray = @()
+    $processedThreadsArray = @()
+    $previousSuspendCountArray = @()
 
     $process.Threads | ForEach-Object {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
@@ -601,7 +679,9 @@ function Resume-Process {
 
         $numThreads++
 
-        Write-Verbose('  - Resuming thread id: ' + $currentThreadId)
+        $invokedThreadsArray += $currentThreadId
+
+        #Write-Verbose('  - Resuming thread id: ' + $currentThreadId)
 
         # $previousSuspendCount should be 1 if the thread is resumed now
         # If it > 1, then there is more than one suspended "state" on the thread. All of these need to be resumed to fully resume the thread/process
@@ -610,10 +690,13 @@ function Resume-Process {
             # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread
             $previousSuspendCount = Invoke-WindowsApi "kernel32" ([int]) "ResumeThread" @([IntPtr]) @($currentThreadId)
             
-            Write-Verbose('Resumed thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 1)')
+            #Write-Verbose('    Resumed thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 1 or 0)')
+            
+            $processedThreadsArray     += $currentThreadId
+            $previousSuspendCountArray += $previousSuspendCount
 
             if ($previousSuspendCount -gt 1) {
-                Write-Verbose('The previous suspend count is larger than 1, this means the process has multiple suspended states... (curious but not necessarily an error)')
+                #Write-Verbose('    The previous suspend count is larger than 1, this means the thread has multiple suspended states... (curious but not necessarily an error)')
             }
         } while ($previousSuspendCount -gt 1)
 
@@ -622,12 +705,59 @@ function Resume-Process {
         }
     }
 
+
+    Write-Verbose('Threads that were invoked:')
+    Write-Verbose('    ' + ($invokedThreadsArray -Join ', '))
+    Write-Verbose('Threads that were processed:')
+    Write-Verbose('    ' + ($processedThreadsArray -Join ', '))
+    Write-Verbose('Previous suspend counts (should be 1 or 0):')
+    Write-Verbose('    ' + ($previousSuspendCountArray -Join ', '))
+
+
     if ($resumeCounts -eq $numThreads) {
         return $resumeCounts
     }
     else {
         return -1
     }
+}
+
+
+<##
+ # Suspends a process via the DebugActiveProcess method
+ # .PARAM [System.Diagnostics.Process] $process The process to suspend
+ # .RETURN Bool
+ #>
+function Suspend-ProcessWithDebugMethod {
+    param(
+        [Parameter(Mandatory=$true)]
+        [System.Diagnostics.Process]$process
+    )
+
+    if (!$process) {
+        return $false
+    }
+
+    Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcess" @([int]) @($process.Id)
+}
+
+
+<##
+ # Resumes a suspended process
+ # .PARAM System.Diagnostics.Process $process The process to resume
+ # .RETURN Bool
+ #>
+function Resume-ProcessWithDebugMethod {
+    param(
+        [Parameter(Mandatory=$true)]
+        [System.Diagnostics.Process]$process
+    )
+
+    if (!$process) {
+        return $false
+    }
+
+    Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcessStop" @([int]) @($process.Id)
 }
 
 
@@ -720,7 +850,7 @@ function Import-Settings {
             if ($name -eq 'coresToIgnore') {
                 $setting = @()
 
-                if ($value -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+                if ($value -ne $null -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
                     # Split the string by comma and add to the coresToIgnore entry
                     $value -split ',\s*' | ForEach-Object {
                         if ($_.Length -gt 0) {
@@ -841,8 +971,12 @@ function Get-Settings {
     foreach ($sectionEntry in $userSettings.GetEnumerator()) {
         foreach ($userSetting in $sectionEntry.Value.GetEnumerator()) {
             # No empty values
-            if ($userSetting.Value -and ![string]::IsNullOrEmpty($userSetting.Value) -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) {
+            if ($userSetting.Value -ne $null -and ![string]::IsNullOrEmpty($userSetting.Value) -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) {
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
+            }
+            else {
+                Write-Verbose('Setting is empty!')
+                Write-Verbose('[' + $sectionEntry.Name + '][' + $userSetting.Name + ']: ' + $userSetting.Value)
             }
         }
     }
@@ -1039,6 +1173,42 @@ function Get-StressTestWindowHandler {
     $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
         $_.WinTitle -match ($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join '|')
     }
+
+    # No windows found, wait for a bit and repeat
+    if ($windowObj.Length -eq 0) {
+        Write-Verbose('No window found for these names!')
+        Start-Sleep -Milliseconds 300
+
+        $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
+            $_.WinTitle -match ($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join '|')
+        }
+    }
+
+
+    # Still nothing found, throw an error
+    if ($windowObj.Length -eq 0) {
+        Write-ColorText('FATAL ERROR: Could not find a window instance for the stress test program!') Red
+        Write-ColorText('Was looking for these window names:') Red
+        Write-ColorText(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', ')) Yellow
+
+        # I could dump all of the window names here, but I'd rather not due to privacy reasons
+        
+        # Check the process
+        $process = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName']
+
+        if ($process.Length -gt 0) {
+            Write-ColorText('However, found a process with the process name "' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '":') Red
+
+            $process | ForEach-Object {
+                Write-ColorText(' - ProcessName:  ' + $_.ProcessName) Yellow
+                Write-ColorText('   Process Path: ' + $_.Path) Yellow
+                Write-ColorText('   Process Id:   ' + $_.Id) Yellow
+            }
+        }
+
+        Exit-WithFatalError
+    }
+
 
     Write-Verbose('Found the following window(s) with these names:')
 
@@ -1294,6 +1464,11 @@ function Close-Prime95 {
     if ($windowProcessMainWindowHandler) {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
         $Error.Clear()
+
+        # The process may be suspended
+        if ($windowProcess) {
+            $resumed = Resume-ProcessWithDebugMethod $windowProcess
+        }
 
         Write-Verbose('Trying to gracefully close Prime95')
         
@@ -1569,6 +1744,11 @@ function Close-Aida64 {
     if ($stressTestProcessId) {
         $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction SilentlyContinue
         $Error.Clear()
+
+        # The process may be suspended
+        if ($stressTestProcess) {
+            $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
+        }
         
         if ($stressTestProcess) {
             Write-Verbose('Killing the stress test program process')
@@ -1583,6 +1763,11 @@ function Close-Aida64 {
         
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
         $Error.Clear()
+
+        # The process may be suspended
+        if ($windowProcess) {
+            $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
+        }
 
         # This returns false if no window is found with this handle
         if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
@@ -1773,6 +1958,11 @@ function Close-YCruncher {
     if ($windowProcessMainWindowHandler) {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
         $Error.Clear()
+
+        # The process may be suspended
+        if ($windowProcess) {
+            $resumed = Resume-ProcessWithDebugMethod $windowProcess
+        }
 
         Write-Verbose('Trying to gracefully close Y-Cruncher')
         
@@ -2642,6 +2832,27 @@ Initialize-StressTestProgram
 Start-StressTestProgram
 
 
+# Get the core test mode if it's set to default
+$coreTestOrderMode = $settings.General.coreTestOrder
+
+if ($settings.General.coreTestOrder -eq 'default') {
+    if ($numPhysCores -gt 8) {
+        $coreTestOrderMode = 'alternate'
+    }
+    else {
+        $coreTestOrderMode = 'sequential'
+    }
+}
+
+
+# All the cores in the system
+$allCores = @(0..($numPhysCores-1))
+$coresToTest = $allCores
+
+# Subtract ignored cores
+$coresToTest = $allCores | ? {$_ -notin $settings.General.coresToIgnore}
+
+
 # Get the current datetime
 $timestamp = Get-Date -format 'yyyy-MM-dd HH:mm:ss'
 
@@ -2672,7 +2883,8 @@ Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / 
 Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
 Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
 Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore)) Cyan
-Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper()) Cyan
+Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
+Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + ' (' + $coreTestOrderMode.ToUpper() + ')') Cyan
 Write-ColorText('Number of iterations: ..... ' + $settings.General.maxIterations) Cyan
 
 # Print a message if we're ignoring certain cores
@@ -2728,25 +2940,6 @@ catch {
     Exit-WithFatalError('Process ' + $processName + ' not found!')
 }
 
-
-# All the cores
-$allCores = @(0..($numPhysCores-1))
-$coresToTest = $allCores
-
-# Subtract ignored cores
-$coresToTest = $allCores | ? {$_ -notin $settings.General.coresToIgnore}
-
-# Get the core test mode if it's set to default
-$coreTestOrderMode = $settings.General.coreTestOrder
-
-if ($settings.General.coreTestOrder -eq 'default') {
-    if ($numPhysCores -gt 8) {
-        $coreTestOrderMode = 'alternate'
-    }
-    else {
-        $coreTestOrderMode = 'sequential'
-    }
-}
 
 
 # Repeat the whole check $settings.General.maxIterations times
@@ -2978,6 +3171,20 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
             # Get the current CPU frequency
             $currentCpuInfo = Get-CpuFrequency $cpuNumber
             Write-Verbose('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
+
+
+            # Suspend and resume the stress test
+            if ($settings.General.suspendPeriodically) {
+                Write-Verbose('Suspending the stress test process')
+                $suspended = Suspend-ProcessWithDebugMethod $stressTestProcess
+                Write-Verbose('Suspended: ' + $suspended)
+
+                Start-Sleep -Milliseconds 1000
+
+                Write-Verbose('Resuming the stress test process')
+                $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
+                Write-Verbose('Resumed: ' + $resumed)
+            }
         }
         
         # Wait for the remaining runtime
