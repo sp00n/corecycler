@@ -3044,6 +3044,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
                 
                 $affinity = 2
+                $cpuNumber = 1
                 $cpuNumberString = 1
             }
 
