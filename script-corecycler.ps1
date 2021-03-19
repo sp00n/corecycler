@@ -2955,6 +2955,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
 
     $previousCoreNumber = $null
     $availableCores     = $coresToTest
+    $halfCores          = $numPhysCores / 2
     
     # Iterate over each core
     # Named for loop
@@ -2971,7 +2972,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         # If the core test order mode is random or alternate, we need to get the actual core to tests
         if ($coreTestOrderMode -eq 'alternate') {
             Write-Verbose('Alternating test order selected, getting the core to test...')
-            $halfCores = $numPhysCores / 2
+            Write-Verbose('Previous core: ' + $previousCoreNumber)
 
             if ($previousCoreNumber -ne $null) {
                 if ($previousCoreNumber -lt $halfCores) {
@@ -3017,10 +3018,24 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         $cpuNumberString = (($cpuNumbersArray | sort) -join ' and ')
 
 
-        # Apparently Aida64 doesn't like having the affinity set to 1?
+        # Skip if this core is in the ignored cores array
+        if ($settings.General.coresToIgnore -contains $actualCoreNumber) {
+            # Ignore it silently
+            Write-Verbose('Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping')
+            continue
+        }
+
+        # Skip if this core is stored in the error core array
+        if ($settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
+            Write-Text($timestamp + ' - Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
+            continue
+        }
+
+
+        # Apparently Aida64 doesn't like having the affinity set to 1
         # Possible workaround: Set it to 2 instead
         # This also poses a problem when testing two threads on core 0, so we're skipping this core for the time being
-        if ($affinity -eq 1 -and $settings.General.stressTestProgram -eq 'aida64') {
+        if ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 1) {
             Write-ColorText('           Notice!') Black Yellow
 
             # If Hyperthreading / SMT is enabled
@@ -3042,28 +3057,15 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 continue
             }
         }
-        elseif ($affinity -eq 3 -and $settings.General.stressTestProgram -eq 'aida64') {
+
+        # Aida64 running on CPU 0 and CPU 1 (2 threads)
+        elseif ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 3) {
             Write-ColorText('           Notice!') Black Yellow
             Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
             Write-ColorText('           So you might see an error due to decreased CPU usage.') Black Yellow
             #$affinity = 
         }
         
-
-
-
-        # If this core is in the ignored cores array
-        if ($settings.General.coresToIgnore -contains $actualCoreNumber) {
-            # Ignore it silently
-            #Write-Text($timestamp + ' - Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping')
-            continue
-        }
-
-        # If this core is stored in the error core array
-        if ($settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
-            Write-Text($timestamp + ' - Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
-            continue
-        }
 
         # If $settings.General.restartTestProgramForEachCore is set, restart the stress test program for each core
         if ($settings.General.restartTestProgramForEachCore -and ($iteration -gt 1 -or $actualCoreNumber -gt $coresToTest[0])) {
