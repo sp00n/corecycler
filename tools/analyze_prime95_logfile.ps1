@@ -4,7 +4,7 @@
  #>
 
 # The log file to analyze. Either copy the log file to this directory or provide the full path to the log file
-$filePath  = ''
+$filePath = ''
 
 
 # The script tries to autodetect the FFT preset and test mode used in the log file, but you can specify them here
@@ -147,7 +147,13 @@ $allFFTSizesInLogifle       = @()
 $foundFFTSizesIteration     = @()
 $foundFFTSizesUnique        = @()
 $foundTestModesMinMax       = @()
-$foundTestModesFFT          = @()
+$detectedTestModesFFT       = @()
+$detectedFftPreset          = $null
+$autodetectedTestMode       = $false
+$autodetectedFftPreset      = $false
+$foundTestModesMinMax       = @()
+$detectedTestModesFFT       = @()
+$testModesToCheck           = @()
 $logfile                    = Get-Content $filePath
 $regexFFT                   = '^Self\-test (\d+)K passed!$'
 $regexTime                  = '^\[(.*)]$'
@@ -160,7 +166,7 @@ $durations                  = @()
 
 
 # Autodetect the FFT size
-if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset -eq 0) {
+if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length -eq 0) {
     Write-Host ('')
     Write-Host ('Autodetecting the used FFT preset and test mode in the log file') -ForegroundColor Blue
     Write-Host ('---------------------------------------------------------------') -ForegroundColor Blue
@@ -188,90 +194,131 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset -eq 0) 
     Write-Host -NoNewline ('Maximum FFT Size found: ... ') -ForegroundColor Cyan
     Write-Host ($maxFoundFFTSize) -ForegroundColor Yellow
 
-    if (!$testMode -or $testMode.Length -eq 0) {
-        # No test mode was provided, try to guesstimate it
-        $foundTestModesMinMax = @()
-        $foundTestModesFFT    = @()
+    # If there was a test mode provided
+    if ($testMode -and $testMode.Length -gt 0) {
+        $testModesToCheck += $testMode
+    }
+    else {
+        # First check SSE, then AVX, then AVX2
+        $testModesToCheck = @('SSE', 'AVX', 'AVX2')
+    }
 
-        # First use SSE, then AVX, then AVX2
-        foreach ($testModeBeingChecked in @('SSE', 'AVX', 'AVX2')) {
+    # No FFT preset was provided
+    if (!$fftPreset -or $fftPreset.Length -eq 0) {
+        # Go through the provided or all of the test modes
+        foreach ($testModeBeingChecked in $testModesToCheck) {
             # Check if the min and max values match
             foreach ($fftSizeEntry in $FFTMinMaxValues[$testModeBeingChecked].GetEnumerator()) {
                 if ($fftSizeEntry.Value['Min'] -eq $minFoundFFTSize -and $fftSizeEntry.Value['Max'] -eq $maxFoundFFTSize) {
                     $foundTestModesMinMax += $testModeBeingChecked
-                    $fftPreset = $fftSizeEntry.Name # This should not change, so we can fix it
+                    $detectedFftPreset = $fftSizeEntry.Name # This should not change, so we don't need to save all found presets
                 }
             }
         }
 
-
-        # Check if all the FFT sizes are correct
-        foreach ($testModeBeingChecked in @('SSE', 'AVX', 'AVX2')) {
-            if (!$foundTestModesMinMax.Contains($testModeBeingChecked)) {
-                continue
-            }
-
-            # Get the sub array
-            $startKey = [Array]::indexOf($allFFTSizes[$testModeBeingChecked], $FFTMinMaxValues[$testModeBeingChecked][$fftPreset]['Min'])
-            $endKey   = [Array]::indexOf($allFFTSizes[$testModeBeingChecked], $FFTMinMaxValues[$testModeBeingChecked][$fftPreset]['Max'])
-            $fftSubarray = $allFFTSizes[$testModeBeingChecked][$startKey..$endKey]
-            
-            $missing1 = $fftSubarray | Where {$allUniqueFFTSizesInLogfile -NotContains $_}
-            $missing2 = $allUniqueFFTSizesInLogfile | Where {$fftSubarray -NotContains $_}
-
-
-            <#
-            ''
-            'testModeBeingChecked:'
-            $testModeBeingChecked
-
-            'fftSubarray:'
-            $fftSubarray -Join ', '
-
-            'Do the arrays match?'
-
-            
-            'missing1:'
-            ' - Length: ' + $missing1.Length
-            $missing1 -Join ', '
-
-
-            'missing2:'
-            ' - Length: ' + $missing2.Length
-            $missing2 -Join ', '
-            '-------------------------------------'
-            #>
-            
-
-            if ($missing1.Length -eq 0 -and $missing2.Length -eq 0) {
-                $foundTestModesFFT += $testModeBeingChecked
-            }
-        }
-
-
-        # No matching test mode found
-        if ($foundTestModesFFT.Length -eq 0) {
+        if (!$detectedFftPreset) {
             Write-Host ('ERROR: Could not find a matching FFT preset!') -ForegroundColor Red
 
             Read-Host -Prompt 'Press Enter to exit'
             exit
         }
 
-        # If more than one test mode was found, abort, because we cannot be sure
-        # if ($foundTestModesFFT.Length -gt 1) {
-        #     Write-Host ('ERROR: Found more than one matching FFT preset!') -ForegroundColor Red
-        #     Write-Host -NoNewline ('Possible matches: ') -ForegroundColor Blue
-        #     Write-Host ($foundTestModesFFT -Join ', ') -ForegroundColor Yellow
+        $fftPreset = $detectedFftPreset
+    }
 
-        #     Read-Host -Prompt 'Press Enter to exit'
-        #     exit
-        # }
+    # Check the provided FFT preset
+    else {
+        # Go through the provided or all of the test modes
+        foreach ($testModeBeingChecked in $testModesToCheck) {
+            # Check if the min and max values match
+            foreach ($fftSizeEntry in $FFTMinMaxValues[$testModeBeingChecked][$fftPreset]) {
+                if ($fftSizeEntry['Min'] -eq $minFoundFFTSize -and $fftSizeEntry['Max'] -eq $maxFoundFFTSize) {
+                    $foundTestModesMinMax += $testModeBeingChecked
+                    $detectedFftPreset = $fftSizeEntry.Name # This should not change, so we don't need to save all found presets
+                }
+            }
+        }
+    }
 
-        # If more than one FFT mode was found, select the first one but print out a notice later
-        $testMode = $foundTestModesFFT[0]
 
+
+    # Check if all the FFT sizes are correct
+    foreach ($testModeBeingChecked in $testModesToCheck) {
+        if (!$foundTestModesMinMax.Contains($testModeBeingChecked)) {
+            continue
+        }
+
+        # Get the sub array
+        $startKey = [Array]::indexOf($allFFTSizes[$testModeBeingChecked], $FFTMinMaxValues[$testModeBeingChecked][$fftPreset]['Min'])
+        $endKey   = [Array]::indexOf($allFFTSizes[$testModeBeingChecked], $FFTMinMaxValues[$testModeBeingChecked][$fftPreset]['Max'])
+        $fftSubarray = $allFFTSizes[$testModeBeingChecked][$startKey..$endKey]
+        
+        $missing1 = $fftSubarray | Where {$allUniqueFFTSizesInLogfile -NotContains $_}
+        $missing2 = $allUniqueFFTSizesInLogfile | Where {$fftSubarray -NotContains $_}
+
+
+        <#
+        ''
+        'testModeBeingChecked:'
+        $testModeBeingChecked
+
+        'fftSubarray:'
+        $fftSubarray -Join ', '
+
+        'Do the arrays match?'
+
+        
+        'missing1:'
+        ' - Length: ' + $missing1.Length
+        $missing1 -Join ', '
+
+
+        'missing2:'
+        ' - Length: ' + $missing2.Length
+        $missing2 -Join ', '
+        '-------------------------------------'
+        #>
+        
+        # Found a matching hit
+        if ($missing1.Length -eq 0 -and $missing2.Length -eq 0) {
+            $detectedTestModesFFT += $testModeBeingChecked
+        }
+    }
+
+
+    # No matching test mode found
+    if ($detectedTestModesFFT.Length -eq 0) {
+        Write-Host ('ERROR: Could not find a matching FFT preset!') -ForegroundColor Red
+
+        Read-Host -Prompt 'Press Enter to exit'
+        exit
+    }
+
+    # If more than one test mode was found, abort, because we cannot be sure
+    # if ($detectedTestModesFFT.Length -gt 1) {
+    #     Write-Host ('ERROR: Found more than one matching FFT preset!') -ForegroundColor Red
+    #     Write-Host -NoNewline ('Possible matches: ') -ForegroundColor Blue
+    #     Write-Host ($detectedTestModesFFT -Join ', ') -ForegroundColor Yellow
+
+    #     Read-Host -Prompt 'Press Enter to exit'
+    #     exit
+    # }
+
+
+    # A test mode was provided, check if it appears in the detected modes
+    if ($testMode -and $testMode.Length -gt 0 -and !$detectedTestModesFFT.Contains($testMode)) {
+        Write-Host ('ERROR: The provided test mode doesn''t match the data in the log file!') -ForegroundColor Red
+
+        Read-Host -Prompt 'Press Enter to exit'
+        exit
+    }
+
+
+    if (!$testMode -or $testMode.Length -eq 0) {
+        $autodetectedTestMode = $true
+        
         Write-Host -NoNewline ('Autodetected Test Mode: ... ') -ForegroundColor Cyan
-        Write-Host ($foundTestModesFFT -Join ' or ') -ForegroundColor Yellow
+        Write-Host ($detectedTestModesFFT -Join ' or ') -ForegroundColor Yellow        
     }
     else {
         Write-Host -NoNewline ('Provided Test Mode: ....... ') -ForegroundColor Cyan
@@ -279,24 +326,48 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset -eq 0) 
     }
 
 
-    Write-Host -NoNewline ('Autodetected FFT Preset: .. ') -ForegroundColor Cyan
-    Write-Host ($fftPreset) -ForegroundColor Yellow
+    if ($detectedFftPreset -and $detectedFftPreset.Length -gt 0) {
+        $autodetectedFftPreset = $true
+
+        Write-Host -NoNewline ('Autodetected FFT Preset: .. ') -ForegroundColor Cyan
+        Write-Host ($fftPreset) -ForegroundColor Yellow
+    }
+    else {
+        Write-Host -NoNewline ('Provided FFT Preset: ...... ') -ForegroundColor Cyan
+        Write-Host ($fftPreset) -ForegroundColor Yellow
+    }
+
     Write-Host ('')
     
-    if ($foundTestModesFFT.Length -gt 1) {
+    if ($detectedTestModesFFT.Length -gt 1) {
         Write-Host ('Warning! More than one possible test mode found!') -ForegroundColor Red
         Write-Host ('')
     }
 
     Write-Host ('')
 
+
+    # No test mode was provided, and there's more than one possible candidate
+    # Set the test mode to the first entry if no test mode was provided
+    if (!$testMode -or $testMode.Length -eq 0) {
+        $testMode = $detectedTestModesFFT[0]
+    }
 }
 
 
+
 # Get the selected FFT size array
-$startKey = [Array]::indexOf($allFFTSizes[$testMode], $FFTMinMaxValues[$testMode][$fftPreset]['Min'])
-$endKey   = [Array]::indexOf($allFFTSizes[$testMode], $FFTMinMaxValues[$testMode][$fftPreset]['Max'])
-$selectedFFTSizesArray = $allFFTSizes[$testMode][$startKey..$endKey]
+try {
+    $startKey = [Array]::indexOf($allFFTSizes[$testMode], $FFTMinMaxValues[$testMode][$fftPreset]['Min'])
+    $endKey   = [Array]::indexOf($allFFTSizes[$testMode], $FFTMinMaxValues[$testMode][$fftPreset]['Max'])
+    $selectedFFTSizesArray = $allFFTSizes[$testMode][$startKey..$endKey]
+}
+catch {
+    Write-Host ('Error! Could not find the correct start and end FFT size for the selected test mode!') -ForegroundColor Red
+    $fftPreset
+    Read-Host -Prompt 'Press Enter to exit'
+    exit
+}
 
 
 foreach ($line in $logfile) {
@@ -443,16 +514,21 @@ foreach ($line in $logfile) {
 }
 
 
-Write-Host ('')
-Write-Host ('----------------------------------------------------------------------------') -ForegroundColor Cyan
-Write-Host -NoNewline ('Log file analyzed: ..... ') -ForegroundColor Cyan
-Write-Host ($filePath) -ForegroundColor Yellow
-Write-Host -NoNewline ('Selected Test Mode: .... ') -ForegroundColor Cyan
-Write-Host ($testMode) -ForegroundColor Yellow
-Write-Host -NoNewline ('Selected FFT Preset: ... ') -ForegroundColor Cyan
-Write-Host ($fftPreset) -ForegroundColor Yellow
-Write-Host ('----------------------------------------------------------------------------') -ForegroundColor Cyan
-Write-Host ('')
+
+if ($detectedTestModesFFT.Length -eq 0) {
+    Write-Host ('')
+    Write-Host ('----------------------------------------------------------------------------') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Log file analyzed: ..... ') -ForegroundColor Cyan
+    Write-Host ($filePath) -ForegroundColor Yellow
+    Write-Host -NoNewline ('Selected Test Mode: .... ') -ForegroundColor Cyan
+    Write-Host ($testMode) -ForegroundColor Yellow
+    Write-Host -NoNewline ('Selected FFT Preset: ... ') -ForegroundColor Cyan
+    Write-Host ($fftPreset) -ForegroundColor Yellow
+    Write-Host ('----------------------------------------------------------------------------') -ForegroundColor Cyan
+    Write-Host ('')
+}
+
+
 Write-Host ('The various iterations:') -ForegroundColor Blue
 Write-Host ('-----------------------') -ForegroundColor Blue
 
@@ -510,10 +586,32 @@ Write-Host ('Summary') -ForegroundColor Blue
 Write-Host ('----------------------------------------------------------------------------') -ForegroundColor Cyan
 Write-Host -NoNewline ('Log file analyzed: ..... ') -ForegroundColor Cyan
 Write-Host ($filePath) -ForegroundColor Yellow
-Write-Host -NoNewline ('Selected Test Mode: .... ') -ForegroundColor Cyan
-Write-Host ($testMode) -ForegroundColor Yellow
-Write-Host -NoNewline ('Selected FFT Preset: ... ') -ForegroundColor Cyan
-Write-Host ($fftPreset) -ForegroundColor Yellow
+
+
+if ($autodetectedTestMode) {
+    Write-Host -NoNewline ('Detected Test Mode: .... ') -ForegroundColor Cyan
+    Write-Host ($detectedTestModesFFT -Join ' or ') -ForegroundColor Yellow
+}
+else {
+    Write-Host -NoNewline ('Selected Test Mode: .... ') -ForegroundColor Cyan
+    Write-Host ($testMode) -ForegroundColor Yellow    
+}
+
+if ($autodetectedFftPreset) {
+    Write-Host -NoNewline ('Detected FFT Preset: ... ') -ForegroundColor Cyan
+    Write-Host ($fftPreset) -ForegroundColor Yellow
+}
+else {
+    Write-Host -NoNewline ('Selected FFT Preset: ... ') -ForegroundColor Cyan
+    Write-Host ($fftPreset) -ForegroundColor Yellow   
+}
+
+if ($detectedTestModesFFT.Length -gt 1) {
+    Write-Host ('')
+    Write-Host ('Warning! More than one possible test mode found!') -ForegroundColor Red
+}
+
+
 Write-Host ('----------------------------------------------------------------------------') -ForegroundColor Cyan
 
 Write-Host ('')
