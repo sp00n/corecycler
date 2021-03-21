@@ -2200,11 +2200,11 @@ function Test-ProcessUsage {
                 Write-Verbose($timestamp + ' - ...checking CPU usage again: ' + $thisProcessCPUPercentage + '%')
 
                 # Still below the minimum usage
-                if ($processCPUPercentage -le $minProcessUsage) {
+                if ($thisProcessCPUPercentage -le $minProcessUsage) {
                     Write-Verbose('           ...still not enough usage, throw an error')
 
                     # We don't care about an error string here anymore
-                    $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $processCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
+                    $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
                 }
                 else {
                     Write-Verbose('           ...the process seems to have recovered, continuing with stress testing')
