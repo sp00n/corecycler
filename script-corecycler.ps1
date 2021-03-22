@@ -21,8 +21,10 @@ $version                   = '0.8.0.0 RC1'
 $curDateTime               = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
-$logFileName               = $null
-$logFileFullPath           = $null
+#$logFileName               = $null
+#$logFileFullPath           = $logFilePathAbsolute
+$logFileName               = 'CoreCycler_' + $curDateTime + '.log'
+$logFileFullPath           = $logFilePathAbsolute + $logFileName
 $settings                  = $null
 $selectedStressTestProgram = $null
 $windowProcess             = $null
@@ -38,6 +40,12 @@ $stressTestConfigFileName  = $null
 $stressTestConfigFilePath  = $null
 $stressTestLogFileName     = $null
 $stressTestLogFilePath     = $null
+$prime95CPUSettings        = $null
+$FFTSizes                  = $null
+$FFTMinMaxValues           = $null
+$minFFTSize                = $null
+$maxFFTSize                = $null
+$cpuTestMode               = $null
 
 
 # Stress test program executables and paths
@@ -123,7 +131,6 @@ $stressTestProgramsWithSameProcess = @(
 )
 
 
-
 # Used to get around the localized counter names
 $englishCounterNames = @(
     'Process',
@@ -170,20 +177,20 @@ $isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
 
 # Add code definitions so that we can close a window even if it's minimized to the tray
 # The regular PowerShell way unfortunetely doesn't work in this case
-$GetWindowDefinition = @'
+$GetWindowsDefinition = @'
     using System;
     using System.Text;
     using System.Collections.Generic;
     using System.Runtime.InteropServices;
     
-    namespace Api {
+    namespace GetWindows {
         public class WinStruct {
             public string WinTitle {get; set; }
             public int MainWindowHandle { get; set; }
             public int ProcessId { get; set; }
         }
          
-        public class ApiDef {
+        public class Main {
             private delegate bool CallBackPtr(int hwnd, int lParam);
             private static CallBackPtr callBackPtr = Callback;
             private static List<WinStruct> _WinStructList = new List<WinStruct>();
@@ -216,18 +223,32 @@ $GetWindowDefinition = @'
     }
 '@
 
-$CloseWindowDefinition = @'
+$SendMessageDefinition = @'
     using System;
     using System.Runtime.InteropServices;
     
     public static class Win32 {
         public static uint WM_CLOSE = 0x10;
+        public static uint BM_CLICK = 0x00F5;
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
         public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
     }
 '@
 
+$FindWindowExDefinition = @'
+    [DllImport("user32.dll", EntryPoint = "FindWindowEx")]
+    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+'@
+
+
+# Make the external code definitions available to PowerShell
+Add-Type -TypeDefinition $GetWindowsDefinition
+$SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
+$FindWindowEx = Add-Type -MemberDefinition $FindWindowExDefinition -Name "APISendMessage" -PassThru
+
+# Also VisualBasic
+Add-Type -Assembly Microsoft.VisualBasic
 
 
 <##
@@ -264,7 +285,7 @@ function Write-ErrorText {
         $string = $lines | Out-String
 
         Write-Host $string -ForegroundColor Red
-        Add-Content $logFilePath ($string)
+        Add-Content $logFileFullPath ($string)
     }
 }
 
@@ -846,36 +867,42 @@ function Import-Settings {
             $name = $name.ToString().Trim()
             $setting = $null
 
+
             # Special handling for coresToIgnore, which can be empty
             if ($name -eq 'coresToIgnore') {
-                $setting = @()
+                $thisSetting = @()
+                #$thisSetting = [System.Collections.ArrayList]::new()
 
                 if ($value -ne $null -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
                     # Split the string by comma and add to the coresToIgnore entry
                     $value -split ',\s*' | ForEach-Object {
                         if ($_.Length -gt 0) {
-                            $setting += [Int]$_
+                            $thisSetting += [Int]$_
                         }
                     }
+
+                    $thisSetting = $thisSetting | Sort
                 }
 
-                $setting = $setting | Sort
+                $setting = $thisSetting
             }
 
             # Regular settings cannot be empty
             elseif ($value -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+                $thisSetting = $null
+
                 # Parse the runtime per core (seconds, minutes, hours)
                 if ($name -eq 'runtimePerCore') {
                     # Parse the hours, minutes, seconds
                     if ($value.indexOf('h') -ge 0 -or $value.indexOf('m') -ge 0 -or $value.indexOf('s') -ge 0) {
                         $hasMatched = $value -match '((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
                         $seconds = [Double]$matches.hours * 60 * 60 + [Double]$matches.minutes * 60 + [Double]$matches.seconds
-                        $setting = [Int]$seconds
+                        $thisSetting = [Int]$seconds
                     }
 
                     # Treat the value as seconds
                     else {
-                        $setting = [Int]$value
+                        $thisSetting = [Int]$value
                     }
                 }
 
@@ -883,18 +910,20 @@ function Import-Settings {
                 # String values
                 elseif ($settingsWithStrings.Contains($name)) {
                     if ($settingsToLowercase.Contains($name)) {
-                        $setting = ([String]$value).ToLower()
+                        $thisSetting = ([String]$value).ToLower()
                     }
                     else {
-                        $setting = [String]$value
+                        $thisSetting = [String]$value
                     }
                 }
 
 
                 # Integer values
                 elseif ($value -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
-                    $setting = [Int]$value
+                    $thisSetting = [Int]$value
                 }
+
+                $setting = $thisSetting
             }
 
             # No [section] found, error
@@ -970,8 +999,11 @@ function Get-Settings {
     
     foreach ($sectionEntry in $userSettings.GetEnumerator()) {
         foreach ($userSetting in $sectionEntry.Value.GetEnumerator()) {
-            # No empty values
-            if ($userSetting.Value -ne $null -and ![string]::IsNullOrEmpty($userSetting.Value) -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) {
+            # No empty values (except empty arrays)
+            if ( `
+                    ($userSetting.Value -ne $null -and ![string]::IsNullOrEmpty($userSetting.Value) -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) `
+                -or ($userSetting.Value -is [Array] -or $userSetting.Value -is [Hashtable]) `
+            ) {
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
             }
             else {
@@ -1041,8 +1073,8 @@ function Get-Settings {
 
 
     # Set the final full path and name of the log file
-    $Script:logFileName         = $settings.Logging.name + '_' + $curDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $settings.mode + '.log'
-    $Script:logFileFullPath     = $logFilePathAbsolute + $logFileName
+    $Script:logFileName     = $settings.Logging.name + '_' + $curDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $settings.mode + '.log'
+    $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
 }
 
 
@@ -1161,38 +1193,57 @@ function Get-TortureWeakValue {
 function Get-StressTestWindowHandler {
     $stressTestProcess   = $null
     $stressTestProcessId = $null
+    $windowObj           = $null
+    $process             = $null
     
     Write-Verbose('Trying to get the stress test program window handler');
     Write-Verbose('Looking for these window names:')
     Write-Verbose(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', '))
 
-    $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
-        $_.WinTitle -match ($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join '|')
-    }
+    $timestamp = Get-Date -format HH:mm:ss
 
-    # No windows found, wait for a bit and repeat
-    if ($windowObj.Length -eq 0) {
-        Write-Verbose('No window found for these names!')
-        Start-Sleep -Milliseconds 300
+    for ($i = 1; $i -le 30; $i++) {
+        Start-Sleep -Milliseconds 250
 
-        $windowObj = [Api.Apidef]::GetWindows() | Where-Object {
+        $windowObj = [GetWindows.Main]::GetWindows() | Where-Object {
             $_.WinTitle -match ($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join '|')
+        }
+
+        $stressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
+
+        $timestamp = Get-Date -format HH:mm:ss
+
+        if ($windowObj.Length -gt 0) {
+            Write-Verbose($timestamp + ' - Window found')
+            break
+        }
+        else {
+            Write-Verbose($timestamp + ' - ... no window found for these names...')
         }
     }
 
 
-    # Still nothing found, throw an error
+    # Still nothing found
+    if ($windowObj.Length -eq 0) {
+        # Check if the process name exists
+        $process = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName']
+
+        # We found the process, one last check for the window
+        if ($process.Length -gt 0) {
+            $windowObj = [GetWindows.Main]::GetWindows() | Where-Object {
+                $_.WinTitle -match ($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join '|')
+            }
+        }
+    }
+
+
+    # Yeah, we can't find anything, throw that error
     if ($windowObj.Length -eq 0) {
         Write-ColorText('FATAL ERROR: Could not find a window instance for the stress test program!') Red
         Write-ColorText('Was looking for these window names:') Red
         Write-ColorText(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', ')) Yellow
 
-        # I could dump all of the window names here, but I'd rather not due to privacy reasons
-        
-        # Check the process
-        $process = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName']
-
-        if ($process.Length -gt 0) {
+        if ($process) {
             Write-ColorText('However, found a process with the process name "' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '":') Red
 
             $process | ForEach-Object {
@@ -1202,6 +1253,7 @@ function Get-StressTestWindowHandler {
             }
         }
 
+        # I could dump all of the window names here, but I'd rather not due to privacy reasons
         Exit-WithFatalError
     }
 
@@ -1220,7 +1272,7 @@ function Get-StressTestWindowHandler {
     Write-Verbose('Filtering the windows for ".*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$":')
 
     $filteredWindowObj = $windowObj | Where-Object {
-        (Get-Process -Id $_.ProcessId).Path -match ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
+        (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -match ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
     }
 
     $filteredWindowObj | ForEach-Object {
@@ -1306,6 +1358,194 @@ function Initialize-Prime95 {
         Write-ColorText('https://www.mersenne.org/download/') Cyan
         Exit-WithFatalError
     }
+
+    # Set various global variables we need for Prime95
+    $Script:prime95CPUSettings = @{
+        SSE = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = 0
+            CpuSupportsAVX2 = 0
+            CpuSupportsFMA3 = 0
+        }
+
+        AVX = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = 1
+            CpuSupportsAVX2 = 0
+            CpuSupportsFMA3 = 0
+        }
+
+        AVX2 = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = 1
+            CpuSupportsAVX2 = 1
+            CpuSupportsFMA3 = 1
+        }
+
+        CUSTOM = @{
+            CpuSupportsSSE  = 1
+            CpuSupportsSSE2 = 1
+            CpuSupportsAVX  = $settings.Custom.CpuSupportsAVX
+            CpuSupportsAVX2 = $settings.Custom.CpuSupportsAVX2
+            CpuSupportsFMA3 = $settings.Custom.CpuSupportsFMA3
+        }
+    }
+
+
+    # The various FFT sizes for Prime95
+    # Used to determine where an error likely happened
+    # Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
+    # SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000,        16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
+    # AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752,        11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768
+    # AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200 [...TODO]
+    $Script:FFTSizes = @{
+        SSE = @(
+            # Smallest FFT
+            4, 5, 6, 8, 10, 12, 14, 16, 20,
+            
+            # Not used in Prime95 presets
+            24, 28, 32,
+            
+            # Small FFT
+            40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240,
+
+            # Not used in Prime95 presets
+            256, 288, 320, 336, 384, 400,
+
+            # Large FFT
+            448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
+            2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
+            6400, 6720, 6912, 7168, 7680, 8000, 8192
+
+            # Not used in Prime95 presets
+            # Now custom labeled "Huge"
+            # 32768 seems to be the maximum FFT size possible for SSE
+            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
+            8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
+            22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
+        )
+
+        AVX = @(
+            # Smallest FFT
+            4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+
+            # Not used in Prime95 presets
+            24, 25, 28, 32, 35,
+
+            # Small FFT
+            36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240,
+
+            # Not used in Prime95 presets
+            256, 288, 320, 336, 384, 400,
+
+            # Large FFT
+            448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
+            2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
+            6400, 6720, 6912, 7168, 7680, 8000, 8192
+
+            # Not used in Prime95 presets
+            # Now custom labeled "Huge"
+            # 32768 seems to be the maximum FFT size possible for AVX
+            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
+            8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
+            22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
+        )
+
+
+        AVX2 = @(
+            # Smallest FFT
+            4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+
+            # Not used in Prime95 presets
+            24, 25, 28, 30, 32, 35,
+
+            # Small FFT
+            36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 144, 160, 168, 192, 200, 224, 240,
+
+            # Not used in Prime95 presets
+            256, 280, 288, 320, 336, 384, 400,
+
+            # Large FFT
+            448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
+            2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
+            6400, 6720, 7168, 7680, 8000, 8064, 8192
+
+            # Not used in Prime95 presets
+            # Now custom labeled "Huge"
+            # 51200 seems to be the maximum FFT size possible for AVX2
+            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
+            8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
+            21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
+
+            # An example of the randomization:
+            # 11200, 8960, 9216, 9600, 10240, 10752, 11520, 11200, 11520, 12288, 11200, 8192, 11520, 12288, 12800, 13440, 13824, 8960, 14336, 15360,
+            # 16000, 16128, 16384, 9216, 17920, 18432, 19200, 20480, 21504, 9600, 22400, 23040, 24576, 25600, 26880, 10240, 28672, 30720, 32000, 32768,
+            # 35840, 10752, 38400, 40960, 44800, 51200
+        )
+    }
+
+
+    # The min and max values for the various presets
+    # Note that the actually tested sizes differ from the originally provided min and max values
+    # depending on the selected test mode (SSE, AVX, AVX2)
+    $Script:FFTMinMaxValues = @{
+        SSE = @{
+            Smallest = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
+            Small    = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
+            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
+            All      = @{ Min =    4; Max = 32768; }
+        }
+
+        AVX = @{
+            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
+            All      = @{ Min =    4; Max = 32768; }
+        }
+
+        AVX2 = @{
+            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge     = @{ Min = 8960; Max = 51200; }  # New addition
+            All      = @{ Min =    4; Max = 51200; }
+        }
+    }
+
+
+    # Get the correct min and max values for the selected FFT settings
+    if ($settings.mode -eq 'CUSTOM') {
+        $Script:minFFTSize = [Int]$settings.Custom.MinTortureFFT
+        $Script:maxFFTSize = [Int]$settings.Custom.MaxTortureFFT
+    }
+    else {
+        $Script:minFFTSize = $FFTMinMaxValues[$settings.mode][$settings.Prime95.FFTSize].Min
+        $Script:maxFFTSize = $FFTMinMaxValues[$settings.mode][$settings.Prime95.FFTSize].Max
+    }
+
+
+    # Get the test mode, even if $settings.mode is set to CUSTOM
+    $Script:cpuTestMode = $settings.mode
+
+    # If we're in CUSTOM mode, try to determine which setting preset it is
+    if ($settings.mode -eq 'CUSTOM') {
+        $Script:cpuTestMode = 'SSE'
+
+        if ($settings.Custom.CpuSupportsAVX -eq 1) {
+            if ($settings.Custom.CpuSupportsAVX2 -eq 1 -and $settings.Custom.CpuSupportsFMA3 -eq 1) {
+                $Script:cpuTestMode = 'AVX2'
+            }
+            else {
+                $Script:cpuTestMode = 'AVX'
+            }
+        }
+    }
+
 
     $configType  = $settings.mode
     $configFile1 = $stressTestPrograms['prime95']['absolutePath'] + 'local.txt'
@@ -1395,10 +1635,18 @@ function Start-Prime95 {
     Write-Verbose('Starting Prime95')
 
     # Minimized to the tray
-    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
+    # This steals the focus
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
+
+    # This doesn't steal the focus
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['prime95']['fullPathToExe'] + '" -t'), 'MinimizedNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['prime95']['fullPathToExe'] + '" -t'), 'NormalNoFocus')
+    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['prime95']['fullPathToExe'] + '" -t'), 'Hide')
+
+    $Script:windowProcess = Get-Process -Id $processId
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
@@ -1417,7 +1665,7 @@ function Start-Prime95 {
         $Script:processCounterPathId = Start-Job -ScriptBlock { 
             $counterPathName = $args[0].'FullName'
             $processId = $args[1]
-            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+            ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
         } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
         if (!$processCounterPathId) {
@@ -1453,8 +1701,7 @@ function Close-Prime95 {
     
     # If we now have a windowProcessMainWindowHandler, try to close the window
     if ($windowProcessMainWindowHandler) {
-        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
-        $Error.Clear()
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
         # The process may be suspended
         if ($windowProcess) {
@@ -1464,7 +1711,7 @@ function Close-Prime95 {
         Write-Verbose('Trying to gracefully close Prime95')
         
         # This returns false if no window is found with this handle
-        if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
+        if (!$SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0) | Out-Null) {
             #'Process Window not found!'
         }
 
@@ -1477,15 +1724,14 @@ function Close-Prime95 {
     
     
     # If the window is still here at this point, just kill the process
-    $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
-    $Error.Clear()
+    $windowProcess = Get-Process $processName -ErrorAction Ignore
 
     if ($windowProcess) {
         Write-Verbose('Could not gracefully close Prime95, killing the process')
         
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
-        Stop-Process $windowProcess.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
         Write-Verbose('Prime95 closed')
@@ -1539,41 +1785,40 @@ function Initialize-Aida64 {
     $Script:stressTestLogFileName = 'Aida64_' + $curDateTime + '_' + $settings.mode + '.csv'
     $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
-    # The aida64.ini
-    $configFile = $stressTestPrograms['aida64']['absolutePath'] + 'aida64.ini'
-
+    # The aida64.ini and aida64.sst.ini
+    $configFile1 = $stressTestPrograms['aida64']['absolutePath'] + 'aida64.ini'
+    $configFile2 = $stressTestPrograms['aida64']['absolutePath'] + 'aida64.sst.ini'
 
     if ($configType -ne 'CACHE' -and $configType -ne 'RAM') {
         Exit-WithFatalError('Invalid mode type provided!')
     }
 
-    # Create the local.txt and overwrite if necessary
-    $null = New-Item $configFile -ItemType File -Force
+    # Create the aida64.ini and overwrite if necessary
+    $null = New-Item $configFile1 -ItemType File -Force
 
-    Set-Content $configFile ('[Generic]')
+    Set-Content $configFile1 ('[Generic]')
     
-    
-    Add-Content $configFile ('')
-    Add-Content $configFile ('NoGUI=0')
-    Add-Content $configFile ('LoadWithWindows=0')
-    Add-Content $configFile ('SplashScreen=0')
-    Add-Content $configFile ('MinimizeToTray=1')
-    Add-Content $configFile ('Language=en')
-    Add-Content $configFile ('ReportHeader=0')
-    Add-Content $configFile ('ReportFooter=0')
-    Add-Content $configFile ('ReportMenu=0')
-    Add-Content $configFile ('ReportDebugInfo=1')
-    Add-Content $configFile ('ReportDebugInfoCSV=0')
-    Add-Content $configFile ('ReportHostInFPC=0')
-    Add-Content $configFile ('HWMonLogToHTM=0')
-    Add-Content $configFile ('HWMonLogToCSV=1')
-    Add-Content $configFile ('HWMonLogProcesses=0')
-    Add-Content $configFile ('HWMonPersistentLog=1')
-    Add-Content $configFile ('HWMonLogFileOpenFreq=24')
-    Add-Content $configFile ('HWMonHTMLogFile=')
+    Add-Content $configFile1 ('')
+    Add-Content $configFile1 ('NoGUI=0')
+    Add-Content $configFile1 ('LoadWithWindows=0')
+    Add-Content $configFile1 ('SplashScreen=0')
+    Add-Content $configFile1 ('MinimizeToTray=1')
+    Add-Content $configFile1 ('Language=en')
+    Add-Content $configFile1 ('ReportHeader=0')
+    Add-Content $configFile1 ('ReportFooter=0')
+    Add-Content $configFile1 ('ReportMenu=0')
+    Add-Content $configFile1 ('ReportDebugInfo=1')
+    Add-Content $configFile1 ('ReportDebugInfoCSV=0')
+    Add-Content $configFile1 ('ReportHostInFPC=0')
+    Add-Content $configFile1 ('HWMonLogToHTM=0')
+    Add-Content $configFile1 ('HWMonLogToCSV=1')
+    Add-Content $configFile1 ('HWMonLogProcesses=0')
+    Add-Content $configFile1 ('HWMonPersistentLog=1')
+    Add-Content $configFile1 ('HWMonLogFileOpenFreq=24')
+    Add-Content $configFile1 ('HWMonHTMLogFile=')
 
     # HWMonCSVLogFile=H:\_Overclock\CoreCycler\logs\Aida64_DATE_TIME_ETC.csv
-    Add-Content $configFile ('HWMonCSVLogFile=' + $stressTestLogFilePath)
+    Add-Content $configFile1 ('HWMonCSVLogFile=' + $stressTestLogFilePath)
 
     # Which items to include in the log file
     # Unfortunately most of these require admin privileges
@@ -1628,7 +1873,7 @@ function Initialize-Aida64 {
         $csvEntriesArr += 'PCPUPKG PCPUVDD'
     }
 
-    Add-Content $configFile ('HWMonLogItems=' + ($csvEntriesArr -Join ' '))
+    Add-Content $configFile1 ('HWMonLogItems=' + ($csvEntriesArr -Join ' '))
 
     <#
     HWMonLogItems=
@@ -1642,6 +1887,29 @@ function Initialize-Aida64 {
     CCPUVDD CCPUVDDNB
     PCPUPKG PCPUVDD PCPUVDDNB
     #>
+
+    # Create the aida64.sst.ini and overwrite if necessary
+    $null = New-Item $configFile2 -ItemType File -Force
+    
+    # No AVX
+    Add-Content $configFile2 ('UseAVX=0')
+    Add-Content $configFile2 ('UseAVX512=0')
+
+    # Start the stress test on max 2 threads, not on all
+    Set-Content $configFile2 ('CPUMaskAuto=0')
+
+    # On CPU 2 & 3 if 2 threads
+    if ($settings.General.numberOfThreads -gt 1) {
+        Add-Content $configFile2 ('CPUMask=0x00000012')
+    }
+    # On CPU 2 if 1 thread
+    else {
+        Add-Content $configFile2 ('CPUMask=0x00000004')
+    }
+    
+    # Maybe use this later on?
+    #Add-Content $configFile1 ('MemAlloc=95')
+
 }
 
 
@@ -1660,24 +1928,40 @@ function Start-Aida64 {
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
-    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Minimized
+    # This steals the focus
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Minimized
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru
+    
+    # This doesn't steal the focus
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /HIDETRAYMENU /SST CACHE'), 'Hide')
+    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /HIDETRAYMENU /SST CACHE'), 'MinimizedNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /HIDETRAYMENU /SST CACHE'), 'NormalNoFocus')
+    
+
+    $Script:windowProcess = Get-Process -Id $processId
+    
 
     #aida64.exe /SILENT /SST RAM
     #aida64.exe /HIDETRAYMENU /SST RAM
 
     # Aida64 takes some additional time to load
     # Check for the stress test process, if it's loaded, we're ready to go
-    Write-Text('Waiting for Aida64 to load...')
+    $timestamp = Get-Date -format HH:mm:ss
+    Write-Text($timestamp + ' - Waiting for Aida64 to load the stress test...')
 
     for ($i = 1; $i -le 30; $i++) {
         Start-Sleep -Milliseconds 500
 
-        $stressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction SilentlyContinue
-        $Error.Clear()
+        $stressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
+
+        $timestamp = Get-Date -format HH:mm:ss
 
         if ($stressTestProcess) {
+            Write-Text($timestamp + ' - Aida64 started')
             break
+        }
+        else {
+            Write-Verbose($timestamp + ' - ... not found yet')
         }
     }
     
@@ -1696,7 +1980,7 @@ function Start-Aida64 {
         $Script:processCounterPathId = Start-Job -ScriptBlock { 
             $counterPathName = $args[0].'FullName'
             $processId = $args[1]
-            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+            ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
         } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
         if (!$processCounterPathId) {
@@ -1724,6 +2008,8 @@ function Start-Aida64 {
 function Close-Aida64 {
     Write-Verbose('Trying to close Aida64')
 
+    $thisStressTestProcess = $null
+
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
     if (!$windowProcessMainWindowHandler) {
@@ -1731,37 +2017,83 @@ function Close-Aida64 {
     }
 
     # The stress test window cannot be closed gracefully, as it has no main window
-    # So just kill it
+    # We could just kill it, but this leaves behind a tray icon and an error message the next time Aida is opened
+    # Instead, we simulate a click on the "Stop" button. Funky!
     if ($stressTestProcessId) {
-        $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction SilentlyContinue
-        $Error.Clear()
+        $success = $false
+        $thisStressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
         # The process may be suspended
-        if ($stressTestProcess) {
-            $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
+        if ($thisStressTestProcess) {
+            $resumed = Resume-ProcessWithDebugMethod $thisStressTestProcess
         }
-        
-        if ($stressTestProcess) {
-            Write-Verbose('Killing the stress test program process')
-            Stop-Process $stressTestProcess.Id -Force -ErrorAction SilentlyContinue
+
+        if ($thisStressTestProcess -and $windowProcessMainWindowHandler) {
+            Write-Verbose('Trying to find the "Stop" button to simulate a click on it...')
+            $stopButton = $FindWindowEx::FindWindowEx($windowProcessMainWindowHandler, [IntPtr]::Zero, "TButton", "S&top")
+
+            if ($stopButton) {
+                Write-Verbose('Stop button found, trying to click it')
+                
+                $click = $SendMessage::SendMessage($stopButton, $SendMessage::BM_CLICK, 0, 0)
+                Write-Verbose('Click result: ' + $click)
+                
+                if (!$click) {
+                    Write-Verbose('Could not click the stop button :(')
+                }
+                else {
+                    # It may take a little while before the process ends
+                    for ($i = 1; $i -le 30; $i++) {
+                        Start-Sleep -Milliseconds 500
+                        $thisStressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
+
+                        $timestamp = Get-Date -format HH:mm:ss
+
+                        if ($thisStressTestProcess) {
+                            Write-Verbose($timestamp + ' - ... the stress test process still exists')
+                        }
+                        else {
+                            Write-Verbose($timestamp + ' - The stress test process has been removed!')
+                            $success = $true
+                            break
+                        }
+                    }
+                }
+            }
+            else {
+                Write-Verbose('Stop button not found :(')
+            }
         }
     }
+
+
+    # No windowProcessMainWindowHandler was found
+    if ($thisStressTestProcess -and !$windowProcessMainWindowHandler) {
+        Write-Verbose('Apparently there''s no main window, but the stress test is still running.')
+    }
+
+
+    # Fallback to killing the process, with all its side effects
+    if ($thisStressTestProcess -and !$success) {
+        Write-Verbose('Killing the stress test program process')
+        Stop-Process $thisStressTestProcess.Id -Force -ErrorAction Ignore
+    }
+
 
     # If we now have a windowProcessMainWindowHandler, first try to close the main window gracefully
     if ($windowProcessMainWindowHandler) {
         Write-Verbose('Trying to gracefully close Aida64')
         Write-Verbose('windowProcessId: ' + $windowProcessId)
         
-        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
-        $Error.Clear()
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
         # The process may be suspended
         if ($windowProcess) {
-            $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
+            $resumed = Resume-ProcessWithDebugMethod $windowProcess
         }
 
         # This returns false if no window is found with this handle
-        if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
+        if (!$SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0) | Out-Null) {
             #'Process Window not found!'
         }
 
@@ -1777,14 +2109,13 @@ function Close-Aida64 {
     Write-Verbose('Get-Process ' + $stressTestPrograms['aida64']['processName'])
     
     # If the window is still here at this point, just kill the process
-    $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction SilentlyContinue
-    $Error.Clear()
+    $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction Ignore
 
     if ($windowProcess) {
         Write-Verbose('Could not gracefully close Aida64, killing the process')
         
         # Unfortunately this will leave any tray icons behind
-        Stop-Process $windowProcess.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
         Write-Verbose('Aida64 closed')
@@ -1891,8 +2222,22 @@ function Start-YCruncher {
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
-    $Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Minimized
+    # This steals the focus
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Minimized
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru
+
+    # This doesn't steal the focus
+    # We need to use conhost, otherwise the output would be inside the current console window
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'MinimizedNoFocus')
+    
+    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'MinimizedNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'NormalNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'Hide')
+    
+    
+    $Script:windowProcess = Get-Process -Id $processId
+
+
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
@@ -1911,7 +2256,7 @@ function Start-YCruncher {
         $Script:processCounterPathId = Start-Job -ScriptBlock { 
             $counterPathName = $args[0].'FullName'
             $processId = $args[1]
-            ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+            ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
         } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
         if (!$processCounterPathId) {
@@ -1947,8 +2292,7 @@ function Close-YCruncher {
     
     # If we now have a windowProcessMainWindowHandler, try to close the window
     if ($windowProcessMainWindowHandler) {
-        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
-        $Error.Clear()
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
         # The process may be suspended
         if ($windowProcess) {
@@ -1958,7 +2302,7 @@ function Close-YCruncher {
         Write-Verbose('Trying to gracefully close Y-Cruncher')
         
         # This returns false if no window is found with this handle
-        if (![Win32]::SendMessage($windowProcessMainWindowHandler, [Win32]::WM_CLOSE, 0, 0) | Out-Null) {
+        if (!$SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0) | Out-Null) {
             #'Process Window not found!'
         }
 
@@ -1971,15 +2315,14 @@ function Close-YCruncher {
     
     
     # If the window is still here at this point, just kill the process
-    $windowProcess = Get-Process $processName -ErrorAction SilentlyContinue
-    $Error.Clear()
+    $windowProcess = Get-Process $processName -ErrorAction Ignore
 
     if ($windowProcess) {
         Write-Verbose('Could not gracefully close Y-Cruncher, killing the process')
         
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
-        Stop-Process $windowProcess.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
         Write-Verbose('Y-Cruncher closed')
@@ -2060,7 +2403,7 @@ function Close-StressTestProgram {
  # Check the CPU power usage and restart Prime95 if necessary
  # Throws an error if the CPU usage is too low
  # .PARAM int $coreNumber The current core being tested
- # .RETURN void
+ # .RETURN void But throws a string if there was an error with the CPU usage
  #>
 function Test-ProcessUsage {
     param (
@@ -2091,13 +2434,11 @@ function Test-ProcessUsage {
     $resultFileHandle = $false
 
     if ($settings.General.stressTestProgram -eq 'prime95') {
-        $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction SilentlyContinue
-        $Error.Clear()
+        $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction Ignore
     }
 
     # Does the process still exist?
-    $stressTestProcess = Get-Process $processName -ErrorAction SilentlyContinue
-    $Error.Clear()
+    $stressTestProcess = Get-Process $processName -ErrorAction Ignore
     
 
     # 1. The process doesn't exist anymore, immediate error
@@ -2149,8 +2490,7 @@ function Test-ProcessUsage {
     # 3. Check if the process is still using enough CPU process power
     if (!$stressTestError) {
         # Get the CPU percentage
-        $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
-        $Error.Clear()
+        $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
         
         Write-Verbose($timestamp + ' - ...checking CPU usage: ' + $processCPUPercentage + '%')
 
@@ -2190,12 +2530,11 @@ function Test-ProcessUsage {
                 $thisProcessCounterPathId = Start-Job -ScriptBlock { 
                     $counterPathName = $args[0].'FullName'
                     $processId = $args[1]
-                    ((Get-Counter $counterPathName -ErrorAction SilentlyContinue).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+                    ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
                 } -ArgumentList $counterNames, $thisProcessId | Wait-Job | Receive-Job
 
                 $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
-                $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction SilentlyContinue).CounterSamples.CookedValue) / $numLogicalCores, 2)
-                $Error.Clear()
+                $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
 
                 Write-Verbose($timestamp + ' - ...checking CPU usage again: ' + $thisProcessCPUPercentage + '%')
 
@@ -2214,6 +2553,7 @@ function Test-ProcessUsage {
     }
 
 
+    # We now have an error message, process
     if ($stressTestError) {
         Write-Verbose('There has been an error with the stress test program!')
 
@@ -2370,6 +2710,16 @@ function Test-ProcessUsage {
         }
 
 
+        # Throw an error to let the caller know to close and possibily restart the stress test program
+        # Maybe use a specific exception type instead / additionally?
+        # System.ApplicationException
+        # System.Activities.WorkflowApplicationAbortedException
+        throw '111'
+
+
+        <#
+        # This has been moved to the main functionality
+
         # Try to close the stress test program process if it is still running
         Write-Verbose('Trying to close the stress test program to re-start it')
         Close-StressTestProgram
@@ -2395,7 +2745,6 @@ function Test-ProcessUsage {
             
             Exit-Script
         }
-        
 
         # Try to restart the stress test program and continue with the next core
         # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
@@ -2411,12 +2760,12 @@ function Test-ProcessUsage {
         }
         
         
-        # Throw an error to let the caller know there was an error
-        #throw ($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')')
+        # Throw an error to let the caller know there was a general error
         # Use a fixed value to be able to differentiate between a "real" error and this info
         # System.ApplicationException
         # System.Activities.WorkflowApplicationAbortedException
         throw '999'
+        #>
     }
 }
 
@@ -2439,9 +2788,9 @@ Get-Settings
 
 
 # Check if .NET is installed
-$hasDotNet3_5 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v3.5' -ErrorAction SilentlyContinue).Install
-$hasDotNet4_0 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4.0\Client' -ErrorAction SilentlyContinue).Install
-$hasDotNet4_x = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue).Install
+$hasDotNet3_5 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v3.5' -ErrorAction Ignore).Install
+$hasDotNet4_0 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4.0\Client' -ErrorAction Ignore).Install
+$hasDotNet4_x = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Ignore).Install
 
 if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
     Write-Host
@@ -2519,7 +2868,7 @@ catch {
 # We're starting a background job so that the Get-Counter call is not cached, which causes problems later on
 $counter = Start-Job -ScriptBlock { 
     $data = @($input)
-    (Get-Counter $data.'FullName' -ErrorAction SilentlyContinue).CounterSamples
+    (Get-Counter $data.'FullName' -ErrorAction Ignore).CounterSamples
 } -InputObject $counterNames | Wait-Job | Receive-Job
 
 
@@ -2535,11 +2884,6 @@ if (!$counter) {
 
     Exit-WithFatalError
 }
-
-
-# Make the external code definitions available to PowerShell
-Add-Type -TypeDefinition $GetWindowDefinition
-Add-Type -TypeDefinition $CloseWindowDefinition
 
 
 # The name of the selected stress test program
@@ -2558,17 +2902,15 @@ else {
 
 
 # Check if the stress test process is already running
-$stressTestProcess = Get-Process $processName -ErrorAction SilentlyContinue
+$stressTestProcess = Get-Process $processName -ErrorAction Ignore
 
 # Some programs share the same process for stress testing and for displaying the main window, and some not
 if ($stressTestProgramsWithSameProcess.Contains($settings.General.stressTestProgram)) {
     $windowProcess = $stressTestProcess
 }
 else {
-    $windowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction SilentlyContinue
+    $windowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
 }
-
-$Error.Clear()
 
 
 # The expected CPU usage for the running stress test process
@@ -2601,206 +2943,6 @@ $cpuCheckIterations = [Math]::Floor($settings.General.runtimePerCore / $cpuUsage
 $runtimeRemaining   = $settings.General.runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
 
 
-# The Prime95 CPU settings for the various test modes
-if ($settings.General.stressTestProgram -eq 'prime95') {
-    $prime95CPUSettings = @{
-        SSE = @{
-            CpuSupportsSSE  = 1
-            CpuSupportsSSE2 = 1
-            CpuSupportsAVX  = 0
-            CpuSupportsAVX2 = 0
-            CpuSupportsFMA3 = 0
-        }
-
-        AVX = @{
-            CpuSupportsSSE  = 1
-            CpuSupportsSSE2 = 1
-            CpuSupportsAVX  = 1
-            CpuSupportsAVX2 = 0
-            CpuSupportsFMA3 = 0
-        }
-
-        AVX2 = @{
-            CpuSupportsSSE  = 1
-            CpuSupportsSSE2 = 1
-            CpuSupportsAVX  = 1
-            CpuSupportsAVX2 = 1
-            CpuSupportsFMA3 = 1
-        }
-
-        CUSTOM = @{
-            CpuSupportsSSE  = 1
-            CpuSupportsSSE2 = 1
-            CpuSupportsAVX  = $settings.Custom.CpuSupportsAVX
-            CpuSupportsAVX2 = $settings.Custom.CpuSupportsAVX2
-            CpuSupportsFMA3 = $settings.Custom.CpuSupportsFMA3
-        }
-    }
-
-
-    # The various FFT sizes for Prime95
-    # Used to determine where an error likely happened
-    # Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
-    # SSE:  4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000,        16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
-    # AVX:  4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752,        11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768
-    # AVX2: 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200 [...TODO]
-    $FFTSizes = @{
-        SSE = @(
-            # Smallest FFT
-            4, 5, 6, 8, 10, 12, 14, 16, 20,
-            
-            # Not used in Prime95 presets
-            24, 28, 32,
-            
-            # Small FFT
-            40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240,
-
-            # Not used in Prime95 presets
-            256, 288, 320, 336, 384, 400,
-
-            # Large FFT
-            448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
-            2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
-            6400, 6720, 6912, 7168, 7680, 8000, 8192
-
-            # Not used in Prime95 presets
-            # Now custom labeled "Huge"
-            # 32768 seems to be the maximum FFT size possible for SSE
-            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
-            8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
-            22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
-        )
-
-        AVX = @(
-            # Smallest FFT
-            4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
-
-            # Not used in Prime95 presets
-            24, 25, 28, 32, 35,
-
-            # Small FFT
-            36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240,
-
-            # Not used in Prime95 presets
-            256, 288, 320, 336, 384, 400,
-
-            # Large FFT
-            448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
-            2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
-            6400, 6720, 6912, 7168, 7680, 8000, 8192
-
-            # Not used in Prime95 presets
-            # Now custom labeled "Huge"
-            # 32768 seems to be the maximum FFT size possible for AVX
-            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
-            8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
-            22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
-        )
-
-
-        AVX2 = @(
-            # Smallest FFT
-            4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
-
-            # Not used in Prime95 presets
-            24, 25, 28, 30, 32, 35,
-
-            # Small FFT
-            36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 144, 160, 168, 192, 200, 224, 240,
-
-            # Not used in Prime95 presets
-            256, 280, 288, 320, 336, 384, 400,
-
-            # Large FFT
-            448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
-            2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
-            6400, 6720, 7168, 7680, 8000, 8064, 8192
-
-            # Not used in Prime95 presets
-            # Now custom labeled "Huge"
-            # 51200 seems to be the maximum FFT size possible for AVX2
-            # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
-            8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
-            21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
-
-            # An example of the randomization:
-            # 11200, 8960, 9216, 9600, 10240, 10752, 11520, 11200, 11520, 12288, 11200, 8192, 11520, 12288, 12800, 13440, 13824, 8960, 14336, 15360,
-            # 16000, 16128, 16384, 9216, 17920, 18432, 19200, 20480, 21504, 9600, 22400, 23040, 24576, 25600, 26880, 10240, 28672, 30720, 32000, 32768,
-            # 35840, 10752, 38400, 40960, 44800, 51200
-        )
-    }
-
-
-    # The min and max values for the various presets
-    # Note that the actually tested sizes differ from the originally provided min and max values
-    # depending on the selected test mode (SSE, AVX, AVX2)
-    $FFTMinMaxValues = @{
-        SSE = @{
-            Smallest = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
-            Small    = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
-            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
-            All      = @{ Min =    4; Max = 32768; }
-        }
-
-        AVX = @{
-            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
-            All      = @{ Min =    4; Max = 32768; }
-        }
-
-        AVX2 = @{
-            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge     = @{ Min = 8960; Max = 51200; }  # New addition
-            All      = @{ Min =    4; Max = 51200; }
-        }
-    }
-
-
-    # Get the correct min and max values for the selected FFT settings
-    if ($settings.mode -eq 'CUSTOM') {
-        $minFFTSize = [Int]$settings.Custom.MinTortureFFT
-        $maxFFTSize = [Int]$settings.Custom.MaxTortureFFT
-    }
-    else {
-        $minFFTSize = $FFTMinMaxValues[$settings.mode][$settings.Prime95.FFTSize].Min
-        $maxFFTSize = $FFTMinMaxValues[$settings.mode][$settings.Prime95.FFTSize].Max
-    }
-
-
-    # Get the test mode, even if $settings.mode is set to CUSTOM
-    $cpuTestMode = $settings.mode
-
-    # If we're in CUSTOM mode, try to determine which setting preset it is
-    if ($settings.mode -eq 'CUSTOM') {
-        $cpuTestMode = 'SSE'
-
-        if ($settings.Custom.CpuSupportsAVX -eq 1) {
-            if ($settings.Custom.CpuSupportsAVX2 -eq 1 -and $settings.Custom.CpuSupportsFMA3 -eq 1) {
-                $cpuTestMode = 'AVX2'
-            }
-            else {
-                $cpuTestMode = 'AVX'
-            }
-        }
-    }
-
-
-    # The Prime95 results.txt file name for this run
-    #$primeResultsName = 'Prime95_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
-    #$primeResultsPath = $logFilePathAbsolute + $primeResultsName
-    
-    # Unfortunately prime.log only logs communications with the PrimeNet server
-    #$primeLogName = 'Prime95_output_' + $curDateTime + '_' + $settings.mode + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
-    #$primeLogPath = $logFilePathAbsolute + $primeLogName
-}
-
-
-
 # Close all existing instances of the stress test program and start a new one with our config
 if ($stressTestProcess -or $windowProcess) {
     Write-Verbose('There already exists an instance of ' + $selectedStressTestProgram + ', trying to close it')
@@ -2814,14 +2956,6 @@ if ($stressTestProcess -or $windowProcess) {
 
     Close-StressTestProgram
 }
-
-# Create the required config files for the stress test program
-Initialize-StressTestProgram
-
-
-# Start the stress test program
-Start-StressTestProgram
-
 
 # Get the core test mode if it's set to default
 $coreTestOrderMode = $settings.General.coreTestOrder
@@ -2842,6 +2976,10 @@ $coresToTest = $allCores
 
 # Subtract ignored cores
 $coresToTest = $allCores | ? {$_ -notin $settings.General.coresToIgnore}
+
+
+# Create the required config files for the stress test program
+Initialize-StressTestProgram
 
 
 # Get the current datetime
@@ -2875,7 +3013,7 @@ Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled
 Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
 Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore)) Cyan
 Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + ' (' + $coreTestOrderMode.ToUpper() + ')') Cyan
+Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + $(if ($settings.General.coreTestOrder.ToLower() -eq 'default') {' (' + $coreTestOrderMode.ToUpper() + ')'})) Cyan
 Write-ColorText('Number of iterations: ..... ' + $settings.General.maxIterations) Cyan
 
 # Print a message if we're ignoring certain cores
@@ -2919,6 +3057,10 @@ if ($stressTestLogFileName) {
 
 Write-ColorText('--------------------------------------------------------------------------------') Cyan
 Write-Text('')
+
+
+# Start the stress test program
+Start-StressTestProgram
 
 
 # Try to get the affinity of the stress test program process. If not found, abort
@@ -2988,9 +3130,10 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         elseif ($coreTestOrderMode -eq 'random') {
             Write-Verbose('Random test order selected, getting the core to test...')
             Write-Verbose('Still available cores: ' + ($availableCores -Join ', '))
-            
             $actualCoreNumber = $availableCores | Get-Random
-            $availableCores = $availableCores | ? {$_ -ne $actualCoreNumber}
+        }
+        else {
+            Write-Verbose('Sequential test order selected, getting the next core in line...')
         }
 
 
@@ -3064,12 +3207,14 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
             Write-ColorText('           Notice!') Black Yellow
             Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
             Write-ColorText('           So you might see an error due to decreased CPU usage.') Black Yellow
+
+            # TODO?
             #$affinity = 
         }
         
 
         # If $settings.General.restartTestProgramForEachCore is set, restart the stress test program for each core
-        if ($settings.General.restartTestProgramForEachCore -and ($iteration -gt 1 -or $actualCoreNumber -gt $coresToTest[0])) {
+        if ($settings.General.restartTestProgramForEachCore -and ($iteration -gt 1 -or $availableCores.Length -lt $coresToTest.Length)) {
             Write-Verbose('restartTestProgramForEachCore is set, restarting the test program...')
 
             Close-StressTestProgram
@@ -3086,6 +3231,10 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
 
             Start-StressTestProgram
         }
+
+
+        # Remove this core from the array of still available cores
+        $availableCores = $availableCores | ? {$_ -ne $actualCoreNumber}
         
        
         # This core has not thrown an error yet, run the test
@@ -3151,10 +3300,57 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
             catch {
                 Write-Verbose('There has been some error in Test-ProcessUsage, checking')
 
-                if ($Error -and $Error[0].ToString() -eq '999') {
+                # There is an error message
+                if ($Error -and $Error[0].ToString() -eq '111') {
+                    # Try to close the stress test program process if it is still running
+                    Write-Verbose('Trying to close the stress test program to re-start it')
+                    Close-StressTestProgram
+                    
+
+                    # If the stopOnError flag is set, stop at this point
+                    if ($settings.General.stopOnError) {
+                        Write-Text('')
+                        Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
+
+                        if ($settings.General.stressTestProgram -eq 'prime95') {
+                            # Display the results.txt file name for Prime95 for this run
+                            Write-Text('')
+                            Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                            Write-ColorText($stressTestLogFilePath) Cyan
+                        }
+
+                        # And the name of the log file for this run
+                        Write-Text('')
+                        Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+                        Write-ColorText($logfileFullPath) Cyan
+                        Write-Text('')
+                        
+                        Exit-Script
+                    }
+
+
+                    # Try to restart the stress test program and continue with the next core
+                    # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
+                    # This will be taken care of in another routine
+                    if (!$settings.General.restartTestProgramForEachCore) {
+                        Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
+
+                        $timestamp = Get-Date -format HH:mm:ss
+                        Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
+
+                        # Start the stress test program again
+                        Start-StressTestProgram
+                    }
+                }
+
+
+                # Something else happened (although this shouldn't happen anymore)
+                if ($Error -and $Error[0].ToString() -eq '111') {
                     Write-Verbose($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
                     continue coreLoop
                 }
+
+                # Unknown error
                 else {
                     Write-ColorText('FATAL ERROR:') Red
                     Write-ErrorText $Error
@@ -3186,6 +3382,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         
         # One last check
         try {
+            Write-Verbose('One last CPU usage check before finishing this core')
             Test-ProcessUsage $actualCoreNumber
         }
         
@@ -3193,7 +3390,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         catch {
             Write-Verbose('There has been some error in Test-ProcessUsage, checking')
 
-            if ($Error -and $Error[0] -eq '999') {
+            if ($Error -and $Error[0].ToString() -eq '111') {
                 Write-Verbose($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
                 continue
             }
