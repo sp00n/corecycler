@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0 RC1
+    0.8.0.0 RC2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -12,17 +12,15 @@
     Creative Commons "CC BY-NC-SA"
     https://creativecommons.org/licenses/by-nc-sa/4.0/
     https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
-.NOTE
+.NOTES
     Please excuse my amateurish code in this file, it's my first attempt at writing in PowerShell ._.
 #>
 
 # Global variables
-$version                   = '0.8.0.0 RC1'
+$version                   = '0.8.0.0 RC2'
 $curDateTime               = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
-#$logFileName               = $null
-#$logFileFullPath           = $logFilePathAbsolute
 $logFileName               = 'CoreCycler_' + $curDateTime + '.log'
 $logFileFullPath           = $logFilePathAbsolute + $logFileName
 $settings                  = $null
@@ -152,12 +150,14 @@ $counterNames = @{
     'Process'                 = ''
     'ID Process'              = ''
     '% Processor Time'        = ''
-    'Processor Information'   = ''
-    '% Processor Performance' = ''
-    '% Processor Utility'     = ''
     'FullName'                = ''
     'SearchString'            = ''
     'ReplaceString'           = ''
+
+    # Possible future use
+    #'Processor Information'   = ''
+    #'% Processor Performance' = ''
+    #'% Processor Utility'     = ''
 }
 
 
@@ -231,44 +231,42 @@ $SendMessageDefinition = @'
     using System.Runtime.InteropServices;
     
     public static class SendMessageClass {
-        public static uint WM_CLOSE      = 0x0010;  // Close command
-        public static uint BM_CLICK      = 0x00F5;  // Button Mouse click
-        public static uint WM_SYSCOMMAND = 0x0112;  // Initiate a system command (minimize, maximize, etc)
-        public static uint SC_CLOSE      = 0xF060;  // Close command
-        public static uint SC_MINIMIZE   = 0xF020;  // Minimize command
-        public static uint SC_RESTORE    = 0xF120;  // Restore window command
-        public static uint WM_SETFOCUS   = 0x0007;  // Set focus command
-
-
         // Values for Msg
-        public static uint KEY_A       = 0x0041;
-        public static uint KEY_D       = 0x0044;
-        public static uint KEY_S       = 0x0053;
-        public static uint KEY_T       = 0x0054;
-        public static uint KEY_MENU    = 0x0012;    // ALT Key
+        public static uint WM_SETFOCUS        = 0x0007;    // Set focus command
+        public static uint WM_CLOSE           = 0x0010;    // Close command
+        public static uint WM_SYSCOMMAND      = 0x0112;    // Initiate a system command (minimize, maximize, etc)
+        public static uint WM_SYSCHAR         = 0x0106;    // Send a system character. This is a bit confusing
+        public static uint WM_SYSKEYDOWN      = 0x0104;    // System key down
+        public static uint WM_SYSKEYUP        = 0x0105;    // System key up
+        public static uint KEY_DOWN           = 0x0100;    // Key down
+        public static uint KEY_UP             = 0x0101;    // Key up
+        public static uint VM_CHAR            = 0x0102;    // Send a keyboard character (see below)
+        public static uint LBUTTONDOWN        = 0x0201;    // Left mouse button down
+        public static uint LBUTTONUP          = 0x0202;    // Left mouse button up
+
+        // This needs to be send to a button child "window" handle
+        public static uint BM_CLICK           = 0x00F5;    // Mouse click on a button
 
         // Values for wParam
-        public static uint KEY_DOWN      = 0x0100;
-        public static uint KEY_UP        = 0x0101;
-        public static uint VM_CHAR       = 0x0102;
-        public static uint LBUTTONDOWN   = 0x0201;
-        public static uint LBUTTONUP     = 0x0202;
-        public static uint WM_SYSKEYDOWN = 0x0104;
-        public static uint WM_SYSKEYUP   = 0x0105;
-        public static uint WM_SYSCHAR    = 0x0106;
+        public static uint KEY_A              = 0x0041;    // A
+        public static uint KEY_D              = 0x0044;    // D
+        public static uint KEY_E              = 0x0045;    // E
+        public static uint KEY_S              = 0x0053;    // S
+        public static uint KEY_T              = 0x0054;    // T
+        public static uint KEY_MENU           = 0x0012;    // ALT Key
+
+        // To be used in conjunction with WM_SYSCOMMAND
+        public static uint SC_CLOSE           = 0xF060;    // Close command
+        public static uint SC_MINIMIZE        = 0xF020;    // Minimize command
+        public static uint SC_RESTORE         = 0xF120;    // Restore window command
 
         // Values for calculating lParam
-        public static uint MAPVK_VK_TO_VSC    = 0x00;
-        public static uint MAPVK_VSC_TO_VK    = 0x01;
-        public static uint MAPVK_VK_TO_CHAR   = 0x02;
-        public static uint MAPVK_VSC_TO_VK_EX = 0x03;
-        public static uint MAPVK_VK_TO_VSC_EX = 0x04;
+        public static uint MAPVK_VK_TO_VSC    = 0x0000;
+        public static uint MAPVK_VSC_TO_VK    = 0x0001;
+        public static uint MAPVK_VK_TO_CHAR   = 0x0002;
+        public static uint MAPVK_VSC_TO_VK_EX = 0x0003;
+        public static uint MAPVK_VK_TO_VSC_EX = 0x0004;
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
-        public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
-        public static extern IntPtr PostMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
         public static extern uint MapVirtualKey(uint uCode, uint uMapType);
@@ -285,6 +283,14 @@ $SendMessageDefinition = @'
             
             return lParam;
         }
+
+        // SendMessage. Seems to return always 0
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
+        public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
+
+        // PostMessage. Seems to return always 1
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
+        public static extern IntPtr PostMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
     }
 '@
 
@@ -297,13 +303,17 @@ $SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
 Add-Type -Assembly Microsoft.VisualBasic
 
 
-<##
- # Write a message to the screen and to the log file
- # .PARAM string $text The text to output
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Write a message to the screen and to the log file
+.PARAMETER text
+    [String] The text to output
+.OUTPUTS
+    void
+#>
 function Write-Text {
     param(
+        [Parameter(Mandatory=$true)]
         $text
     )
     
@@ -312,13 +322,17 @@ function Write-Text {
 }
 
 
-<##
- # Write an error message to the screen and to the log file
- # .PARAM array $errorArray An array with the text entries to output
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Write an error message to the screen and to the log file
+.PARAMETER errorArray
+    [Array] An array with the text entries to output
+.OUTPUTS
+    [Void]
+#>
 function Write-ErrorText {
     param(
+        [Parameter(Mandatory=$true)]
         $errorArray
     )
 
@@ -336,17 +350,27 @@ function Write-ErrorText {
 }
 
 
-<##
- # Write a message to the screen with a specific color and to the log file
- # .PARAM string $text The text to output
- # .PARAM string $foregroundColor The foreground color
- # .PARAM string $backgroundColor (optional) The background color
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Write a message to the screen with a specific color and to the log file
+.PARAMETER text
+    [String] The text to output
+.PARAMETER foregroundColor
+    [String] The foreground color
+.PARAMETER backgroundColor
+    [String] (optional) The background color
+.OUTPUTS
+    [Void]
+#>
 function Write-ColorText {
     param(
+        [Parameter(Mandatory=$true)]
         $text,
+
+        [Parameter(Mandatory=$true)]
         $foregroundColor,
+
+        [Parameter(Mandatory=$false)]
         $backgroundColor
     )
 
@@ -364,14 +388,18 @@ function Write-ColorText {
 }
 
 
-<##
- # Write a message to the screen and to the log file
- # Verbosity / Debug output
- # .PARAM string $text The text to output
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Write a message to the screen and to the log file
+    Verbosity / Debug output
+.PARAMETER text
+    [String] The text to output
+.OUTPUTS
+    [Void]
+#>
 function Write-Verbose {
     param(
+        [Parameter(Mandatory=$true)]
         $text
     )
     
@@ -382,17 +410,20 @@ function Write-Verbose {
 
         Add-Content $logFileFullPath (''.PadLeft(11, ' ') + '      + ' + $text)
     }
-
 }
 
 
-<##
- # Exit the script
- # .PARAM string $text (optional) The text to display
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Exit the script
+.PARAMETER text
+    [String] (optional) The text to display
+.OUTPUTS
+    [Void]
+#>
 function Exit-Script {
     param(
+        [Parameter(Mandatory=$false)]
         $text
     )
 
@@ -405,13 +436,17 @@ function Exit-Script {
 }
 
 
-<##
- # Throw a fatal error and exit the script
- # .PARAM string $text (optional) The text to display
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Throw a fatal error and exit the script
+.PARAMETER text
+    [String] (optional) The text to display
+.OUTPUTS
+    [Void]
+#>
 function Exit-WithFatalError {
     param(
+        [Parameter(Mandatory=$false)]
         $text
     )
 
@@ -424,13 +459,19 @@ function Exit-WithFatalError {
 }
 
 
-<##
- # Get the localized counter name
- # Yes, they're localized. Way to go Microsoft!
- # .SOURCE https://www.powershellmagazine.com/2013/07/19/querying-performance-counters-from-powershell/
- # .PARAM Int $ID The id of the counter name. See the link above on how to get the IDs
- # .RETURN String The localized name
- #>
+<#
+.DESCRIPTION
+    Get the localized counter name
+    Yes, they're localized. Way to go Microsoft!
+.PARAMETER ID
+    [UInt32] The id of the counter name. See the link above on how to get the IDs
+.PARAMETER ComputerName
+    [String] The name of the computer to query. Defaults to the current computer
+.OUTPUTS
+    [String] The localized name
+.LINK
+    https://www.powershellmagazine.com/2013/07/19/querying-performance-counters-from-powershell/
+#>
 function Get-PerformanceCounterLocalName {
     param (
         [UInt32]
@@ -441,10 +482,10 @@ function Get-PerformanceCounterLocalName {
     $code = '[DllImport("pdh.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern UInt32 PdhLookupPerfNameByIndex(string szMachineName, uint dwNameIndex, System.Text.StringBuilder szNameBuffer, ref uint pcchNameBufferSize);'
 
     $Buffer = New-Object System.Text.StringBuilder(1024)
-    [UInt32]$BufferSize = $Buffer.Capacity
+    [UInt32] $BufferSize = $Buffer.Capacity
 
     $t = Add-Type -MemberDefinition $code -PassThru -Name PerfCounter -Namespace Utility
-    $rv = $t::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref]$BufferSize)
+    $rv = $t::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref] $BufferSize)
 
     if ($rv -eq 0) {
         $Buffer.ToString().Substring(0, $BufferSize-1)
@@ -455,16 +496,18 @@ function Get-PerformanceCounterLocalName {
 }
 
 
-<##
- # This is used to get the Performance Counter IDs, which will be used to get the localized names
- # .PARAM Array $englishCounterNames An arraay with the english names of the counters
- # .RETURN Hash A hash with Name:ID pairs of the counters
- #>
+<#
+.DESCRIPTION
+    This is used to get the Performance Counter IDs, which will be used to get the localized names
+.PARAMETER englishCounterNames
+    [Array] An arraay with the english names of the counters
+.OUTPUTS
+    [HashTable] A hashtable with Name:ID pairs of the counters
+#>
 function Get-PerformanceCounterIDs {
     param (
         [Parameter(Mandatory=$true)]
-        [Array]
-        $englishCounterNames
+        [Array] $englishCounterNames
     )
 
     $key          = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\009'
@@ -476,8 +519,8 @@ function Get-PerformanceCounterIDs {
     # The first line is the ID
     # The second line is the name
     for ($i = 0; $i -lt $numCounters; $i += 2) {
-        $counterId   = [Int]$allCounters[$i]
-        $counterName = [String]$allCounters[$i+1]
+        $counterId   = [Int] $allCounters[$i]
+        $counterName = [String] $allCounters[$i+1]
 
         if ($englishCounterNames.Contains($counterName) -and !$countersHash.ContainsKey($counterName)) {
             $countersHash[$counterName] = $counterId
@@ -504,11 +547,11 @@ function Get-PerformanceCounterIDs {
 ## 
 ## ## Prepare the parameter types and parameters for the  
 ## CreateHardLink function 
-## $parameterTypes = [string], [string], [IntPtr] 
-## $parameters = [string] $filename, [string] $existingFilename, [IntPtr]::Zero 
+## $parameterTypes = [String], [String], [IntPtr] 
+## $parameters = [String] $filename, [String] $existingFilename, [IntPtr]::Zero 
 ##  
 ## ## Call the CreateHardLink method in the Kernel32 DLL 
-## $result = Invoke-WindowsApi "kernel32" ([bool]) "CreateHardLink" ` 
+## $result = Invoke-WindowsApi "kernel32" ([Bool]) "CreateHardLink" ` 
 ##     $parameterTypes $parameters 
 ## 
 ############################################################################## 
@@ -516,9 +559,9 @@ function Get-PerformanceCounterIDs {
 ############################################################################## 
 function Invoke-WindowsApi {
     param(
-        [string] $dllName, 
+        [String] $dllName, 
         [Type] $returnType, 
-        [string] $methodName,
+        [String] $methodName,
         [Type[]] $parameterTypes,
         [Object[]] $parameters
     )
@@ -543,7 +586,7 @@ function Invoke-WindowsApi {
 
     for ($counter = 1; $counter -le $parameterTypes.Length; $counter++) {
        ## If an item is a PSReference, then the user 
-       ## wants an [out] parameter.
+       ## wants an [Out] parameter.
        if ($parameterTypes[$counter - 1] -eq [Ref]) {
           ## Remember which parameters are used for [Out] parameters
           $refParameters += $counter
@@ -567,11 +610,11 @@ function Invoke-WindowsApi {
     $method = $type.DefineMethod($methodName, 'Public,HideBySig,Static,PinvokeImpl', $returnType, $parameterTypes)
     
     foreach ($refParameter in $refParameters) {
-       [void] $method.DefineParameter($refParameter, "Out", $null)
+       [Void] $method.DefineParameter($refParameter, "Out", $null)
     }
 
     ## Apply the P/Invoke constructor
-    $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
+    $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([String])
     $attr = New-Object Reflection.Emit.CustomAttributeBuilder $ctor, $dllName
     $method.SetCustomAttribute($attr)
 
@@ -632,16 +675,19 @@ function Invoke-WindowsApi {
 }
 
 
-<##
- # Suspends a process
- # Unfortunately this introduces a memory leak on multiple calls (resp. Invoke-WindowsApi does)
- # .PARAM [System.Diagnostics.Process] $process The process to suspend
- # .RETURN [Int] The number of suspended threads from this process. -1 if something failed
- #>
+<#
+.DESCRIPTION
+    Suspends a process
+    Unfortunately this introduces a memory leak on multiple calls (resp. Invoke-WindowsApi does)
+.PARAMETER process
+    [System.Diagnostics.Process] The process to suspend
+.OUTPUTS
+    [Int] The number of suspended threads from this process. -1 if something failed
+#>
 function Suspend-Process {
     param(
         [Parameter(Mandatory=$true)]
-        [System.Diagnostics.Process]$process
+        [System.Diagnostics.Process] $process
     )
 
     if (!$process) {
@@ -659,7 +705,7 @@ function Suspend-Process {
 
     $process.Threads | ForEach-Object {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
-        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([int], [bool], [int]) @(0x0002, $false, $_.Id)
+        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([Int], [Bool], [Int]) @(0x0002, $false, $_.Id)
         
         if ($currentThreadId -eq [IntPtr]::Zero) {
             continue
@@ -674,7 +720,7 @@ function Suspend-Process {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread
         # Do we also need Wow64SuspendThread?
         # https://docs.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-wow64suspendthread
-        $previousSuspendCount = Invoke-WindowsApi "kernel32" ([int]) "SuspendThread" @([IntPtr]) @($currentThreadId)
+        $previousSuspendCount = Invoke-WindowsApi "kernel32" ([Int]) "SuspendThread" @([IntPtr]) @($currentThreadId)
 
         #Write-Verbose('    Suspended thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 0)')
         
@@ -711,16 +757,19 @@ function Suspend-Process {
 }
 
 
-<##
- # Resumes a suspended process
- # Unfortunately this introduces a memory leak on multiple calls (resp. Invoke-WindowsApi does)
- # .PARAM System.Diagnostics.Process $process The process to resume
- # .RETURN [Int] The number of resumed threads from this process. -1 if something failed
- #>
+<#
+.DESCRIPTION
+    Resumes a suspended process
+    Unfortunately this introduces a memory leak on multiple calls (resp. Invoke-WindowsApi does)
+.PARAMETER process
+    [System.Diagnostics.Process] The process to resume
+.OUTPUTS
+    [Int] The number of resumed threads from this process. -1 if something failed
+#>
 function Resume-Process {
     param(
         [Parameter(Mandatory=$true)]
-        [System.Diagnostics.Process]$process
+        [System.Diagnostics.Process] $process
     )
 
     if (!$process) {
@@ -738,7 +787,7 @@ function Resume-Process {
 
     $process.Threads | ForEach-Object {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
-        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([int], [bool], [int]) @(0x0002, $false, $_.Id)
+        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([Int], [Bool], [Int]) @(0x0002, $false, $_.Id)
         
         if ($currentThreadId -eq [IntPtr]::Zero) {
             continue
@@ -755,7 +804,7 @@ function Resume-Process {
         # If it is -1, the operation has failed
         do {
             # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread
-            $previousSuspendCount = Invoke-WindowsApi "kernel32" ([int]) "ResumeThread" @([IntPtr]) @($currentThreadId)
+            $previousSuspendCount = Invoke-WindowsApi "kernel32" ([Int]) "ResumeThread" @([IntPtr]) @($currentThreadId)
             
             #Write-Verbose('    Resumed thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 1 or 0)')
             
@@ -790,52 +839,62 @@ function Resume-Process {
 }
 
 
-<##
- # Suspends a process via the DebugActiveProcess method
- # .PARAM [System.Diagnostics.Process] $process The process to suspend
- # .RETURN Bool
- #>
+<#
+.DESCRIPTION
+    Suspends a process via the DebugActiveProcess method
+.PARAMETER process
+    [System.Diagnostics.Process] The process to suspend
+.OUTPUTS
+    [Bool]
+#>
 function Suspend-ProcessWithDebugMethod {
     param(
         [Parameter(Mandatory=$true)]
-        [System.Diagnostics.Process]$process
+        [System.Diagnostics.Process] $process
     )
 
     if (!$process) {
         return $false
     }
 
-    Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcess" @([int]) @($process.Id)
+    Invoke-WindowsApi "kernel32" ([Bool]) "DebugActiveProcess" @([Int]) @($process.Id)
 }
 
 
-<##
- # Resumes a suspended process
- # .PARAM System.Diagnostics.Process $process The process to resume
- # .RETURN Bool
- #>
+<#
+.DESCRIPTION
+    Resumes a suspended process
+.PARAMETER process
+    [System.Diagnostics.Process] The process to resume
+.OUTPUTS
+    [Bool]
+#>
 function Resume-ProcessWithDebugMethod {
     param(
         [Parameter(Mandatory=$true)]
-        [System.Diagnostics.Process]$process
+        [System.Diagnostics.Process] $process
     )
 
     if (!$process) {
         return $false
     }
 
-    Invoke-WindowsApi "kernel32" ([bool]) "DebugActiveProcessStop" @([int]) @($process.Id)
+    Invoke-WindowsApi "kernel32" ([Bool]) "DebugActiveProcessStop" @([Int]) @($process.Id)
 }
 
 
-<##
- # Gets the current CPU frequency of a specific core / CPU
- # .PARAM Int $cpuNumber The CPU to query
- # .RETURN Hashtable The current frequency and percent
- # .NOTE The calculated value does not 100% match the one from HWInfo64 or Ryzen Master, it's a bit lower
- #       I'm not sure why or if there's any way to fix this
- #       It's still higher than the one reported by Windows Task Manager though
- #>
+<#
+.DESCRIPTION
+    Gets the current CPU frequency of a specific core / CPU
+.PARAMETER cpuNumber
+    [Int] The CPU to query
+.OUTPUTS
+    [HashTable] The current frequency and percent
+.NOTES
+    The calculated value does not 100% match the one from HWInfo64 or Ryzen Master, it's a bit lower
+    I'm not sure why or if there's any way to fix this
+    It's still higher than the one reported by Windows Task Manager though
+#>
 function Get-CpuFrequency {
     param(
         [Parameter(Mandatory=$true)]
@@ -885,11 +944,14 @@ function Get-CpuFrequency {
 }
 
 
-<##
- # Import the settings from a .ini file
- # .PARAM String $filePath The path to the file to parse
- # .RETURN Hashtable A hashtable holding the settings
- #>
+<#
+.DESCRIPTION
+    Import the settings from a .ini file
+.PARAMETER filePath
+    [String] The path to the file to parse
+.OUTPUTS
+    [HashTable] A hashtable holding the settings
+#>
 function Import-Settings {
     param(
         [Parameter(Mandatory=$true)]
@@ -934,11 +996,11 @@ function Import-Settings {
                 $thisSetting = @()
                 #$thisSetting = [System.Collections.ArrayList]::new()
 
-                if ($value -ne $null -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+                if ($value -ne $null -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
                     # Split the string by comma and add to the coresToIgnore entry
                     $value -split ',\s*' | ForEach-Object {
                         if ($_.Length -gt 0) {
-                            $thisSetting += [Int]$_
+                            $thisSetting += [Int] $_
                         }
                     }
 
@@ -949,7 +1011,7 @@ function Import-Settings {
             }
 
             # Regular settings cannot be empty
-            elseif ($value -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+            elseif ($value -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
                 $thisSetting = $null
 
                 # Parse the runtime per core (seconds, minutes, hours)
@@ -957,13 +1019,13 @@ function Import-Settings {
                     # Parse the hours, minutes, seconds
                     if ($value.indexOf('h') -ge 0 -or $value.indexOf('m') -ge 0 -or $value.indexOf('s') -ge 0) {
                         $hasMatched = $value -match '((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
-                        $seconds = [Double]$matches.hours * 60 * 60 + [Double]$matches.minutes * 60 + [Double]$matches.seconds
-                        $thisSetting = [Int]$seconds
+                        $seconds = [Double] $matches.hours * 60 * 60 + [Double] $matches.minutes * 60 + [Double] $matches.seconds
+                        $thisSetting = [Int] $seconds
                     }
 
                     # Treat the value as seconds
                     else {
-                        $thisSetting = [Int]$value
+                        $thisSetting = [Int] $value
                     }
                 }
 
@@ -971,26 +1033,27 @@ function Import-Settings {
                 # String values
                 elseif ($settingsWithStrings.Contains($name)) {
                     if ($settingsToLowercase.Contains($name)) {
-                        $thisSetting = ([String]$value).ToLower()
+                        $thisSetting = ([String] $value).ToLower()
                     }
                     else {
-                        $thisSetting = [String]$value
+                        $thisSetting = [String] $value
                     }
                 }
 
 
                 # Integer values
-                elseif ($value -and ![string]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
-                    $thisSetting = [Int]$value
+                elseif ($value -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+                    $thisSetting = [Int] $value
                 }
 
                 $setting = $thisSetting
             }
 
             # No [section] found, error
-            if (!$section -or [string]::IsNullOrEmpty($section) -or [String]::IsNullOrWhiteSpace($section)) {
+            if (!$section -or [String]::IsNullOrEmpty($section) -or [String]::IsNullOrWhiteSpace($section)) {
                 Write-ColorText('FATAL ERROR: Invalid config file "' + $filePath + '" detected!') Red
-                Write-ColorText('Maybe your config file is still from an older version?') Red
+                Write-ColorText('Maybe your config file is still from an older version.') Red
+                Write-ColorText('Please delete your config.ini file and try again.') Red
                 Exit-WithFatalError
             }
 
@@ -1002,11 +1065,14 @@ function Import-Settings {
 }
 
 
-<##
- # Get the settings
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Get the settings
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Get-Settings {
     Write-Verbose('Parsing the user settings')
 
@@ -1062,7 +1128,7 @@ function Get-Settings {
         foreach ($userSetting in $sectionEntry.Value.GetEnumerator()) {
             # No empty values (except empty arrays)
             if ( `
-                    ($userSetting.Value -ne $null -and ![string]::IsNullOrEmpty($userSetting.Value) -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) `
+                    ($userSetting.Value -ne $null -and ![String]::IsNullOrEmpty($userSetting.Value) -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) `
                 -or ($userSetting.Value -is [Array] -or $userSetting.Value -is [Hashtable]) `
             ) {
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
@@ -1073,23 +1139,6 @@ function Get-Settings {
             }
         }
     }
-
-
-    <#
-    foreach ($sectionEntry in $settings.GetEnumerator()) {
-        ''
-        '--------------------'
-        $sectionEntry.Name
-        '--------------------'
-        
-        foreach ($setting in $sectionEntry.Value.GetEnumerator()) {
-            $setting.Name + ': ' + $setting.Value
-        }
-    }
-
-    Read-Host -Prompt 'Press Enter to exit'
-    exit
-    #>
 
 
     # Limit the number of threads to 1 - 2
@@ -1139,11 +1188,14 @@ function Get-Settings {
 }
 
 
-<##
- # Get the formatted runtime per core string
- # .PARAM int $seconds The runtime in seconds
- # .RETURN string The formatted runtime string
- #>
+<#
+.DESCRIPTION
+    Get the formatted runtime per core string
+.PARAMETER seconds
+    [Int] The runtime in seconds
+.OUTPUTS
+    [String] The formatted runtime string
+#>
 function Get-FormattedRuntimePerCoreString {
     param (
         $seconds
@@ -1153,7 +1205,7 @@ function Get-FormattedRuntimePerCoreString {
     $timeSpan = [TimeSpan]::FromSeconds($seconds)
 
     if ( $timeSpan.Hours -ge 1 ) {
-        $thisString = [String]$timeSpan.Hours + ' hour'
+        $thisString = [String] $timeSpan.Hours + ' hour'
 
         if ( $timeSpan.Hours -gt 1 ) {
             $thisString += 's'
@@ -1163,7 +1215,7 @@ function Get-FormattedRuntimePerCoreString {
     }
 
     if ( $timeSpan.Minutes -ge 1 ) {
-        $thisString = [String]$timeSpan.Minutes + ' minute'
+        $thisString = [String] $timeSpan.Minutes + ' minute'
 
         if ( $timeSpan.Minutes -gt 1 ) {
             $thisString += 's'
@@ -1174,7 +1226,7 @@ function Get-FormattedRuntimePerCoreString {
 
 
     if ( $timeSpan.Seconds -ge 1 ) {
-        $thisString = [String]$timeSpan.Seconds + ' second'
+        $thisString = [String] $timeSpan.Seconds + ' second'
 
         if ( $timeSpan.Seconds -gt 1 ) {
             $thisString += 's'
@@ -1187,11 +1239,14 @@ function Get-FormattedRuntimePerCoreString {
 }
 
 
-<##
- # Get the correct TortureWeak setting for the selected CPU settings
- # .PARAM void
- # .RETURN Int
- #>
+<#
+.DESCRIPTION
+    Get the correct TortureWeak setting for the selected CPU settings
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Int] The calculated TortureWeak value
+#>
 function Get-TortureWeakValue {
     <#
     Calculation of the TortureWeak ini setting
@@ -1245,15 +1300,18 @@ function Get-TortureWeakValue {
 }
 
 
-<##
- # Send a Start, Stop or Dismiss signal to Aida64
- # .PARAM String $command The command to execute (Start, Stop, Dismiss)
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Send a Start, Stop or Dismiss signal to Aida64
+.PARAMETER command
+    [String] The command to execute (Start, Stop, Dismiss, Clear)
+.OUTPUTS
+    [Void]
+#>
 function Send-CommandToAida64 {
     param(
         [Parameter(Mandatory=$true)]
-        [String]$command
+        [String] $command
     )
 
     Write-Verbose('Trying to send the "' + $command + '" command to Aida64')
@@ -1267,35 +1325,41 @@ function Send-CommandToAida64 {
     elseif ($command.ToLower() -eq 'dismiss') {
         $KEY = $SendMessage::KEY_D
     }
+    elseif ($command.ToLower() -eq 'clear') {
+        $KEY = $SendMessage::KEY_E
+    }
 
     # This sends an ALT + KEY keystroke to the Aida64 main window
-    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSKEYDOWN, $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 1, 0, 0))
-    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSKEYDOWN, $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 1, 0, 0))
-    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSCHAR,    $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 1, 0, 0))
-    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP,        $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 0, 1, 1))
-    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP,        $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 0, 1, 1))
+    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSKEYDOWN, $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 1, 0, 0))
+    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSKEYDOWN, $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 1, 0, 0))
+    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSCHAR,    $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 1, 0, 0))
+    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP,        $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 0, 1, 1))
+    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP,        $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 0, 1, 1))
 
 
     # DEBUG
     # Just to be able to see the entries in Spy++ more easily
-    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
 }
 
 
-<##
- # Get the main window handler for the selected stress test program process
- # Even if minimized to the tray
- # .PARAM Bool $stopOnStressTestProcessNotFound If set to false, will not throw an error if the stress test process was not found
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Get the main window handler for the selected stress test program process
+    Even if minimized to the tray
+.PARAMETER stopOnStressTestProcessNotFound
+    [Bool] If set to false, will not throw an error if the stress test process was not found
+.OUTPUTS
+    [Void]
+#>
 function Get-StressTestWindowHandler {
     param(
         [Parameter(Mandatory=$false)]
-        [Bool]$stopOnStressTestProcessNotFound = $true
+        [Bool] $stopOnStressTestProcessNotFound = $true
     )
 
     $stressTestProcess   = $null
@@ -1454,12 +1518,15 @@ function Get-StressTestWindowHandler {
 }
 
 
-<##
- # Create the Prime95 config files (local.txt & prime.txt)
- # This depends on the $settings.mode variable
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Create the Prime95 config files (local.txt & prime.txt)
+    This depends on the $settings.mode variable
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Initialize-Prime95 {
     # Check if the prime95.exe exists
     Write-Verbose('Checking if prime95.exe exists at:')
@@ -1636,8 +1703,8 @@ function Initialize-Prime95 {
 
     # Get the correct min and max values for the selected FFT settings
     if ($settings.mode -eq 'CUSTOM') {
-        $Script:minFFTSize = [Int]$settings.Custom.MinTortureFFT
-        $Script:maxFFTSize = [Int]$settings.Custom.MaxTortureFFT
+        $Script:minFFTSize = [Int] $settings.Custom.MinTortureFFT
+        $Script:maxFFTSize = [Int] $settings.Custom.MaxTortureFFT
     }
     else {
         $Script:minFFTSize = $FFTMinMaxValues[$settings.mode][$settings.Prime95.FFTSize].Min
@@ -1742,11 +1809,14 @@ function Initialize-Prime95 {
 }
 
 
-<##
- # Open Prime95 and set global script variables
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Open Prime95 and set global script variables
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Start-Prime95 {
     Write-Verbose('Starting Prime95')
 
@@ -1801,11 +1871,14 @@ function Start-Prime95 {
 }
 
 
-<##
- # Close Prime95
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Close Prime95
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Close-Prime95 {
     Write-Verbose('Trying to close Prime95')
 
@@ -1855,11 +1928,14 @@ function Close-Prime95 {
 }
 
 
-<##
- # Initialize Aida64
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Initialize Aida64
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Initialize-Aida64 {
     # Check if the aida64.exe exists
     Write-Verbose('Checking if aida64.exe exists at:')
@@ -1884,6 +1960,7 @@ function Initialize-Aida64 {
 
     # Rename the aida64.exe.manifest to aida64.exe.manifest.bak so that we can start as a regular user
     # By default AIDA64 requires admin rights for additional sensory information, which we don't need here
+    # TODO: Do we still need this with the /SAFEST command line flag?
     $pathManifest = $stressTestPrograms['aida64']['processPath'] + '\aida64.exe.manifest'
     $pathBackup   = $stressTestPrograms['aida64']['processPath'] + '\aida64.exe.manifest.bak'
     
@@ -1913,17 +1990,15 @@ function Initialize-Aida64 {
     $null = New-Item $configFile1 -ItemType File -Force
 
     Set-Content $configFile1 ('[Generic]')
-    
-    Add-Content $configFile1 ('')
     Add-Content $configFile1 ('NoGUI=0')
     Add-Content $configFile1 ('LoadWithWindows=0')
     Add-Content $configFile1 ('SplashScreen=0')
-    Add-Content $configFile1 ('MinimizeToTray=1')
+    Add-Content $configFile1 ('MinimizeToTray=0')
     Add-Content $configFile1 ('Language=en')
     Add-Content $configFile1 ('ReportHeader=0')
     Add-Content $configFile1 ('ReportFooter=0')
     Add-Content $configFile1 ('ReportMenu=0')
-    Add-Content $configFile1 ('ReportDebugInfo=1')
+    Add-Content $configFile1 ('ReportDebugInfo=0')
     Add-Content $configFile1 ('ReportDebugInfoCSV=0')
     Add-Content $configFile1 ('ReportHostInFPC=0')
     Add-Content $configFile1 ('HWMonLogToHTM=0')
@@ -2023,21 +2098,23 @@ function Initialize-Aida64 {
         Add-Content $configFile2 ('CPUMask=0x00000004')
     }
     
-    # Maybe use this later on?
+    # Maybe use this later on to limit the amount of memory used for the RAM test?
     #Add-Content $configFile1 ('MemAlloc=95')
-
 }
 
 
-<##
- # Open Aida64
- # .PARAM Bool $startOnlyStressTest If this is set, it will only start the stress test process and not the whole program
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Open Aida64
+.PARAMETER startOnlyStressTest
+    [Bool] If this is set, it will only start the stress test process and not the whole program
+.OUTPUTS
+    [Void]
+#>
 function Start-Aida64 {
     param(
         [Parameter(Mandatory=$false)]
-        [Bool]$startOnlyStressTest = $false
+        [Bool] $startOnlyStressTest = $false
     )
 
     Write-Verbose('Starting Aida64')
@@ -2152,15 +2229,18 @@ function Start-Aida64 {
 }
 
 
-<##
- # Close Aida64
- # .PARAM Bool $closeOnlyStressTest If set to true, will try to only stop the stress test process and not the whole program
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Close Aida64
+.PARAMETER closeOnlyStressTest
+    [Bool] If set to true, will try to only stop the stress test process and not the whole program
+.OUTPUTS
+    [Void]
+#>
 function Close-Aida64 {
     param(
         [Parameter(Mandatory=$false)]
-        [Bool]$closeOnlyStressTest = $false
+        [Bool] $closeOnlyStressTest = $false
     )
 
 
@@ -2294,15 +2374,21 @@ function Close-Aida64 {
             Write-Verbose('Aida64 closed')
         }
     }
+
+
+    # Aida64 seems to create a "sst-is-running.txt" file in the %TEMP% directory
 }
 
 
-<##
- # Create the Y-Cruncher config files (local.txt & prime.txt)
- # This depends on the $settings.mode variable
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Create the Y-Cruncher config file
+    This depends on the $settings.mode variable
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Initialize-YCruncher {
     # Check if the selected binary exists
     Write-Verbose('Checking if ' + $stressTestPrograms['ycruncher']['processName'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'] + ' exists at:')
@@ -2319,20 +2405,15 @@ function Initialize-YCruncher {
     }
 
     $configType = $settings.mode
-    #$configName = '1-Thread_60s_Tests-BKT-BBP-SFT-FFT-N32-N64-HNT-VST.cfg'
     $configName = 'stressTest.cfg'
     $configFile = $stressTestPrograms['ycruncher']['absolutePath'] + $configName
 
     $Script:stressTestConfigFileName = $configName
     $Script:stressTestConfigFilePath = $configFile
 
-    # TODO: More config types
-    #if ($configType -ne 'CUSTOM' -and $configType -ne 'SSE' -and $configType -ne 'AVX' -and $configType -ne 'AVX2') {
-    #    Exit-WithFatalError('Invalid mode type provided!')
-    #}
-
     # The log file name and path for this run
     # TODO: Y-Cruncher doesn't seem to create any type of log :(
+    #       And I also cannot redirect the output via > logfile.txt 
     #$Script:stressTestLogFileName = 'Y-Cruncher_' + $curDateTime + '.txt'
     #$Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
@@ -2382,11 +2463,14 @@ function Initialize-YCruncher {
 }
 
 
-<##
- # Open Y-Cruncher and set global script variables
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Open Y-Cruncher and set global script variables
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Start-YCruncher {
     Write-Verbose('Starting Y-Cruncher')
 
@@ -2410,7 +2494,6 @@ function Start-YCruncher {
     
     
     $Script:windowProcess = Get-Process -Id $processId
-
 
 
     # This might be necessary to correctly read the process. Or not
@@ -2450,11 +2533,14 @@ function Start-YCruncher {
 }
 
 
-<##
- # Close Y-Cruncher
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Close Y-Cruncher
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Close-YCruncher {
     Write-Verbose('Trying to close Y-Cruncher')
 
@@ -2504,11 +2590,14 @@ function Close-YCruncher {
 }
 
 
-<##
- # Initialize the selected stress test program
- # .PARAM void
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Initialize the selected stress test program
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
 function Initialize-StressTestProgram {
     Write-Verbose('Initalizing the stress test program')
 
@@ -2527,15 +2616,18 @@ function Initialize-StressTestProgram {
 }
 
 
-<##
- # Start the selected stress test program
- # .PARAM Bool $startOnlyStressTest If this is set, it will only start the stress test process and not the whole program
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Start the selected stress test program
+.PARAMETER startOnlyStressTest
+    [Bool] If this is set, it will only start the stress test process and not the whole program
+.OUTPUTS
+    [Void]
+#>
 function Start-StressTestProgram {
     param(
         [Parameter(Mandatory=$false)]
-        [Bool]$startOnlyStressTest = $false
+        [Bool] $startOnlyStressTest = $false
     )
 
     Write-Verbose('Starting the stress test program')
@@ -2555,15 +2647,18 @@ function Start-StressTestProgram {
 }
 
 
-<##
- # Close the selected stress test program
- # .PARAM Bool $closeOnlyStressTest If this is set, it will only close the stress test process and not the whole program
- # .RETURN void
- #>
+<#
+.DESCRIPTION
+    Close the selected stress test program
+.PARAMETER closeOnlyStressTest
+    [Bool] If this is set, it will only close the stress test process and not the whole program
+.OUTPUTS
+    [Void]
+#>
 function Close-StressTestProgram {
     param(
         [Parameter(Mandatory=$false)]
-        [Bool]$closeOnlyStressTest = $false
+        [Bool] $closeOnlyStressTest = $false
     )
 
     Write-Verbose('Trying to close the stress test program')
@@ -2583,12 +2678,15 @@ function Close-StressTestProgram {
 }
 
 
-<##
- # Check the CPU power usage and restart Prime95 if necessary
- # Throws an error if the CPU usage is too low
- # .PARAM int $coreNumber The current core being tested
- # .RETURN void But throws a string if there was an error with the CPU usage
- #>
+<#
+.DESCRIPTION
+    Check the CPU power usage and restart Prime95 if necessary
+    Throws an error if the CPU usage is too low
+.PARAMETER coreNumber
+    [Int] The current core being tested
+.OUTPUTS
+    [Void] But throws a string if there was an error with the CPU usage
+#>
 function Test-ProcessUsage {
     param (
         $coreNumber
@@ -2757,7 +2855,7 @@ function Test-ProcessUsage {
         else {
             # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
             # Otherwise, it's the same value
-            $cpuNumberString = $coreNumber * (1 + [Int]$isHyperthreadingEnabled)
+            $cpuNumberString = $coreNumber * (1 + [Int] $isHyperthreadingEnabled)
         }
 
 
@@ -2811,7 +2909,7 @@ function Test-ProcessUsage {
                     $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
                     $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
                     $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
-                    $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+                    $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int] $matches[1] }   # $matches is a fixed(?) variable name for -match
                     
                     # No passed FFT was found, assume it's the first FFT size
                     if (!$lastPassedFFT) {
@@ -2859,7 +2957,7 @@ function Test-ProcessUsage {
                 $lastFiveRows     = $resultFileHandle | Get-Content -Tail 5
                 $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
                 $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
-                $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int]$matches[1] }   # $matches is a fixed(?) variable name for -match
+                $lastPassedFFT    = if ($matches -is [Hashtable] -or $matches -is [Array]) { [Int] $matches[1] }   # $matches is a fixed(?) variable name for -match
                 
                 if ($lastPassedFFT) {
                     Write-ColorText('ERROR: The last *passed* FFT size before the error was: ' + $lastPassedFFT + 'K') Magenta 
@@ -2898,66 +2996,16 @@ function Test-ProcessUsage {
         # Maybe use a specific exception type instead / additionally?
         # System.ApplicationException
         # System.Activities.WorkflowApplicationAbortedException
-        throw '111'
-
-
-        <#
-        # This has been moved to the main functionality
-
-        # Try to close the stress test program process if it is still running
-        Write-Verbose('Trying to close the stress test program to re-start it')
-        Close-StressTestProgram
-        
-
-        # If the stopOnError flag is set, stop at this point
-        if ($settings.General.stopOnError) {
-            Write-Text('')
-            Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
-
-            if ($settings.General.stressTestProgram -eq 'prime95') {
-                # Display the results.txt file name for Prime95 for this run
-                Write-Text('')
-                Write-ColorText('Prime95''s results log file can be found at:') Cyan
-                Write-ColorText($stressTestLogFilePath) Cyan
-            }
-
-            # And the name of the log file for this run
-            Write-Text('')
-            Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
-            Write-ColorText($logfileFullPath) Cyan
-            Write-Text('')
-            
-            Exit-Script
-        }
-
-        # Try to restart the stress test program and continue with the next core
-        # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
-        # This will be taken care of in another routine
-        if (!$settings.General.restartTestProgramForEachCore) {
-            Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
-
-            $timestamp = Get-Date -format HH:mm:ss
-            Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
-
-            # Start the stress test program again
-            Start-StressTestProgram
-        }
-        
-        
-        # Throw an error to let the caller know there was a general error
-        # Use a fixed value to be able to differentiate between a "real" error and this info
-        # System.ApplicationException
-        # System.Activities.WorkflowApplicationAbortedException
         throw '999'
-        #>
     }
 }
 
 
 
-<##
- # The main functionality
- #>
+<#
+.DESCRIPTION
+    The main functionality
+#>
 
 
 # Get the default and the user settings
@@ -3117,8 +3165,7 @@ for ($i = 0; $i -lt $numPhysCores; $i++) {
 
 
 # Check the CPU usage each x seconds
-# Note: 15 seconds may fail if there was an error and Prime95 was restarted -> false positive
-#       20 seconds may work fine, but it's probably best to wait for longer on the first check
+# This currently also controls the interval of the suspendPeriodically functionality
 $cpuUsageCheckInterval = 10
 
 
@@ -3228,8 +3275,6 @@ else {
 Write-ColorText('--------------------------------------------------------------------------------') Cyan
 
 
-
-
 # Display the log file location(s)
 Write-ColorText('The log files for this run are stored in:') Cyan
 Write-ColorText($logFilePathAbsolute) Cyan
@@ -3258,7 +3303,7 @@ catch {
 }
 
 
-
+# Start with the CPU test
 # Repeat the whole check $settings.General.maxIterations times
 for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration++) {
     $timestamp = Get-Date -format HH:mm:ss
@@ -3335,7 +3380,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         else {
             # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
             # Otherwise, it's the same value
-            $cpuNumber        = $actualCoreNumber * (1 + [Int]$isHyperthreadingEnabled)
+            $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
             $cpuNumbersArray += $cpuNumber
             $affinity         = [Math]::Pow(2, $cpuNumber)
         }
@@ -3431,7 +3476,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         try {
             Write-Verbose('Setting the affinity to ' + $affinity)
 
-            $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64]$affinity
+            $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
         }
         catch {
             # Apparently setting the affinity can fail on the first try, so make another attempt
@@ -3439,7 +3484,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
             Start-Sleep -Milliseconds 300
 
             try {
-                $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64]$affinity
+                $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
             }
             catch {
                 Close-StressTestProgram
@@ -3487,7 +3532,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 Write-Verbose('There has been some error in Test-ProcessUsage, checking')
 
                 # There is an error message
-                if ($Error -and $Error[0].ToString() -eq '111') {
+                if ($Error -and $Error[0].ToString() -eq '999') {
                     # Try to close the stress test program process if it is still running
                     Write-Verbose('Trying to close the stress test program to re-start it')
                     
@@ -3534,7 +3579,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
 
 
                 # Something else happened (although this shouldn't happen anymore)
-                if ($Error -and $Error[0].ToString() -eq '111') {
+                if ($Error -and $Error[0].ToString() -eq '999') {
                     Write-Verbose($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
                     continue coreLoop
                 }
@@ -3637,6 +3682,6 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
 
 # The CoreCycler has finished
 $timestamp = Get-Date -format HH:mm:ss
-Write-Text($timestamp + ' - CoreCycler finished')
+Write-ColorText($timestamp + ' - CoreCycler finished!') Green
 Close-StressTestProgram
 Exit-Script

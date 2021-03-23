@@ -8,6 +8,7 @@ https://github.com/sp00n/corecycler
 WHAT?
 -----
 A stability test script for PBO & Curve Optimizer stability testing on AMD Ryzen processors.
+It probably also works on Intel, but I haven't tested that.
 
 
 
@@ -33,6 +34,15 @@ testing. You can also move your own copy of Prime95 into the /p95 directory if y
 choice!).
 To download Prime95, go to the official site at https://www.mersenne.org/download/ (however, the 30.4 version used 
 here is at the time of writing only available through their forum).
+
+Beginning with version 0.8 it also supports Aida64 and Y-Cruncher, however it does NOT include Aida64 by default.
+You need to download the >>>Portable Engineer<<< version yourself and extract into the /test_programs/aida64 folder. It 
+has to be the Portable Engineer version, because the regular "Extreme" edition doesn't support starting the stress test 
+from the command line.
+To download Aida64 Portable Engineer, go here: https://www.aida64.com/downloads
+You can use the trial version for up to 30 days, which should give you enough time to find your stable setting for PBO.
+
+Y-Cruncher is included, and can be downloaded here: http://www.numberworld.org/y-cruncher/#Download
 
 
 
@@ -114,12 +124,28 @@ Q: My computer crashes when running this program!
 A: Very likely your Curve Optimizer setting is unstable. Change the settings to a higher value (e.g. from -15 to -12) 
    and try again.
 
+Q: How long should I run this for?
+A: Basically as long as you can. If you aim for a "12h prime-stable setup", you'd need to run every single core for 
+   12 hours, which for a processor with 12 cores like the 5900X would sum up to a total of 144 hours of stress testing.
+   Of course you can also settle for less, that's totally up to you.
+
+Q: Which setting should I use?
+A: Short answer: all of them.
+   Long answer: I've defaulted this to Prime95 without AVX and AVX2 and "Huge" FFTs. The reason behind this is that 
+   this *should* produce the least amount of heat and therefore the highest boost clock. But you should eventually run 
+   all of the tests to make sure that you're really error free.
+   Also switchting from Prime95 to Y-Cruncher or Aida64 produces different load scenarios, which can prove useful in 
+   detecting instabilities.
+
 Q: Why are you using SSE? AVX stresses the CPU much more!
 A: Yes, AVX/AVX2 does stress the CPU more than the SSE mode. However it is exactly this additional load on the core 
    wich prevents the boost clock from reaching its maximum (because it is temperature and load dependant), and so you 
    can't really detect these edge cases which eventuall can cause an error sooner or later. So while being somewhat 
    counterintuitive, the SSE mode with its lighter load is actually the one that finds the most stability problems.
    However, you can change the mode to AVX or AVX2 in the config.ini if you're happy with only AVX/AVX2 stability.
+
+Q: What settings can I change?
+A: The config.ini contains details and an explanation for each setting, so take a look there.
 
 Q: When starting the tool I only see a "FATAL ERROR: Could not access the Windows Performance Process Counter!" message!
 A: The tool requires the Windows Performance Process Counter (PerfProc) to work correctly. It may have been disabled, 
@@ -132,8 +158,8 @@ A: The tool requires the Windows Performance Process Counter (PerfProc) to work 
    https://leansentry.zendesk.com/hc/en-us/articles/360038645792-How-to-Fix-performance-counter-issues
    https://docs.microsoft.com/en-us/troubleshoot/windows-server/performance/manually-rebuild-performance-counters
 
-   I've also included a batch file in the /troubleshooting directory (enable_performance_counter.bat), which _should_ 
-   perform all these actions for you, but no guarantees that it will actually work!
+   I've also included a batch file in the /tools/ directory (enable_performance_counter.bat), which _should_ perform 
+   all these actions for you, but no guarantees that it will actually work!
 
 Q: When starting the tool I only see a "FATAL ERROR: Could not get the localized Performance Process Counter name!" message!
 A: See above. You probably need to re-enable the Windows Performance Process Counter (PerfProc).
@@ -142,7 +168,7 @@ Q: When starting the tool I only see a "FATAL ERROR: .NET could not be found or 
 A: This tool requires the .NET Framework with at least version 3.5. You can download it here:
    https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10
 
-Q: I have overclocked my RAM and I see errors when runnign this program, but I'm sure my CPU is fine!
+Q: I have overclocked my RAM and I see errors when running this program, but I'm sure my CPU is fine!
 A: The errors may actually come from your overclocked RAM and not your CPU directly.
    Best practice for overclocking is to separately test the memory overclock and the CPU overclock, i.e. test your CPU 
    while your memory runs at stock speeds.
