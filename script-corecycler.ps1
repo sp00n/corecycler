@@ -177,6 +177,8 @@ $isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
 
 # Add code definitions so that we can close a window even if it's minimized to the tray
 # The regular PowerShell way unfortunetely doesn't work in this case
+
+# The definition to get the main window handle even if the process is minimized to the tray
 $GetWindowsDefinition = @'
     using System;
     using System.Text;
@@ -223,29 +225,73 @@ $GetWindowsDefinition = @'
     }
 '@
 
+# The definition to send a message to a process
 $SendMessageDefinition = @'
     using System;
     using System.Runtime.InteropServices;
     
-    public static class Win32 {
-        public static uint WM_CLOSE = 0x10;
-        public static uint BM_CLICK = 0x00F5;
+    public static class SendMessageClass {
+        public static uint WM_CLOSE      = 0x0010;  // Close command
+        public static uint BM_CLICK      = 0x00F5;  // Button Mouse click
+        public static uint WM_SYSCOMMAND = 0x0112;  // Initiate a system command (minimize, maximize, etc)
+        public static uint SC_CLOSE      = 0xF060;  // Close command
+        public static uint SC_MINIMIZE   = 0xF020;  // Minimize command
+        public static uint SC_RESTORE    = 0xF120;  // Restore window command
+        public static uint WM_SETFOCUS   = 0x0007;  // Set focus command
+
+
+        // Values for Msg
+        public static uint KEY_A       = 0x0041;
+        public static uint KEY_D       = 0x0044;
+        public static uint KEY_S       = 0x0053;
+        public static uint KEY_T       = 0x0054;
+        public static uint KEY_MENU    = 0x0012;    // ALT Key
+
+        // Values for wParam
+        public static uint KEY_DOWN      = 0x0100;
+        public static uint KEY_UP        = 0x0101;
+        public static uint VM_CHAR       = 0x0102;
+        public static uint LBUTTONDOWN   = 0x0201;
+        public static uint LBUTTONUP     = 0x0202;
+        public static uint WM_SYSKEYDOWN = 0x0104;
+        public static uint WM_SYSKEYUP   = 0x0105;
+        public static uint WM_SYSCHAR    = 0x0106;
+
+        // Values for calculating lParam
+        public static uint MAPVK_VK_TO_VSC    = 0x00;
+        public static uint MAPVK_VSC_TO_VK    = 0x01;
+        public static uint MAPVK_VK_TO_CHAR   = 0x02;
+        public static uint MAPVK_VSC_TO_VK_EX = 0x03;
+        public static uint MAPVK_VK_TO_VSC_EX = 0x04;
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
         public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
-    }
-'@
 
-$FindWindowExDefinition = @'
-    [DllImport("user32.dll", EntryPoint = "FindWindowEx")]
-    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
+        public static extern IntPtr PostMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
+        public static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
+        public static uint GetLParam(Int16 repeatCount, uint key, byte extended, byte contextCode, byte previousState, byte transitionState) {
+            var lParam = (uint) repeatCount;
+            uint scanCode = MapVirtualKey(key, MAPVK_VK_TO_CHAR);
+
+            lParam += scanCode*0x10000;
+            lParam += (uint) ((extended)*0x1000000);
+            lParam += (uint) ((contextCode*2)*0x10000000);
+            lParam += (uint) ((previousState*4)*0x10000000);
+            lParam += (uint) ((transitionState*8)*0x10000000);
+            
+            return lParam;
+        }
+    }
 '@
 
 
 # Make the external code definitions available to PowerShell
 Add-Type -TypeDefinition $GetWindowsDefinition
 $SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
-$FindWindowEx = Add-Type -MemberDefinition $FindWindowExDefinition -Name "APISendMessage" -PassThru
 
 # Also VisualBasic
 Add-Type -Assembly Microsoft.VisualBasic
@@ -812,8 +858,23 @@ function Get-CpuFrequency {
 
     $PercentProcessorPerformanceDiff      = $PercentProcessorPerformance2 - $PercentProcessorPerformance1
     $PercentProcessorPerformance_BaseDiff = $PercentProcessorPerformance_Base2 - $PercentProcessorPerformance_Base1
-    $PercentProcessorPerformance          = $PercentProcessorPerformanceDiff / $PercentProcessorPerformance_BaseDiff
-    $Frequency                            = $ProcessorFrequency * ($PercentProcessorPerformance / 100)
+
+    # Error check, if the base values are the same, let's do another query
+    for ($i = 0; $i -lt 10; $i++) {
+        if ($PercentProcessorPerformanceDiff -lt 1000 -or $PercentProcessorPerformance_BaseDiff -lt 1000) {
+            Start-Sleep 50
+            $snapshot2 = Get-WmiObject -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
+
+            $PercentProcessorPerformance2         = $snapshot2.PercentProcessorPerformance
+            $PercentProcessorPerformance_Base2    = $snapshot2.PercentProcessorPerformance_Base
+
+            $PercentProcessorPerformanceDiff      = $PercentProcessorPerformance2 - $PercentProcessorPerformance1
+            $PercentProcessorPerformance_BaseDiff = $PercentProcessorPerformance_Base2 - $PercentProcessorPerformance_Base1
+        }
+    }
+
+    $PercentProcessorPerformance = $PercentProcessorPerformanceDiff / $PercentProcessorPerformance_BaseDiff
+    $Frequency                   = $ProcessorFrequency * ($PercentProcessorPerformance / 100)
 
     $returnObj = @{
         'CurrentFrequency' = [Math]::Round($Frequency, 0)
@@ -1185,12 +1246,58 @@ function Get-TortureWeakValue {
 
 
 <##
+ # Send a Start, Stop or Dismiss signal to Aida64
+ # .PARAM String $command The command to execute (Start, Stop, Dismiss)
+ # .RETURN void
+ #>
+function Send-CommandToAida64 {
+    param(
+        [Parameter(Mandatory=$true)]
+        [String]$command
+    )
+
+    Write-Verbose('Trying to send the "' + $command + '" command to Aida64')
+
+    if ($command.ToLower() -eq 'start') {
+        $KEY = $SendMessage::KEY_S
+    }
+    elseif ($command.ToLower() -eq 'stop') {
+        $KEY = $SendMessage::KEY_T
+    }
+    elseif ($command.ToLower() -eq 'dismiss') {
+        $KEY = $SendMessage::KEY_D
+    }
+
+    # This sends an ALT + KEY keystroke to the Aida64 main window
+    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSKEYDOWN, $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 1, 0, 0))
+    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSKEYDOWN, $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 1, 0, 0))
+    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::WM_SYSCHAR,    $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 1, 0, 0))
+    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP,        $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 0, 1, 1))
+    [void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP,        $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 0, 1, 1))
+
+
+    # DEBUG
+    # Just to be able to see the entries in Spy++ more easily
+    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[void]$SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+}
+
+
+<##
  # Get the main window handler for the selected stress test program process
  # Even if minimized to the tray
- # .PARAM void
+ # .PARAM Bool $stopOnStressTestProcessNotFound If set to false, will not throw an error if the stress test process was not found
  # .RETURN void
  #>
 function Get-StressTestWindowHandler {
+    param(
+        [Parameter(Mandatory=$false)]
+        [Bool]$stopOnStressTestProcessNotFound = $true
+    )
+
     $stressTestProcess   = $null
     $stressTestProcessId = $null
     $windowObj           = $null
@@ -1226,7 +1333,7 @@ function Get-StressTestWindowHandler {
     # Still nothing found
     if ($windowObj.Length -eq 0) {
         # Check if the process name exists
-        $process = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName']
+        $process = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
 
         # We found the process, one last check for the window
         if ($process.Length -gt 0) {
@@ -1315,7 +1422,16 @@ function Get-StressTestWindowHandler {
             Write-Verbose('Found with ID: ' + $stressTestProcessId)
         }
         catch {
-            Exit-WithFatalError('Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + ')')
+            $message = 'Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + ')'
+
+            # Only throw an error if the flag to do so was set
+            # It may be possible that e.g. the main window of Aida64 was started, but no stress test is currently running
+            if ($stopOnStressTestProcessNotFound) {
+                Exit-WithFatalError($message)
+            }
+            else {
+                Write-Verbose($message)
+            }
         }
     }
 
@@ -1652,7 +1768,7 @@ function Start-Prime95 {
     Start-Sleep -Milliseconds 500
     
     if (!$Script:windowProcess) {
-        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['prime95']['processName'] + '!')
+        Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['prime95']['processName'] + '"!')
     }
 
     # Get the main window handler
@@ -1915,59 +2031,95 @@ function Initialize-Aida64 {
 
 <##
  # Open Aida64
- # .PARAM void
+ # .PARAM Bool $startOnlyStressTest If this is set, it will only start the stress test process and not the whole program
  # .RETURN void
  #>
 function Start-Aida64 {
+    param(
+        [Parameter(Mandatory=$false)]
+        [Bool]$startOnlyStressTest = $false
+    )
+
     Write-Verbose('Starting Aida64')
+    Write-Verbose('The flag to only start the stress test process is: ' + $startOnlyStressTest)
 
     # Cache or RAM
     $thisMode = $settings.Aida64.mode
 
-    # Minimized to the tray
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Hidden
-    
-    # Minimized to the task bar
-    # This steals the focus
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru -WindowStyle Minimized
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['aida64']['fullPathToExe'] -ArgumentList ('/HIDETRAYMENU /SST ' + $thisMode) -PassThru
-    
-    # This doesn't steal the focus
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /HIDETRAYMENU /SST CACHE'), 'Hide')
-    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /HIDETRAYMENU /SST CACHE'), 'MinimizedNoFocus')
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /HIDETRAYMENU /SST CACHE'), 'NormalNoFocus')
-    
+    # Check if the main process still exists
+    $windowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
 
-    $Script:windowProcess = Get-Process -Id $processId
-    
+    # Sart the main window process if $startOnlyStressTest is not set, or if the main window process wasn't found
+    if (!$startOnlyStressTest -or !$windowProcess) {
+        if ($startOnlyStressTest -and !$windowProcess) {
+            Write-Verbose('The flag to only start the stress test process was set, but couldn''t find the main window!')
+            Write-Verbose('Starting the main window process')
+        }
 
-    #aida64.exe /SILENT /SST RAM
-    #aida64.exe /HIDETRAYMENU /SST RAM
+        # Minimized to the task bar
+        # This doesn't steal the focus
+        #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /SAFEST /SILENT /SST ' + $thisMode), 'NormalNoFocus')
+        #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /SAFEST /SILENT /SST ' + $thisMode), 'Hide')
+        $processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /SAFEST /SILENT /SST ' + $thisMode), 'MinimizedNoFocus')
+        
+        $Script:windowProcess = Get-Process -Id $processId
+
+        # /SST          = Directly starts the System Stability Test (available tests: Cache, RAM, CPU, FPU, Disk, GPU)
+        # /SILENT       = No tray icon, which can stay behind if the main window process is killed
+        # /HIDETRAYMENU = Disables the right click menu on the tray icon. Doesn't seem to work though
+        # /SAFE         = No low-level PCI, SMBus and sensor scanning
+        # /SAFEST       = No kernel drivers are loaded
+
+        #aida64.exe /SAFEST /SILENT /SST CACHE
+        #aida64.exe /SAFEST /HIDETRAYMENU /SST CACHE
+
+        # Don't start only the stress test further below
+        $startOnlyStressTest = $false
+    }
+
 
     # Aida64 takes some additional time to load
     # Check for the stress test process, if it's loaded, we're ready to go
     $timestamp = Get-Date -format HH:mm:ss
     Write-Text($timestamp + ' - Waiting for Aida64 to load the stress test...')
 
-    for ($i = 1; $i -le 30; $i++) {
-        Start-Sleep -Milliseconds 500
-
-        $stressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
-
-        $timestamp = Get-Date -format HH:mm:ss
-
-        if ($stressTestProcess) {
-            Write-Text($timestamp + ' - Aida64 started')
-            break
+    # Repeat the whole process up to 3 times, i.e. 3x10x0,5 = 15 seconds total runtime before it errors out
+    :startProcessLoop for ($i = 1; $i -le 3; $i++) {
+        if ($startOnlyStressTest) {
+            # Send a keyboard command to the Aida64 window to start the stress test process
+            Send-CommandToAida64 'Start'
         }
-        else {
-            Write-Verbose($timestamp + ' - ... not found yet')
+
+        # Repeat the check every 500ms
+        for ($j = 0; $j -lt 10; $j++) {
+            $stressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
+
+            $timestamp = Get-Date -format HH:mm:ss
+
+            if ($stressTestProcess) {
+                Write-Text($timestamp + ' - Aida64 started')
+                break startProcessLoop
+            }
+            else {
+                Write-Verbose($timestamp + ' - ... stress test process not found yet')
+            }
+
+            Start-Sleep -Milliseconds 500
         }
     }
     
-    
-    if (!$Script:windowProcess) {
-        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['aida64']['processName'] + '!')
+    # Either the main window or the stress test process wasn't found
+    if (!$Script:windowProcess -or !$stressTestProcess) {
+        # If $startOnlyStressTest was set, try again without the flag
+        if ($startOnlyStressTest) {
+            Write-Verbose('Couldn''t start the main window or stress test process')
+            Write-Verbose('Close all processes and try again from scratch')
+            Close-Aida64
+            Start-Aida64
+            return
+        }
+
+        Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['aida64']['processName'] + '"!')
     }
 
     # Get the main window handler
@@ -1984,7 +2136,7 @@ function Start-Aida64 {
         } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
         if (!$processCounterPathId) {
-            Exit-WithFatalError('Could not find the counter path for the Aida64 instance!')
+            Exit-WithFatalError('Could not find the counter path for the Aida64 stress test instance!')
         }
 
         $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
@@ -2002,25 +2154,43 @@ function Start-Aida64 {
 
 <##
  # Close Aida64
- # .PARAM void
+ # .PARAM Bool $closeOnlyStressTest If set to true, will try to only stop the stress test process and not the whole program
  # .RETURN void
  #>
 function Close-Aida64 {
-    Write-Verbose('Trying to close Aida64')
+    param(
+        [Parameter(Mandatory=$false)]
+        [Bool]$closeOnlyStressTest = $false
+    )
+
+
+    if ($settings.General.restartTestProgramForEachCore) {
+        Write-Text('           Trying to close Aida64')
+    }
+    else {
+        Write-Verbose('Trying to close Aida64')
+    }
+
+    Write-Verbose('The flag to only close the stress test process is: ' + $closeOnlyStressTest)
+
 
     $thisStressTestProcess = $null
+    $success = $false
 
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
     if (!$windowProcessMainWindowHandler) {
-        Get-StressTestWindowHandler
+        # Set the flag to not stop if the stress test process wasn't found
+        # It may not be running
+        Get-StressTestWindowHandler $false
     }
 
     # The stress test window cannot be closed gracefully, as it has no main window
     # We could just kill it, but this leaves behind a tray icon and an error message the next time Aida is opened
-    # Instead, we simulate a click on the "Stop" button. Funky!
-    if ($stressTestProcessId) {
-        $success = $false
+    # Instead, we send a keystroke command to the Aida64 window. Funky!
+    if ($closeOnlyStressTest -and $stressTestProcessId) {
+        Write-Verbose('The stress test process does exist')
+
         $thisStressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
         # The process may be suspended
@@ -2028,40 +2198,32 @@ function Close-Aida64 {
             $resumed = Resume-ProcessWithDebugMethod $thisStressTestProcess
         }
 
+        # We can only send a keyboard command if the main window also still exists
         if ($thisStressTestProcess -and $windowProcessMainWindowHandler) {
-            Write-Verbose('Trying to find the "Stop" button to simulate a click on it...')
-            $stopButton = $FindWindowEx::FindWindowEx($windowProcessMainWindowHandler, [IntPtr]::Zero, "TButton", "S&top")
+            Write-Verbose('The stress test and the main window process exist')
 
-            if ($stopButton) {
-                Write-Verbose('Stop button found, trying to click it')
-                
-                $click = $SendMessage::SendMessage($stopButton, $SendMessage::BM_CLICK, 0, 0)
-                Write-Verbose('Click result: ' + $click)
-                
-                if (!$click) {
-                    Write-Verbose('Could not click the stop button :(')
-                }
-                else {
-                    # It may take a little while before the process ends
-                    for ($i = 1; $i -le 30; $i++) {
-                        Start-Sleep -Milliseconds 500
-                        $thisStressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
+            # Repeat the whole process up to 3 times, i.e. 3x10x0,5 = 15 seconds total runtime before it errors out
+            :stopProcessLoop for ($i = 1; $i -le 3; $i++) {
+                # Send a keyboard command to the Aida64 window to stop the stress test process
+                Send-CommandToAida64 'Stop'
 
-                        $timestamp = Get-Date -format HH:mm:ss
+                # Repeat the check every 500ms
+                for ($j = 0; $j -lt 10; $j++) {
+                    $thisStressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
 
-                        if ($thisStressTestProcess) {
-                            Write-Verbose($timestamp + ' - ... the stress test process still exists')
-                        }
-                        else {
-                            Write-Verbose($timestamp + ' - The stress test process has been removed!')
-                            $success = $true
-                            break
-                        }
+                    $timestamp = Get-Date -format HH:mm:ss
+
+                    if ($thisStressTestProcess) {
+                        Write-Verbose($timestamp + ' - ... the stress test process still exists')
                     }
+                    else {
+                        Write-Verbose($timestamp + ' - The stress test process has successfully closed')
+                        $success = $true
+                        break stopProcessLoop
+                    }
+
+                    Start-Sleep -Milliseconds 500
                 }
-            }
-            else {
-                Write-Verbose('Stop button not found :(')
             }
         }
     }
@@ -2069,7 +2231,16 @@ function Close-Aida64 {
 
     # No windowProcessMainWindowHandler was found
     if ($thisStressTestProcess -and !$windowProcessMainWindowHandler) {
-        Write-Verbose('Apparently there''s no main window, but the stress test is still running.')
+        Write-Verbose('Apparently there''s no main window, but the stress test is still running!')
+    }
+
+    # If the stress test process couldn't be closed gracefully
+    # We need to kill the whole program including the main window, or we may not be able to start the stress test again
+    if ($closeOnlyStressTest -and $thisStressTestProcess) {
+        Write-Verbose('The stress test process couldn''t be stopped, we need to kill both the stress test and the main window process')
+
+        # Set the flag to also close the main window at this point
+        $closeOnlyStressTest = $false
     }
 
 
@@ -2081,44 +2252,47 @@ function Close-Aida64 {
 
 
     # If we now have a windowProcessMainWindowHandler, first try to close the main window gracefully
-    if ($windowProcessMainWindowHandler) {
-        Write-Verbose('Trying to gracefully close Aida64')
-        Write-Verbose('windowProcessId: ' + $windowProcessId)
-        
-        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
+    # But only if $closeOnlyStressTest is false
+    if (!$closeOnlyStressTest) {
+        if ($windowProcessMainWindowHandler) {
+            Write-Verbose('Trying to gracefully close Aida64')
+            Write-Verbose('windowProcessId: ' + $windowProcessId)
+            
+            $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
-        # The process may be suspended
+            # The process may be suspended
+            if ($windowProcess) {
+                $resumed = Resume-ProcessWithDebugMethod $windowProcess
+            }
+
+            # This returns false if no window is found with this handle
+            if (!$SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0) | Out-Null) {
+                #'Process Window not found!'
+            }
+
+            # We've send the close request, let's wait up to 3 seconds
+            elseif ($windowProcess -and !$windowProcess.HasExited) {
+                #'Waiting for the exit'
+                Write-Verbose('Sent the close message, waiting for the program to exit')
+                $null = $windowProcess.WaitForExit(3000)
+            }
+        }
+        
+        Write-Verbose('Checking if the main window process still exists:')
+        Write-Verbose('Get-Process "' + $stressTestPrograms['aida64']['processName'] + '"')
+        
+        # If the window is still here at this point, just kill the process
+        $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction Ignore
+
         if ($windowProcess) {
-            $resumed = Resume-ProcessWithDebugMethod $windowProcess
+            Write-Verbose('Still there, could not gracefully close Aida64, killing the process')
+            
+            # Unfortunately this will leave any tray icons behind
+            Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
         }
-
-        # This returns false if no window is found with this handle
-        if (!$SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0) | Out-Null) {
-            #'Process Window not found!'
+        else {
+            Write-Verbose('Aida64 closed')
         }
-
-        # We've send the close request, let's wait up to 3 seconds
-        elseif ($windowProcess -and !$windowProcess.HasExited) {
-            #'Waiting for the exit'
-            Write-Verbose('Sent the close message, waiting for the program to exit')
-            $null = $windowProcess.WaitForExit(3000)
-        }
-    }
-    
-    Write-Verbose('Checking if the main window process still exists:')
-    Write-Verbose('Get-Process ' + $stressTestPrograms['aida64']['processName'])
-    
-    # If the window is still here at this point, just kill the process
-    $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction Ignore
-
-    if ($windowProcess) {
-        Write-Verbose('Could not gracefully close Aida64, killing the process')
-        
-        # Unfortunately this will leave any tray icons behind
-        Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
-    }
-    else {
-        Write-Verbose('Aida64 closed')
     }
 }
 
@@ -2229,7 +2403,7 @@ function Start-YCruncher {
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'MinimizedNoFocus')
-    
+
     $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'MinimizedNoFocus')
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'NormalNoFocus')
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'Hide')
@@ -2243,7 +2417,7 @@ function Start-YCruncher {
     Start-Sleep -Milliseconds 500
     
     if (!$Script:windowProcess) {
-        Exit-WithFatalError('Could not start process ' + $stressTestPrograms['ycruncher']['processName'] + '!')
+        Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['ycruncher']['processName'] + '"!')
     }
 
     # Get the main window handler
@@ -2355,20 +2529,25 @@ function Initialize-StressTestProgram {
 
 <##
  # Start the selected stress test program
- # .PARAM void
+ # .PARAM Bool $startOnlyStressTest If this is set, it will only start the stress test process and not the whole program
  # .RETURN void
  #>
 function Start-StressTestProgram {
+    param(
+        [Parameter(Mandatory=$false)]
+        [Bool]$startOnlyStressTest = $false
+    )
+
     Write-Verbose('Starting the stress test program')
 
     if ($settings.General.stressTestProgram -eq 'prime95') {
-        Start-Prime95
+        Start-Prime95 $startOnlyStressTest
     }
     elseif ($settings.General.stressTestProgram -eq 'aida64') {
-        Start-Aida64
+        Start-Aida64 $startOnlyStressTest
     }
     elseif ($settings.General.stressTestProgram -eq 'ycruncher') {
-        Start-YCruncher
+        Start-YCruncher $startOnlyStressTest
     }
     else {
         Exit-WithFatalError('No stress test program selected!')
@@ -2378,20 +2557,25 @@ function Start-StressTestProgram {
 
 <##
  # Close the selected stress test program
- # .PARAM void
+ # .PARAM Bool $closeOnlyStressTest If this is set, it will only close the stress test process and not the whole program
  # .RETURN void
  #>
 function Close-StressTestProgram {
+    param(
+        [Parameter(Mandatory=$false)]
+        [Bool]$closeOnlyStressTest = $false
+    )
+
     Write-Verbose('Trying to close the stress test program')
 
     if ($settings.General.stressTestProgram -eq 'prime95') {
-        Close-Prime95
+        Close-Prime95 $closeOnlyStressTest
     }
     elseif ($settings.General.stressTestProgram -eq 'aida64') {
-        Close-Aida64
+        Close-Aida64 $closeOnlyStressTest
     }
     elseif ($settings.General.stressTestProgram -eq 'ycruncher') {
-        Close-YCruncher
+        Close-YCruncher $closeOnlyStressTest
     }
     else {
         Exit-WithFatalError('No stress test program selected!')
@@ -2965,7 +3149,7 @@ if ($settings.General.coreTestOrder -eq 'default') {
         $coreTestOrderMode = 'alternate'
     }
     else {
-        $coreTestOrderMode = 'sequential'
+        $coreTestOrderMode = 'random'
     }
 }
 
@@ -3217,7 +3401,8 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         if ($settings.General.restartTestProgramForEachCore -and ($iteration -gt 1 -or $availableCores.Length -lt $coresToTest.Length)) {
             Write-Verbose('restartTestProgramForEachCore is set, restarting the test program...')
 
-            Close-StressTestProgram
+            # Set the flag to only stop the stress test program if possible
+            Close-StressTestProgram $true
 
             # If the delayBetweenCores setting is set, wait for the defined amount
             if ($settings.General.delayBetweenCores -gt 0) {
@@ -3229,7 +3414,8 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 Start-Sleep -Seconds $settings.General.delayBetweenCores
             }
 
-            Start-StressTestProgram
+            # Set the flag to only start the stress test program if possible
+            Start-StressTestProgram $true
         }
 
 
@@ -3304,7 +3490,9 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 if ($Error -and $Error[0].ToString() -eq '111') {
                     # Try to close the stress test program process if it is still running
                     Write-Verbose('Trying to close the stress test program to re-start it')
-                    Close-StressTestProgram
+                    
+                    # Set the flag to only stop the stress test program if possible
+                    Close-StressTestProgram $true
                     
 
                     # If the stopOnError flag is set, stop at this point
@@ -3339,7 +3527,8 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                         Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
 
                         # Start the stress test program again
-                        Start-StressTestProgram
+                        # Set the flag to only start the stress test program if possible
+                        Start-StressTestProgram $true
                     }
                 }
 
