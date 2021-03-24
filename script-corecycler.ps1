@@ -1314,6 +1314,13 @@ function Send-CommandToAida64 {
         [String] $command
     )
 
+    # No windowProcessMainWindowHandler? No good!
+    if (!$windowProcessMainWindowHandler -or [String]::IsNullOrEmpty($windowProcessMainWindowHandler) -or [String]::IsNullOrWhiteSpace($windowProcessMainWindowHandler)) {
+        Write-Verbose('Could not get the windowProcessMainWindowHandler!')
+        return
+    }
+
+
     Write-Verbose('Trying to send the "' + $command + '" command to Aida64')
 
     if ($command.ToLower() -eq 'start') {
@@ -2164,7 +2171,7 @@ function Start-Aida64 {
     :startProcessLoop for ($i = 1; $i -le 3; $i++) {
         if ($startOnlyStressTest) {
             # Send a keyboard command to the Aida64 window to start the stress test process
-            Send-CommandToAida64 'Start'
+            Send-CommandToAida64 'start'
         }
 
         # Repeat the check every 500ms
@@ -2285,7 +2292,7 @@ function Close-Aida64 {
             # Repeat the whole process up to 3 times, i.e. 3x10x0,5 = 15 seconds total runtime before it errors out
             :stopProcessLoop for ($i = 1; $i -le 3; $i++) {
                 # Send a keyboard command to the Aida64 window to stop the stress test process
-                Send-CommandToAida64 'Stop'
+                Send-CommandToAida64 'stop'
 
                 # Repeat the check every 500ms
                 for ($j = 0; $j -lt 10; $j++) {
@@ -2375,8 +2382,8 @@ function Close-Aida64 {
         }
     }
 
-
     # Aida64 seems to create a "sst-is-running.txt" file in the %TEMP% directory
+    # Is this something we can utilize?
 }
 
 
@@ -3302,6 +3309,36 @@ catch {
     Exit-WithFatalError('Process ' + $processName + ' not found!')
 }
 
+
+# If Aida64 was started, try to clear any error messages from previous runs
+if ($settings.General.stressTestProgram -eq 'aida64') {
+    Write-Verbose('Trying to clear Aida64 error messages from previous runs')
+
+    $initFunctions = [scriptblock]::Create(@"
+        function Send-CommandToAida64 { ${function:Send-CommandToAida64} }
+        function Write-Verbose { ${function:Write-Verbose} }
+"@)
+
+    $clearAidaMessages = Start-Job -ScriptBlock {
+        param(
+            $SendMessageDefinition,
+            $windowProcessMainWindowHandler,
+            $settings,
+            $logFileFullPath
+        )
+
+        $SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
+
+        Start-Sleep 3
+
+        # Send the command a couple of times
+        # Unfortunately we cannot get any Write-Verbose without adding a Wait-Job
+        for ($i = 0; $i -lt 3; $i++) {
+            Send-CommandToAida64 'dismiss'
+            Start-Sleep 500
+        }
+    } -InitializationScript $initFunctions -ArgumentList $SendMessageDefinition, $windowProcessMainWindowHandler, $settings, $logFileFullPath
+}
 
 # Start with the CPU test
 # Repeat the whole check $settings.General.maxIterations times
