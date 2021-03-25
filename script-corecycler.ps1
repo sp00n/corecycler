@@ -1754,6 +1754,12 @@ function Initialize-Prime95 {
     # Create the local.txt and overwrite if necessary
     $null = New-Item $configFile1 -ItemType File -Force
 
+    # Check if the file exists
+    if (!(Test-Path $configFile1 -PathType leaf)) {
+        Exit-WithFatalError('Could not create the config file at ' + $configFile1 + '!')
+    }
+
+
     Set-Content $configFile1 'RollingAverageIsFromV27=1'
     
     # Limit the load to the selected number of threads
@@ -1771,6 +1777,12 @@ function Initialize-Prime95 {
     
     # Create the prime.txt and overwrite if necessary
     $null = New-Item $configFile2 -ItemType File -Force
+
+    # Check if the file exists
+    if (!(Test-Path $configFile2 -PathType leaf)) {
+        Exit-WithFatalError('Could not create the config file at ' + $configFile2 + '!')
+    }
+
 
     # There's an 80 character limit for the ini settings, so we're using an ugly workaround to put the log file into the /logs/ directory:
     # - set the working dir to the logs directory
@@ -1997,6 +2009,12 @@ function Initialize-Aida64 {
     # Create the aida64.ini and overwrite if necessary
     $null = New-Item $configFile1 -ItemType File -Force
 
+    # Check if the file exists
+    if (!(Test-Path $configFile1 -PathType leaf)) {
+        Exit-WithFatalError('Could not create the config file at ' + $configFile1 + '!')
+    }
+
+
     Set-Content $configFile1 ('[Generic]')
     Add-Content $configFile1 ('NoGUI=0')
     Add-Content $configFile1 ('LoadWithWindows=0')
@@ -2089,13 +2107,19 @@ function Initialize-Aida64 {
 
     # Create the aida64.sst.ini and overwrite if necessary
     $null = New-Item $configFile2 -ItemType File -Force
-    
+
+    # Check if the file exists
+    if (!(Test-Path $configFile2 -PathType leaf)) {
+        Exit-WithFatalError('Could not create the config file at ' + $configFile2 + '!')
+    }
+
+
     # No AVX
-    Add-Content $configFile2 ('UseAVX=0')
+    Set-Content $configFile2 ('UseAVX=0')
     Add-Content $configFile2 ('UseAVX512=0')
 
     # Start the stress test on max 2 threads, not on all
-    Set-Content $configFile2 ('CPUMaskAuto=0')
+    Add-Content $configFile2 ('CPUMaskAuto=0')
 
     # On CPU 2 & 3 if 2 threads
     if ($settings.General.numberOfThreads -gt 1) {
@@ -2429,6 +2453,12 @@ function Initialize-YCruncher {
     # Create the config file and overwrite if necessary
     $null = New-Item $configFile -ItemType File -Force
 
+    # Check if the file exists
+    if (!(Test-Path $configFile -PathType leaf)) {
+        Exit-WithFatalError('Could not create the config file at ' + $configFile + '!')
+    }
+
+
     $coresLine  = '        LogicalCores : [2]'
     $memoryLine = '        TotalMemory : 13418572'
 
@@ -2495,7 +2525,9 @@ function Start-YCruncher {
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
     # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the Y-Cruncher binary!
-    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'MinimizedNoFocus')
+    # Triple double quotes?
+    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost """' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '""" config """' + $stressTestConfigFilePath + '"""'), 'MinimizedNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'MinimizedNoFocus')
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'NormalNoFocus')
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'Hide')
     
@@ -3410,7 +3442,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
                 $thisCPUNumber    = ($actualCoreNumber * 2) + $currentThread
                 $cpuNumbersArray += $thisCPUNumber
-                $affinity        += [Math]::Pow(2, $thisCPUNumber)
+                $affinity        += [System.IntPtr][Int64] [Math]::Pow(2, $thisCPUNumber)
             }
         }
 
@@ -3420,7 +3452,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
             # Otherwise, it's the same value
             $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
             $cpuNumbersArray += $cpuNumber
-            $affinity         = [Math]::Pow(2, $cpuNumber)
+            $affinity         = [System.IntPtr][Int64] [Math]::Pow(2, $cpuNumber)
         }
 
         Write-Verbose('The selected core to test: ' + $actualCoreNumber)
