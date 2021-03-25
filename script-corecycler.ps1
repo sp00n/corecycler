@@ -1521,6 +1521,7 @@ function Get-StressTestWindowHandler {
 
     Write-Verbose('Stress test window handler:    ' + $windowProcessMainWindowHandler)
     Write-Verbose('Stress test window process ID: ' + $windowProcessId)
+    Write-Verbose('Stress test process:           ' + $stressTestProcess.ProcessName)
     Write-Verbose('Stress test process ID:        ' + $stressTestProcessId)
 }
 
@@ -2484,23 +2485,23 @@ function Start-YCruncher {
     $thisMode = $settings.YCruncher.mode
 
     # Minimized to the tray
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Hidden
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
     # This steals the focus
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru -WindowStyle Minimized
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config ' + $stressTestConfigFilePath) -PassThru
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Minimized
+    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru
 
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'MinimizedNoFocus')
-
-    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'MinimizedNoFocus')
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'NormalNoFocus')
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config ' + $stressTestConfigFilePath), 'Hide')
+    # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the Y-Cruncher binary!
+    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'MinimizedNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'NormalNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'Hide')
     
-    
-    $Script:windowProcess = Get-Process -Id $processId
+    # Cannot use the returned $processId here
+    #$Script:windowProcess = Get-Process -Id $processId
+    $Script:windowProcess = Get-Process $stressTestPrograms['ycruncher']['processName']
 
 
     # This might be necessary to correctly read the process. Or not
@@ -3371,7 +3372,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         $startDateThisCore  = (Get-Date)
         $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $settings.General.runtimePerCore)
         $timestamp          = $startDateThisCore.ToString("HH:mm:ss")
-        $affinity           = [Int64]0
+        $affinity           = [System.IntPtr][Int64] 0
         $actualCoreNumber   = $coreNumber
         $cpuNumbersArray    = @()
 
@@ -3452,8 +3453,8 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
                 Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
                 
-                $affinity = 2
-                $cpuNumber = 1
+                $affinity        = 2
+                $cpuNumber       = 1
                 $cpuNumberString = 1
             }
 
@@ -3509,11 +3510,14 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
         $timestamp = (Get-Date).ToString("HH:mm:ss")
         Write-Text($timestamp + ' - Set to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
         
+        # We need System.IntPtr for the affinity
+        $affinity = [System.IntPtr][Int64] $affinity
+
         # Set the affinity to a specific core
         try {
             Write-Verbose('Setting the affinity to ' + $affinity)
 
-            $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
+            $stressTestProcess.ProcessorAffinity = $affinity
         }
         catch {
             # Apparently setting the affinity can fail on the first try, so make another attempt
@@ -3521,13 +3525,25 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
             Start-Sleep -Milliseconds 300
 
             try {
-                $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
+                $stressTestProcess.ProcessorAffinity = $affinity
             }
             catch {
                 Close-StressTestProgram
                 Exit-WithFatalError('Could not set the affinity to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')!')                
             }
         }
+
+        # Check if the affinity is correct
+        $checkingAffinity = $stressTestProcess.ProcessorAffinity
+
+        if ($checkingAffinity -ne $affinity) {
+            Write-Verbose('The affinity could NOT be set correctly!')
+            Write-Verbose(' - affinity trying to set: ' + $affinity)
+            Write-Verbose(' - actual affinity:        ' + $checkingAffinity)
+
+            Exit-WithFatalError('The affinity could not be set correctly!')
+        }
+
 
         Write-Verbose('Successfully set the affinity to ' + $affinity)
 
