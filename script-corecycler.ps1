@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0 RC2
+    0.8.0.0 RC3
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                   = '0.8.0.0 RC2'
+$version                   = '0.8.0.0 RC3'
 $curDateTime               = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -80,6 +80,8 @@ $stressTestPrograms = @{
         'fullPathToExe'      = $null
         'testModes'          = @(
             'CACHE',
+            'CPU',
+            'FPU',
             'RAM'
         )
         'windowNames'        = @(
@@ -197,7 +199,7 @@ $GetWindowsDefinition = @'
             private static CallBackPtr callBackPtr = Callback;
             private static List<WinStruct> _WinStructList = new List<WinStruct>();
 
-            [DllImport("User32.dll")]
+            [DllImport("user32.dll")]
             [return: MarshalAs(UnmanagedType.Bool)]
             private static extern bool EnumWindows(CallBackPtr lpEnumFunc, IntPtr lParam);
 
@@ -1146,9 +1148,9 @@ function Get-Settings {
     $settings.General.numberOfThreads = $(if ($isHyperthreadingEnabled) { $settings.General.numberOfThreads } else { 1 })
 
 
-    # Default the stress test program to prime95
+    # If the selected stress test program is not supported
     if (!$settings.General.stressTestProgram -or !$stressTestPrograms.Contains($settings.General.stressTestProgram)) {
-        $settings.General.stressTestProgram = 'prime95'
+        Exit-WithFatalError('The selected stress test program "' + $settings.General.stressTestProgram + '" could not be found!')
     }
 
 
@@ -1173,8 +1175,14 @@ function Get-Settings {
 
 
     # Sanity check the selected test mode
-    if (!$stressTestPrograms[$settings.General.stressTestProgram]['testModes'].Contains($settings.mode)) {
-        Exit-WithFatalError('The selected test mode "' + $settings.mode + '" is not available for ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + '!')
+    # For Aida64, you can set a comma separated list of multiple stress tests
+    $modesArray = $settings.mode -Split ',\s*'
+    $modeString = $modesArray -Join '-'
+
+    foreach ($mode in $modesArray) {
+        if (!$stressTestPrograms[$settings.General.stressTestProgram]['testModes'].Contains($mode)) {
+            Exit-WithFatalError('The selected test mode "' + $mode + '" is not available for ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + '!')
+        }
     }
 
 
@@ -1183,7 +1191,7 @@ function Get-Settings {
 
 
     # Set the final full path and name of the log file
-    $Script:logFileName     = $settings.Logging.name + '_' + $curDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $settings.mode + '.log'
+    $Script:logFileName     = $settings.Logging.name + '_' + $curDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $modeString + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
 }
 
@@ -1738,17 +1746,13 @@ function Initialize-Prime95 {
     }
 
 
-    $configType  = $settings.mode
+    $modeString  = $settings.mode
     $configFile1 = $stressTestPrograms['prime95']['absolutePath'] + 'local.txt'
     $configFile2 = $stressTestPrograms['prime95']['absolutePath'] + 'prime.txt'
 
 
-    if ($configType -ne 'CUSTOM' -and $configType -ne 'SSE' -and $configType -ne 'AVX' -and $configType -ne 'AVX2') {
-        Exit-WithFatalError('Invalid mode type provided!')
-    }
-
     # The Prime95 results.txt file name and path for this run
-    $Script:stressTestLogFileName = 'Prime95_' + $curDateTime + '_' + $configType + '_' + $settings.Prime95.FFTSize + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    $Script:stressTestLogFileName = 'Prime95_' + $curDateTime + '_' + $modeString + '_' + $settings.Prime95.FFTSize + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
     $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
     # Create the local.txt and overwrite if necessary
@@ -1767,11 +1771,11 @@ function Initialize-Prime95 {
     Add-Content $configFile1 ('CoresPerTest=1')
     Add-Content $configFile1 ('CpuNumHyperthreads=' + $settings.General.numberOfThreads)
     Add-Content $configFile1 ('WorkerThreads='      + $settings.General.numberOfThreads)
-    Add-Content $configFile1 ('CpuSupportsSSE='     + $prime95CPUSettings[$configType].CpuSupportsSSE)
-    Add-Content $configFile1 ('CpuSupportsSSE2='    + $prime95CPUSettings[$configType].CpuSupportsSSE2)
-    Add-Content $configFile1 ('CpuSupportsAVX='     + $prime95CPUSettings[$configType].CpuSupportsAVX)
-    Add-Content $configFile1 ('CpuSupportsAVX2='    + $prime95CPUSettings[$configType].CpuSupportsAVX2)
-    Add-Content $configFile1 ('CpuSupportsFMA3='    + $prime95CPUSettings[$configType].CpuSupportsFMA3)
+    Add-Content $configFile1 ('CpuSupportsSSE='     + $prime95CPUSettings[$modeString].CpuSupportsSSE)
+    Add-Content $configFile1 ('CpuSupportsSSE2='    + $prime95CPUSettings[$modeString].CpuSupportsSSE2)
+    Add-Content $configFile1 ('CpuSupportsAVX='     + $prime95CPUSettings[$modeString].CpuSupportsAVX)
+    Add-Content $configFile1 ('CpuSupportsAVX2='    + $prime95CPUSettings[$modeString].CpuSupportsAVX2)
+    Add-Content $configFile1 ('CpuSupportsFMA3='    + $prime95CPUSettings[$modeString].CpuSupportsFMA3)
     
 
     
@@ -1795,7 +1799,7 @@ function Initialize-Prime95 {
     Add-Content $configFile2 ('results.txt=' + $logFilePath + '\' + $stressTestLogFileName)
     
     # Custom settings
-    if ($configType -eq 'CUSTOM') {
+    if ($modeString -eq 'CUSTOM') {
         Add-Content $configFile2 ('TortureMem='    + $settings.Custom.TortureMem)
         Add-Content $configFile2 ('TortureTime='   + $settings.Custom.TortureTime)
     }
@@ -1848,14 +1852,21 @@ function Start-Prime95 {
     #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
 
     # This doesn't steal the focus
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['prime95']['fullPathToExe'] + '" -t'), 'MinimizedNoFocus')
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['prime95']['fullPathToExe'] + '" -t'), 'NormalNoFocus')
-    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['prime95']['fullPathToExe'] + '" -t'), 'Hide')
-
-    $Script:windowProcess = Get-Process -Id $processId
+    # 0 = Hide
+    # 1 = NormalFocus
+    # 2 = MinimizedFocus
+    # 3 = MaximizedFocus
+    # 4 = NormalNoFocus
+    # 6 = MinimizedNoFocus
+    $windowBehaviour = 0
+    $fullPathToExe   = $stressTestPrograms['prime95']['fullPathToExe']
+    $command         = """${fullPathToExe}"" -t"
+    $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
+
+    $Script:windowProcess = Get-Process -Id $processId -ErrorAction Ignore
     
     if (!$Script:windowProcess) {
         Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['prime95']['processName'] + '"!')
@@ -1972,7 +1983,8 @@ function Initialize-Aida64 {
     }
 
 
-    $configType = $settings.mode
+    $modesArray = $settings.mode -Split ',\s*'
+    $modeString = $modesArray -Join '-'
 
     # TODO: Do we want to offer a way to start Aida64 with admin rights?
     $hasAdminRights = $false
@@ -1995,16 +2007,13 @@ function Initialize-Aida64 {
     }
 
     # The Aida64 log file name and path for this run
-    $Script:stressTestLogFileName = 'Aida64_' + $curDateTime + '_' + $settings.mode + '.csv'
+    $Script:stressTestLogFileName = 'Aida64_' + $curDateTime + '_' + $modeString + '.csv'
     $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
     # The aida64.ini and aida64.sst.ini
     $configFile1 = $stressTestPrograms['aida64']['absolutePath'] + 'aida64.ini'
     $configFile2 = $stressTestPrograms['aida64']['absolutePath'] + 'aida64.sst.ini'
 
-    if ($configType -ne 'CACHE' -and $configType -ne 'RAM') {
-        Exit-WithFatalError('Invalid mode type provided!')
-    }
 
     # Create the aida64.ini and overwrite if necessary
     $null = New-Item $configFile1 -ItemType File -Force
@@ -2114,12 +2123,12 @@ function Initialize-Aida64 {
     }
 
 
-    # No AVX
-    Set-Content $configFile2 ('UseAVX=0')
-    Add-Content $configFile2 ('UseAVX512=0')
-
     # Start the stress test on max 2 threads, not on all
-    Add-Content $configFile2 ('CPUMaskAuto=0')
+    Set-Content $configFile2 ('CPUMaskAuto=0')
+
+    # Use AVX?
+    Add-Content $configFile2 ('UseAVX=' + $settings.Aida64.useAVX)
+    Add-Content $configFile2 ('UseAVX512=' + $settings.Aida64.useAVX)
 
     # On CPU 2 & 3 if 2 threads
     if ($settings.General.numberOfThreads -gt 1) {
@@ -2130,8 +2139,8 @@ function Initialize-Aida64 {
         Add-Content $configFile2 ('CPUMask=0x00000004')
     }
     
-    # Maybe use this later on to limit the amount of memory used for the RAM test?
-    #Add-Content $configFile1 ('MemAlloc=95')
+    # Set the maximum amount of memory during the RAM stress test
+    Add-Content $configFile2 ('MemAlloc=' + $settings.Aida64.maxMemory)
 }
 
 
@@ -2165,13 +2174,19 @@ function Start-Aida64 {
             Write-Verbose('Starting the main window process')
         }
 
-        # Minimized to the task bar
         # This doesn't steal the focus
-        #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /SAFEST /SILENT /SST ' + $thisMode), 'NormalNoFocus')
-        #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /SAFEST /SILENT /SST ' + $thisMode), 'Hide')
-        $processId = [Microsoft.VisualBasic.Interaction]::Shell(('"' + $stressTestPrograms['aida64']['fullPathToExe'] + '" /SAFEST /SILENT /SST ' + $thisMode), 'MinimizedNoFocus')
+        # 0 = Hide
+        # 1 = NormalFocus
+        # 2 = MinimizedFocus
+        # 3 = MaximizedFocus
+        # 4 = NormalNoFocus
+        # 6 = MinimizedNoFocus
+        $windowBehaviour = 6
+        $fullPathToExe   = $stressTestPrograms['aida64']['fullPathToExe']
+        $command         = """${fullPathToExe}"" /SAFEST /SILENT /SST ${thisMode}"
+        $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
         
-        $Script:windowProcess = Get-Process -Id $processId
+        $Script:windowProcess = Get-Process -Id $processId -ErrorAction Ignore
 
         # /SST          = Directly starts the System Stability Test (available tests: Cache, RAM, CPU, FPU, Disk, GPU)
         # /SILENT       = No tray icon, which can stay behind if the main window process is killed
@@ -2436,7 +2451,7 @@ function Initialize-YCruncher {
         Exit-WithFatalError
     }
 
-    $configType = $settings.mode
+    $modeString = $settings.mode
     $configName = 'stressTest.cfg'
     $configFile = $stressTestPrograms['ycruncher']['absolutePath'] + $configName
 
@@ -2525,33 +2540,34 @@ function Start-YCruncher {
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
     # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the Y-Cruncher binary!
-
-    
-    # TODO: There seem to be some problems with starting the process here. Need to investigate
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'MinimizedNoFocus')
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'NormalNoFocus')
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'Hide')
-
-    
     # The escape character in Visual Basic for double quotes seems to be... a double quote!
     # So a triple double quote is actually interpreted as a single double quote here
-    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost """' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '""" config """' + $stressTestConfigFilePath + '"""'), 'MinimizedNoFocus')
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(("conhost.exe """ + $stressTestPrograms['ycruncher']['fullPathToExe'] + """ config """ + $stressTestConfigFilePath + """"), 6) # 6 = MinimizedNoFocus
 
+    # 0 = Hide
+    # 1 = NormalFocus
+    # 2 = MinimizedFocus
+    # 3 = MaximizedFocus
+    # 4 = NormalNoFocus
+    # 6 = MinimizedNoFocus
+    $windowBehaviour = 6
 
-    # Possible alternative using cmd /K with even more quotes
-    # Note that this will not work with the GetWindows() call to match against "^.*00-x86\.exe$", as the window title doesn't end with .exe, but with
-    # "[...]00-x86.exe" config "[...]\stressTest.cfg"
-    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost.exe cmd /K """"""' + $fullPathToExe + '""" config """' + $stressTestConfigFilePath + '""""""'), 'MinimizedNoFocus')
-
-    
-    # Cannot use the returned $processId here
-    #$Script:windowProcess = Get-Process -Id $processId
-    $Script:windowProcess = Get-Process $stressTestPrograms['ycruncher']['processName']
+    # Apparently on some computers (not mine) the windows title is not set to the binary path, so the Get-StressTestWindowHandler function doesn't work
+    # Therefore we're now using "cmd /C start" to be able to set a window title...
+    $fileName      = $stressTestPrograms['ycruncher']['processName'] + '.' + $stressTestPrograms['ycruncher']['processNameExt']
+    $fullPathToExe = $stressTestPrograms['ycruncher']['fullPathToExe']
+    $command       = "cmd /C start /MIN ""Y-Cruncher - ${fileName}"" ""${fullPathToExe}"" config ""${stressTestConfigFilePath}"""
+    $processId     = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
-    
+
+
+    # Cannot use the returned $processId here
+    #$Script:windowProcess = Get-Process -Id $processId
+    $Script:windowProcess = Get-Process $stressTestPrograms['ycruncher']['processName'] -ErrorAction Ignore
+
     if (!$Script:windowProcess) {
         Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['ycruncher']['processName'] + '"!')
     }
@@ -3175,16 +3191,7 @@ if (!$counter) {
 $selectedStressTestProgram = $stressTestPrograms[$settings.General.stressTestProgram]['displayName']
 
 # Set the correct process name
-# Eventually this could be something different than just Prime95
-if ($stressTestPrograms.Contains($settings.General.stressTestProgram)) {
-    $processName = $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']
-}
-
-# Default is Prime95
-else {
-    $processName = $stressTestPrograms['prime95']['processNameForLoad']
-}
-
+$processName = $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']
 
 # Check if the stress test process is already running
 $stressTestProcess = Get-Process $processName -ErrorAction Ignore
@@ -3498,7 +3505,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
                 Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
                 
-                $affinity        = 2
+                $affinity        = [System.IntPtr][Int64] 2
                 $cpuNumber       = 1
                 $cpuNumberString = 1
             }
@@ -3570,7 +3577,7 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
             Start-Sleep -Milliseconds 300
 
             try {
-                $stressTestProcess.ProcessorAffinity = $affinity
+                $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
             }
             catch {
                 Close-StressTestProgram
