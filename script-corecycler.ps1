@@ -2525,11 +2525,24 @@ function Start-YCruncher {
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
     # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the Y-Cruncher binary!
-    # Triple double quotes?
-    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost """' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '""" config """' + $stressTestConfigFilePath + '"""'), 'MinimizedNoFocus')
+
+    
+    # TODO: There seem to be some problems with starting the process here. Need to investigate
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'MinimizedNoFocus')
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'NormalNoFocus')
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost "' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '" config \"' + $stressTestConfigFilePath + '\"'), 'Hide')
+
+    
+    # The escape character in Visual Basic for double quotes seems to be... a double quote!
+    # So a triple double quote is actually interpreted as a single double quote here
+    $processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost """' + $stressTestPrograms['ycruncher']['fullPathToExe'] + '""" config """' + $stressTestConfigFilePath + '"""'), 'MinimizedNoFocus')
+
+
+    # Possible alternative using cmd /K with even more quotes
+    # Note that this will not work with the GetWindows() call to match against "^.*00-x86\.exe$", as the window title doesn't end with .exe, but with
+    # "[...]00-x86.exe" config "[...]\stressTest.cfg"
+    #$processId = [Microsoft.VisualBasic.Interaction]::Shell(('conhost.exe cmd /K """"""' + $fullPathToExe + '""" config """' + $stressTestConfigFilePath + '""""""'), 'MinimizedNoFocus')
+
     
     # Cannot use the returned $processId here
     #$Script:windowProcess = Get-Process -Id $processId
