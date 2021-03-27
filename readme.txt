@@ -200,5 +200,8 @@ ideas, please let me know at
 https://github.com/sp00n/corecycler
 
 
+The licenses of all included programs remain unaffected by this and retain their original, included license!
+
+
 Happy testing!
 sp00n

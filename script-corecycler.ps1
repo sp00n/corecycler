@@ -18,10 +18,10 @@
 
 # Global variables
 $version                   = '0.8.0.0 RC3'
-$curDateTime               = Get-Date -format yyyy-MM-dd_HH-mm-ss
+$startDateTime             = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
-$logFileName               = 'CoreCycler_' + $curDateTime + '.log'
+$logFileName               = 'CoreCycler_' + $startDateTime + '.log'
 $logFileFullPath           = $logFilePathAbsolute + $logFileName
 $settings                  = $null
 $selectedStressTestProgram = $null
@@ -1084,7 +1084,7 @@ function Get-Settings {
     # Set the temporary name and path for the logfile
     # We need it because of the Exit-WithFatalError calls below
     # We don't have all the information yet though, so the name and path will be overwritten after all the user settings have been parsed
-    $Script:logFileName     = $defaultSettings.logfile + '_' + $curDateTime + '.log'
+    $Script:logFileName     = $defaultSettings.logfile + '_' + $startDateTime + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
 
 
@@ -1191,7 +1191,7 @@ function Get-Settings {
 
 
     # Set the final full path and name of the log file
-    $Script:logFileName     = $settings.Logging.name + '_' + $curDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $modeString + '.log'
+    $Script:logFileName     = $settings.Logging.name + '_' + $startDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $modeString + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
 }
 
@@ -1364,40 +1364,45 @@ function Send-CommandToAida64 {
 
 <#
 .DESCRIPTION
-    Get the main window handler for the selected stress test program process
+    Get the main window and stress test processes, as well as the main window handler
     Even if minimized to the tray
+    This will set global variables
 .PARAMETER stopOnStressTestProcessNotFound
     [Bool] If set to false, will not throw an error if the stress test process was not found
 .OUTPUTS
     [Void]
 #>
-function Get-StressTestWindowHandler {
+function Get-StressTestProcessInformation {
     param(
         [Parameter(Mandatory=$false)]
         [Bool] $stopOnStressTestProcessNotFound = $true
     )
 
-    $stressTestProcess   = $null
-    $stressTestProcessId = $null
-    $windowObj           = $null
-    $process             = $null
+    $windowObj                      = $null
+    $filteredWindowObj              = $null
+    $ckeckProcess                   = $null
+    $stressTestProcess              = $null    # Assigned to global variable
+    $stressTestProcessId            = $null    # Assigned to global variable
+    $windowProcess                  = $null    # Assigned to global variable
+    $windowProcessId                = $null    # Assigned to global variable
+    $windowProcessMainWindowHandler = $null    # Assigned to global variable
     
     Write-Verbose('Trying to get the stress test program window handler');
     Write-Verbose('Looking for these window names:')
     Write-Verbose(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', '))
 
-    $timestamp = Get-Date -format HH:mm:ss
-
+    # Try to to get the window and the stress test
     for ($i = 1; $i -le 30; $i++) {
         Start-Sleep -Milliseconds 250
+        $timestamp = Get-Date -format HH:mm:ss
 
+        # This is the window object for the main window
         $windowObj = [GetWindows.Main]::GetWindows() | Where-Object {
             $_.WinTitle -match ($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join '|')
         }
 
+        # This is the process object for the stress test. They may be the same, but not necessarily (e.g. Aida64)
         $stressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
-
-        $timestamp = Get-Date -format HH:mm:ss
 
         if ($windowObj.Length -gt 0) {
             Write-Verbose($timestamp + ' - Window found')
@@ -1409,13 +1414,13 @@ function Get-StressTestWindowHandler {
     }
 
 
-    # Still nothing found
+    # Still no main window found
     if ($windowObj.Length -eq 0) {
-        # Check if the process name exists
-        $process = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
+        # Check if the process for the main window exists
+        $ckeckProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
 
-        # We found the process, one last check for the window
-        if ($process.Length -gt 0) {
+        # We found the main window process, one last check to get the main window object
+        if ($ckeckProcess.Length -gt 0) {
             $windowObj = [GetWindows.Main]::GetWindows() | Where-Object {
                 $_.WinTitle -match ($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join '|')
             }
@@ -1429,10 +1434,10 @@ function Get-StressTestWindowHandler {
         Write-ColorText('Was looking for these window names:') Red
         Write-ColorText(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', ')) Yellow
 
-        if ($process) {
+        if ($ckeckProcess) {
             Write-ColorText('However, found a process with the process name "' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '":') Red
 
-            $process | ForEach-Object {
+            $ckeckProcess | ForEach-Object {
                 Write-ColorText(' - ProcessName:  ' + $_.ProcessName) Yellow
                 Write-ColorText('   Process Path: ' + $_.Path) Yellow
                 Write-ColorText('   Process Id:   ' + $_.Id) Yellow
@@ -1447,7 +1452,7 @@ function Get-StressTestWindowHandler {
     Write-Verbose('Found the following window(s) with these names:')
 
     $windowObj | ForEach-Object {
-        $path = (Get-Process -Id $_.ProcessId).Path
+        $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
         Write-Verbose(' - WinTitle:     ' + $_.WinTitle)
         Write-Verbose('   ProcessId:    ' + $_.ProcessId)
         Write-Verbose('   Process Path: ' + $path)
@@ -1458,14 +1463,16 @@ function Get-StressTestWindowHandler {
     Write-Verbose('Filtering the windows for ".*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$":')
 
     $filteredWindowObj = $windowObj | Where-Object {
-        (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -match ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
+        (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -match `
+            ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
     }
 
     $filteredWindowObj | ForEach-Object {
-        $path = (Get-Process -Id $_.ProcessId).Path
-        Write-Verbose(' - WinTitle:     ' + $_.WinTitle)
-        Write-Verbose('   ProcessId:    ' + $_.ProcessId)
-        Write-Verbose('   Process Path: ' + $path)
+        $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
+        Write-Verbose(' - WinTitle:         ' + $_.WinTitle)
+        Write-Verbose('   MainWindowHandle: ' + $_.MainWindowHandle)
+        Write-Verbose('   ProcessId:        ' + $_.ProcessId)
+        Write-Verbose('   Process Path:     ' + $path)
     }
 
 
@@ -1476,7 +1483,7 @@ function Get-StressTestWindowHandler {
         Write-ColorText('There exist multiple windows with the same name as the stress test program:') Red
         
         $filteredWindowObj | ForEach-Object {
-            $path = (Get-Process -Id $_.ProcessId).Path
+            $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
             Write-ColorText(' - Windows Title: ' + $_.WinTitle) Yellow
             Write-ColorText('   Process Path:  ' + $path) Yellow
             Write-ColorText('   Process Id:    ' + $_.ProcessId) Yellow
@@ -1485,6 +1492,10 @@ function Get-StressTestWindowHandler {
         Write-ColorText('Please close these windows and try again.') Red
         Exit-WithFatalError
     }
+
+
+    # We've now found our main window object, get the corresponding PowerShell process object for it
+    $windowProcess = Get-Process -Id $filteredWindowObj.ProcessId -ErrorAction Ignore
 
 
     # Also, the process performing the stress test can actually be different to the main window of the stress test program
@@ -1516,21 +1527,23 @@ function Get-StressTestWindowHandler {
 
     # The stress test and the main window are the same process
     else {
-        $stressTestProcess   = $windowProcess # This one already exists outside the function
-        $stressTestProcessId = $filteredWindowObj.ProcessId
+        $stressTestProcess   = $windowProcess
+        $stressTestProcessId = $windowProcess.Id
     }
 
 
     # Override the global script variables
-    $Script:windowProcessMainWindowHandler = $filteredWindowObj.MainWindowHandle
+    $Script:windowProcess                  = $windowProcess
     $Script:windowProcessId                = $filteredWindowObj.ProcessId
+    $Script:windowProcessMainWindowHandler = $filteredWindowObj.MainWindowHandle
     $Script:stressTestProcess              = $stressTestProcess
     $Script:stressTestProcessId            = $stressTestProcessId
 
-    Write-Verbose('Stress test window handler:    ' + $windowProcessMainWindowHandler)
-    Write-Verbose('Stress test window process ID: ' + $windowProcessId)
-    Write-Verbose('Stress test process:           ' + $stressTestProcess.ProcessName)
-    Write-Verbose('Stress test process ID:        ' + $stressTestProcessId)
+    Write-Verbose('Main window handler:      ' + $Script:windowProcessMainWindowHandler)
+    Write-Verbose('Main window process name: ' + $Script:windowProcess.ProcessName)
+    Write-Verbose('Main window process ID:   ' + $Script:windowProcessId)
+    Write-Verbose('Stress test process name: ' + $Script:stressTestProcess.ProcessName)
+    Write-Verbose('Stress test process ID:   ' + $Script:stressTestProcessId)
 }
 
 
@@ -1697,6 +1710,8 @@ function Initialize-Prime95 {
             Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
             Huge     = @{ Min = 8960; Max = 32768; }  # New addition
             All      = @{ Min =    4; Max = 32768; }
+            Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Modest   = @{ Min = 1344; Max =  4096; }
         }
 
         AVX = @{
@@ -1705,6 +1720,8 @@ function Initialize-Prime95 {
             Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
             Huge     = @{ Min = 8960; Max = 32768; }  # New addition
             All      = @{ Min =    4; Max = 32768; }
+            Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Modest   = @{ Min = 1344; Max =  4096; }
         }
 
         AVX2 = @{
@@ -1713,6 +1730,8 @@ function Initialize-Prime95 {
             Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
             Huge     = @{ Min = 8960; Max = 51200; }  # New addition
             All      = @{ Min =    4; Max = 51200; }
+            Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Modest   = @{ Min = 1344; Max =  4096; }
         }
     }
 
@@ -1752,7 +1771,7 @@ function Initialize-Prime95 {
 
 
     # The Prime95 results.txt file name and path for this run
-    $Script:stressTestLogFileName = 'Prime95_' + $curDateTime + '_' + $modeString + '_' + $settings.Prime95.FFTSize + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    $Script:stressTestLogFileName = 'Prime95_' + $startDateTime + '_' + $modeString + '_' + $settings.Prime95.FFTSize + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
     $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
     # Create the local.txt and overwrite if necessary
@@ -1808,8 +1827,8 @@ function Initialize-Prime95 {
     else {
         # No memory testing ("In-Place")
         # 1 minute per FFT size
-        Add-Content $configFile2 'TortureMem=0'
-        Add-Content $configFile2 'TortureTime=1'
+        Add-Content $configFile2 ('TortureMem=0')
+        Add-Content $configFile2 ('TortureTime=1')
     }
 
     # Set the FFT sizes
@@ -1820,16 +1839,21 @@ function Initialize-Prime95 {
     # Get the correct TortureWeak setting
     Add-Content $configFile2 ('TortureWeak=' + $(Get-TortureWeakValue))
     
-    Add-Content $configFile2 'V24OptionsConverted=1'
-    Add-Content $configFile2 'V30OptionsConverted=1'
-    Add-Content $configFile2 'WorkPreference=0'
-    Add-Content $configFile2 'WGUID_version=2'
-    Add-Content $configFile2 'StressTester=1'
-    Add-Content $configFile2 'UsePrimenet=0'
-    Add-Content $configFile2 'ExitOnX=1'
-    Add-Content $configFile2 'ResultsFileTimestampInterval=60'
-    Add-Content $configFile2 '[PrimeNet]'
-    Add-Content $configFile2 'Debug=0'
+    Add-Content $configFile2 ('V24OptionsConverted=1')
+    Add-Content $configFile2 ('V30OptionsConverted=1')
+    Add-Content $configFile2 ('WorkPreference=0')
+    Add-Content $configFile2 ('WGUID_version=2')
+    Add-Content $configFile2 ('StressTester=1')
+    Add-Content $configFile2 ('UsePrimenet=0')
+    Add-Content $configFile2 ('ExitOnX=1')
+    Add-Content $configFile2 ('ResultsFileTimestampInterval=60')
+
+    # We're setting the affinity and process/thread priority ourselves
+    Add-Content $configFile2 ('EnableSetAffinity=0')
+    Add-Content $configFile2 ('EnableSetPriority=0')
+
+    Add-Content $configFile2 ('[PrimeNet]')
+    Add-Content $configFile2 ('Debug=0')
 }
 
 
@@ -1845,11 +1869,11 @@ function Start-Prime95 {
     Write-Verbose('Starting Prime95')
 
     # Minimized to the tray
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
+    #$processId = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
     # This steals the focus
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
+    #$processId = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
 
     # This doesn't steal the focus
     # 0 = Hide
@@ -1866,15 +1890,9 @@ function Start-Prime95 {
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
 
-    $Script:windowProcess = Get-Process -Id $processId -ErrorAction Ignore
-    
-    if (!$Script:windowProcess) {
-        Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['prime95']['processName'] + '"!')
-    }
-
-    # Get the main window handler
+    # Get the main window and stress test processes, as well as the main window handler
     # This also works for windows minimized to the tray
-    Get-StressTestWindowHandler
+    Get-StressTestProcessInformation
     
     # This is to find the exact counter path, as you might have multiple processes with the same name
     try {
@@ -1916,7 +1934,7 @@ function Close-Prime95 {
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
     if (!$windowProcessMainWindowHandler) {
-        Get-StressTestWindowHandler
+        Get-StressTestProcessInformation
     }
     
     # If we now have a windowProcessMainWindowHandler, try to close the window
@@ -2007,7 +2025,7 @@ function Initialize-Aida64 {
     }
 
     # The Aida64 log file name and path for this run
-    $Script:stressTestLogFileName = 'Aida64_' + $curDateTime + '_' + $modeString + '.csv'
+    $Script:stressTestLogFileName = 'Aida64_' + $startDateTime + '_' + $modeString + '.csv'
     $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
     # The aida64.ini and aida64.sst.ini
@@ -2164,12 +2182,12 @@ function Start-Aida64 {
     # Cache or RAM
     $thisMode = $settings.Aida64.mode
 
-    # Check if the main process still exists
-    $windowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
+    # Check if the main window process exists
+    $checkWindowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
 
     # Sart the main window process if $startOnlyStressTest is not set, or if the main window process wasn't found
-    if (!$startOnlyStressTest -or !$windowProcess) {
-        if ($startOnlyStressTest -and !$windowProcess) {
+    if (!$startOnlyStressTest -or !$checkWindowProcess) {
+        if ($startOnlyStressTest -and !$checkWindowProcess) {
             Write-Verbose('The flag to only start the stress test process was set, but couldn''t find the main window!')
             Write-Verbose('Starting the main window process')
         }
@@ -2186,7 +2204,7 @@ function Start-Aida64 {
         $command         = """${fullPathToExe}"" /SAFEST /SILENT /SST ${thisMode}"
         $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
         
-        $Script:windowProcess = Get-Process -Id $processId -ErrorAction Ignore
+        $checkWindowProcess = Get-Process -Id $processId -ErrorAction Ignore
 
         # /SST          = Directly starts the System Stability Test (available tests: Cache, RAM, CPU, FPU, Disk, GPU)
         # /SILENT       = No tray icon, which can stay behind if the main window process is killed
@@ -2233,7 +2251,7 @@ function Start-Aida64 {
     }
     
     # Either the main window or the stress test process wasn't found
-    if (!$Script:windowProcess -or !$stressTestProcess) {
+    if (!$checkWindowProcess -or !$stressTestProcess) {
         # If $startOnlyStressTest was set, try again without the flag
         if ($startOnlyStressTest) {
             Write-Verbose('Couldn''t start the main window or stress test process')
@@ -2246,9 +2264,9 @@ function Start-Aida64 {
         Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['aida64']['processName'] + '"!')
     }
 
-    # Get the main window handler
+    # Get the main window and stress test processes, as well as the main window handler
     # This also works for windows minimized to the tray
-    Get-StressTestWindowHandler
+    Get-StressTestProcessInformation
 
     # This is to find the exact counter path, as you might have multiple processes with the same name
     try {
@@ -2309,7 +2327,7 @@ function Close-Aida64 {
     if (!$windowProcessMainWindowHandler) {
         # Set the flag to not stop if the stress test process wasn't found
         # It may not be running
-        Get-StressTestWindowHandler $false
+        Get-StressTestProcessInformation $false
     }
 
     # The stress test window cannot be closed gracefully, as it has no main window
@@ -2461,7 +2479,7 @@ function Initialize-YCruncher {
     # The log file name and path for this run
     # TODO: Y-Cruncher doesn't seem to create any type of log :(
     #       And I also cannot redirect the output via > logfile.txt 
-    #$Script:stressTestLogFileName = 'Y-Cruncher_' + $curDateTime + '.txt'
+    #$Script:stressTestLogFileName = 'Y-Cruncher_' + $startDateTime + '.txt'
     #$Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
 
@@ -2530,12 +2548,12 @@ function Start-YCruncher {
     $thisMode = $settings.YCruncher.mode
 
     # Minimized to the tray
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Hidden
+    #$processId = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Hidden
     
     # Minimized to the task bar
     # This steals the focus
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Minimized
-    #$Script:windowProcess = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru
+    #$processId = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Minimized
+    #$processId = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru
 
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
@@ -2552,29 +2570,23 @@ function Start-YCruncher {
     # 6 = MinimizedNoFocus
     $windowBehaviour = 6
 
-    # Apparently on some computers (not mine) the windows title is not set to the binary path, so the Get-StressTestWindowHandler function doesn't work
+    # Apparently on some computers (not mine) the windows title is not set to the binary path, so the Get-StressTestProcessInformation function doesn't work
     # Therefore we're now using "cmd /C start" to be able to set a window title...
     $fileName      = $stressTestPrograms['ycruncher']['processName'] + '.' + $stressTestPrograms['ycruncher']['processNameExt']
     $fullPathToExe = $stressTestPrograms['ycruncher']['fullPathToExe']
-    $command       = "cmd /C start /MIN ""Y-Cruncher - ${fileName}"" ""${fullPathToExe}"" config ""${stressTestConfigFilePath}"""
+    $command       = "cmd /C start /MIN ""Y-Cruncher - ${fileName}"" ""${fullPathToExe}"" priority:2 config ""${stressTestConfigFilePath}"""
     $processId     = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
+
+    Write-Verbose('The executed command:')
+    Write-Verbose($command)
 
 
     # This might be necessary to correctly read the process. Or not
     Start-Sleep -Milliseconds 500
 
-
-    # Cannot use the returned $processId here
-    #$Script:windowProcess = Get-Process -Id $processId
-    $Script:windowProcess = Get-Process $stressTestPrograms['ycruncher']['processName'] -ErrorAction Ignore
-
-    if (!$Script:windowProcess) {
-        Exit-WithFatalError('Could not start the process "' + $stressTestPrograms['ycruncher']['processName'] + '"!')
-    }
-
-    # Get the main window handler
+    # Get the main window and stress test processes, as well as the main window handler
     # This also works for windows minimized to the tray
-    Get-StressTestWindowHandler
+    Get-StressTestProcessInformation
     
     # This is to find the exact counter path, as you might have multiple processes with the same name
     try {
@@ -2616,7 +2628,7 @@ function Close-YCruncher {
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
     if (!$windowProcessMainWindowHandler) {
-        Get-StressTestWindowHandler
+        Get-StressTestProcessInformation
     }
     
     # If we now have a windowProcessMainWindowHandler, try to close the window
@@ -2766,18 +2778,6 @@ function Test-ProcessUsage {
 
     $timestamp = Get-Date -format HH:mm:ss
     
-    # The minimum CPU usage for the stress test program, below which it should be treated as an error
-    # We need to account for the number of threads
-    # Min. 1.0%
-    # 100/32=   3,125% for 1 thread out of 32 threads
-    # 100/32*2= 6,250% for 2 threads out of 32 threads
-    # 100/24=   4,167% for 1 thread out of 24 threads
-    # 100/24*2= 8,334% for 2 threads out of 24 threads
-    # 100/12=   8,334% for 1 thread out of 12 threads
-    # 100/12*2= 16,67% for 2 threads out of 12 threads
-    $minProcessUsage = [Math]::Max(1.0, $expectedUsage - [Math]::Round(100 / $numLogicalCores, 2))
-    
-    
     # Set to a string if there was an error
     $stressTestError = $false
 
@@ -2865,39 +2865,51 @@ function Test-ProcessUsage {
             # Error string still not found
             # This might have been a false alarm, wait a bit and try again
             if (!$stressTestError) {
-                $waitTime = 2000
+                $waitTime  = 2000
+                $maxChecks = 3
 
-                Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
+                # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
+                for ($i = 1; $i -le $maxChecks; $i++) {
+                    Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
 
-                Start-Sleep -Milliseconds $waitTime
+                    Start-Sleep -Milliseconds $waitTime
 
-                # The second check
-                # Do the whole process path procedure again
-                $thisProcessId = $stressTestProcess.Id[0]
+                    # The additional check
+                    # Do the whole process path procedure again
+                    $thisProcessId = $stressTestProcess.Id[0]
 
-                Write-Verbose('Process Id: ' + $thisProcessId)
+                    Write-Verbose('Process Id: ' + $thisProcessId)
 
-                # Start a background job to get around the cached Get-Counter value
-                $thisProcessCounterPathId = Start-Job -ScriptBlock { 
-                    $counterPathName = $args[0].'FullName'
-                    $processId = $args[1]
-                    ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
-                } -ArgumentList $counterNames, $thisProcessId | Wait-Job | Receive-Job
+                    # Start a background job to get around the cached Get-Counter value
+                    $thisProcessCounterPathId = Start-Job -ScriptBlock { 
+                        $counterPathName = $args[0].'FullName'
+                        $processId = $args[1]
+                        ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+                    } -ArgumentList $counterNames, $thisProcessId | Wait-Job | Receive-Job
 
-                $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
-                $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
+                    $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+                    $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
 
-                Write-Verbose($timestamp + ' - ...checking CPU usage again: ' + $thisProcessCPUPercentage + '%')
+                    Write-Verbose($timestamp + ' - ...checking CPU usage again (#' + $i + '): ' + $thisProcessCPUPercentage + '%')
 
-                # Still below the minimum usage
-                if ($thisProcessCPUPercentage -le $minProcessUsage) {
-                    Write-Verbose('           ...still not enough usage, throw an error')
+                    # If we have recovered, break and continue with stresss testing
+                    if ($thisProcessCPUPercentage -ge $minProcessUsage) {
+                        Write-Verbose('           ...the process seems to have recovered, continuing with stress testing')
+                        break;
+                    }
 
-                    # We don't care about an error string here anymore
-                    $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsage + '%)'
-                }
-                else {
-                    Write-Verbose('           ...the process seems to have recovered, continuing with stress testing')
+                    else {
+                        # Set the error variable if $maxChecks has been reached
+                        if ($i -eq $maxChecks) {
+                            Write-Verbose('           ...still not enough usage, throw an error')
+
+                            # We don't care about an error string here anymore
+                            $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'                            
+                        }
+                        else {
+                            Write-Verbose('           ...still not enough usage (#' + $i + ')')
+                        }
+                    }
                 }
             }
         }
@@ -2989,6 +3001,7 @@ function Test-ProcessUsage {
                     # If the last passed FFT size is the max selected FFT size, start at the beginning
                     elseif ($lastPassedFFT -eq $maxFFTSize) {
                         $lastRunFFT = $minFFTSize
+                        Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
                         Write-Verbose('The last passed FFT size is the max selected FFT size, use the min FFT size: ' + $lastRunFFT)
                     }
 
@@ -2997,13 +3010,15 @@ function Test-ProcessUsage {
                     # Example: Smallest FFT max = 21, but the actual last size tested is 20K
                     elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
                         $lastRunFFT = $minFFTSize
+                        Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
                         Write-Verbose('The last passed FFT size does not show up in the FFTSizes array, assume it''s the first FFT size: ' + $lastRunFFT)
                     }
 
                     # If it's not the max value and it does show up in the FFT array, select the next value
                     else {
                         $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
-                        Write-Verbose('Last passed FFT size found: ' + $lastRunFFT)
+                        Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
+                        Write-Verbose('Last run FFT size assumed:  ' + $lastRunFFT)
                     }
                 }
 
@@ -3187,6 +3202,20 @@ if (!$counter) {
 }
 
 
+# Check if we can access Visual Basic
+try {
+    $null = [Microsoft.VisualBasic.Interaction] | Get-Member -static
+}
+catch {
+    Write-ColorText('FATAL ERROR: Could not access [Microsoft.VisualBasic.Interaction]!') Red
+    Write-ErrorText $Error
+    Exit-WithFatalError
+}
+
+
+
+
+
 # The name of the selected stress test program
 $selectedStressTestProgram = $stressTestPrograms[$settings.General.stressTestProgram]['displayName']
 
@@ -3208,7 +3237,23 @@ else {
 # The expected CPU usage for the running stress test process
 # The selected number of threads should be at 100%, so e.g. for 1 thread out of 24 threads this is 100/24*1= 4.17%
 # Used to determine if the stress test is still running or has thrown an error
-$expectedUsage = [Math]::Round(100 / $numLogicalCores * $settings.General.numberOfThreads, 2)
+# For one thread
+$expectedUsagePerCore = (100 / $numLogicalCores)
+
+# For the selected number of threads
+$expectedUsageTotal = [Math]::Round($expectedUsagePerCore * $settings.General.numberOfThreads, 2)
+
+
+# The minimum CPU usage for the stress test program, below which it should be treated as an error
+# We need to account for the number of threads
+# 100/32=   3,125% for 1 thread out of 32 threads
+# 100/32*2= 6,250% for 2 threads out of 32 threads
+# 100/24=   4,167% for 1 thread out of 24 threads
+# 100/24*2= 8,334% for 2 threads out of 24 threads
+# 100/12=   8,334% for 1 thread out of 12 threads
+# 100/12*2= 16,67% for 2 threads out of 12 threads
+# Use either 1.0% as the lower limit or the total expected usage - the expected usage per core if one thread failed
+$minProcessUsage = [Math]::Max(1.0, [Math]::Round($expectedUsageTotal - $expectedUsagePerCore, 2))
 
 
 # Store all the cores that have thrown an error in the stress test
@@ -3598,6 +3643,46 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
 
 
         Write-Verbose('Successfully set the affinity to ' + $affinity)
+
+
+        # Set the process priority
+        try {
+            # PriorityClass values:
+            # Idle
+            # BelowNormal
+            # Normal
+            # AboveNormal
+            # High
+            # RealTime
+            $stressTestProcess.PriorityClass = 'High'
+
+            # There's also a "SetPriority" property, which seems to be a WMI only property
+            # Possible values:
+            #    64 - Low
+            # 16384 - Below normal
+            #    32 - Normal
+            # 32768 - Above normal
+            #   128 - High
+            #   256 - Realtime
+            #
+            # Return codes:
+            #  0  - Successful completion 
+            #  2  - Access denied 
+            #  3  - Insufficient privilege 
+            #  8  - Unknown failure 
+            #  9  - Path not found 
+            # 21  - Invalid parameter 
+            # 22+ - Other
+
+            # Get-WmiObject win32_process -Filter 'Name="prime95.exe"'
+            # $wmiStressTestProcess = Get-WmiObject win32_process -Filter ('Handle="' + $stressTestProcess.Id + '"')
+            # $setPriority = $wmiStressTestProcess.SetPriority(128)
+            # $setPriority.ReturnValue
+        }
+        catch {
+            Close-StressTestProgram
+            Exit-WithFatalError('Could not set the priority of the stress test process!')
+        }
 
         # If this core is stored in the error core array and the skipCoreOnError setting is not set, display the amount of errors
         if (!$settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {

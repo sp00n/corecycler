@@ -3,8 +3,13 @@
  # Helps to find a suitable value for the runtimePerCore setting
  #>
 
-# The log file to analyze. Either copy the log file to this directory or provide the full path to the log file
-$filePath = ''
+# The directory of where the log file can be found
+# You can use an absolute or relative path from where this script is located
+$logFileDirectory = '..\logs\'
+
+
+# The name of the log file to analyze
+$logFileName = ''
 
 
 # The script tries to autodetect the FFT preset and test mode used in the log file, but you can specify them here
@@ -12,6 +17,7 @@ $testMode  = '' # SSE, AVX, AVX
 $fftPreset = '' # Smallest, Small, Large, Huge, All
 
 
+# The FFT size array to be able to analyze the log file
 $allFFTSizes = @{
     SSE = @(
         # Smallest FFT
@@ -111,6 +117,7 @@ $FFTMinMaxValues = @{
         Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
         Huge     = @{ Min = 8960; Max = 32768; }  # New addition
         All      = @{ Min =    4; Max = 32768; }
+        Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
     }
 
     AVX = @{
@@ -119,6 +126,7 @@ $FFTMinMaxValues = @{
         Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
         Huge     = @{ Min = 8960; Max = 32768; }  # New addition
         All      = @{ Min =    4; Max = 32768; }
+        Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
     }
 
     AVX2 = @{
@@ -127,12 +135,18 @@ $FFTMinMaxValues = @{
         Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
         Huge     = @{ Min = 8960; Max = 51200; }  # New addition
         All      = @{ Min =    4; Max = 51200; }
+        Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
     }
 }
 
 
+# The full path of the log file
+$folder   = (Resolve-Path $logFileDirectory).ToString()
+$folder  += $(if ($folder.SubString($folder.Length-1) -ne '\') { '\' })
+$filePath = (Resolve-Path $logFileDirectory).ToString() + $logFileName
+
 if (!$filePath -or $filePath.Length -eq 0 -or !(Test-Path $filePath -PathType leaf)) {
-    Write-Host('ERROR: Could not find the provided file!') -ForegroundColor Red
+    Write-Host('ERROR: Could not find the provided log file!') -ForegroundColor Red
     Write-Host($filePath) -ForegroundColor Yellow
 
     Read-Host -Prompt 'Press Enter to exit'
