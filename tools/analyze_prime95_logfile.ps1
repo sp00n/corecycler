@@ -117,9 +117,9 @@ $FFTMinMaxValues = @{
         Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
         Huge      = @{ Min = 8960; Max = 32768; }  # New addition
         All       = @{ Min =    4; Max = 32768; }
+        Moderate  = @{ Min = 1344; Max =  4096; }
         Heavy     = @{ Min =    4; Max =  1344; }
         Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
-        Modest    = @{ Min = 1344; Max =  4096; }
     }
 
     AVX = @{
@@ -128,9 +128,9 @@ $FFTMinMaxValues = @{
         Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
         Huge      = @{ Min = 8960; Max = 32768; }  # New addition
         All       = @{ Min =    4; Max = 32768; }
+        Moderate  = @{ Min = 1344; Max =  4096; }
         Heavy     = @{ Min =    4; Max =  1344; }
         Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
-        Modest    = @{ Min = 1344; Max =  4096; }
     }
 
     AVX2 = @{
@@ -139,9 +139,9 @@ $FFTMinMaxValues = @{
         Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
         Huge      = @{ Min = 8960; Max = 51200; }  # New addition
         All       = @{ Min =    4; Max = 51200; }
+        Moderate  = @{ Min = 1344; Max =  4096; }
         Heavy     = @{ Min =    4; Max =  1344; }
         Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
-        Modest    = @{ Min = 1344; Max =  4096; }
     }
 }
 
