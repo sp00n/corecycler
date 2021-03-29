@@ -49,6 +49,10 @@ $fatalError                = $false
 $otherError                = $false
 
 
+# Set the title
+$host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' running')
+
+
 # Stress test program executables and paths
 # The window behaviours:
 # 0 = Hide
@@ -4062,7 +4066,10 @@ finally {
     if ($scriptExit) {
         exit
     }
-    
+
+
+    # Set the title
+    $host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' terminating')
 
     $timestamp = Get-Date -format HH:mm:ss
     
