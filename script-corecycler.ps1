@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0 RC3
+    0.8.0.0 RC4
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                   = '0.8.0.0 RC3'
+$version                   = '0.8.0.0 RC4'
 $startDateTime             = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -34,8 +34,6 @@ $processCounterPathTime    = $null
 $coresWithError            = $null
 $coresWithErrorsCounter    = $null
 $previousError             = $null
-$stressTestConfigFileName  = $null
-$stressTestConfigFilePath  = $null
 $stressTestLogFileName     = $null
 $stressTestLogFilePath     = $null
 $prime95CPUSettings        = $null
@@ -44,9 +42,21 @@ $FFTMinMaxValues           = $null
 $minFFTSize                = $null
 $maxFFTSize                = $null
 $cpuTestMode               = $null
+$coreTestOrderMode         = $null
+$coreTestOrderCustom       = @()
+$scriptExit                = $false
+$fatalError                = $false
+$otherError                = $false
 
 
 # Stress test program executables and paths
+# The window behaviours:
+# 0 = Hide
+# 1 = NormalFocus
+# 2 = MinimizedFocus
+# 3 = MaximizedFocus
+# 4 = NormalNoFocus
+# 6 = MinimizedNoFocus
 $stressTestPrograms = @{
     'prime95' = @{
         'displayName'        = 'Prime95'
@@ -54,8 +64,12 @@ $stressTestPrograms = @{
         'processNameExt'     = 'exe'
         'processNameForLoad' = 'prime95'
         'processPath'        = 'test_programs\p95'
+        'configName'         = $null
+        'configFilePath'     = $null
         'absolutePath'       = $null
         'fullPathToExe'      = $null
+        'command'            = """%fullPathToExe%"" -t"
+        'windowBehaviour'    = 0
         'testModes'          = @(
             'SSE',
             'AVX',
@@ -76,8 +90,12 @@ $stressTestPrograms = @{
         'processNameExt'     = 'exe'
         'processNameForLoad' = 'aida_bench64.dll'   # This needs to be with file extension
         'processPath'        = 'test_programs\aida64'
+        'configName'         = $null
+        'configFilePath'     = $null
         'absolutePath'       = $null
         'fullPathToExe'      = $null
+        'command'            = """%fullPathToExe%"" /SAFEST /SILENT /SST %mode%"
+        'windowBehaviour'    = 6
         'testModes'          = @(
             'CACHE',
             'CPU',
@@ -95,8 +113,12 @@ $stressTestPrograms = @{
         'processNameExt'     = 'exe'
         'processNameForLoad' = '' # Depends on the selected modeYCruncher
         'processPath'        = 'test_programs\y-cruncher\Binaries'
+        'configName'         = 'stressTest.cfg'
+        'configFilePath'     = $null
         'absolutePath'       = $null
         'fullPathToExe'      = $null
+        'command'            = "cmd /C start /MIN ""Y-Cruncher - %fileName%"" ""%fullPathToExe%"" priority:2 config ""%configFilePath%"""
+        'windowBehaviour'    = 6
         'testModes'          = @(
             '00-x86',
             '04-P4P',
@@ -117,11 +139,6 @@ $stressTestPrograms = @{
             '' # Depends on the selected modeYCruncher
         )
     }
-}
-
-foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
-    $stressTestPrograms[$testProgram.Name]['absolutePath']  = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
-    $stressTestPrograms[$testProgram.Name]['fullPathToExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
 }
 
 
@@ -191,30 +208,51 @@ $GetWindowsDefinition = @'
         public class WinStruct {
             public string WinTitle {get; set; }
             public int MainWindowHandle { get; set; }
+            public string ProcessPath { get; set; }
             public int ProcessId { get; set; }
         }
          
         public class Main {
+            private static int PROCESS_QUERY_INFORMATION = (0x00000400);
+            private static int PROCESS_VM_READ           = (0x00000010);
+
             private delegate bool CallBackPtr(int hwnd, int lParam);
             private static CallBackPtr callBackPtr = Callback;
             private static List<WinStruct> _WinStructList = new List<WinStruct>();
 
+            // Get all windows
             [DllImport("user32.dll")]
             [return: MarshalAs(UnmanagedType.Bool)]
             private static extern bool EnumWindows(CallBackPtr lpEnumFunc, IntPtr lParam);
 
+            // Get the window title
             [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
             static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
             
+            // Get the process id for the window
             [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
             static extern int GetWindowThreadProcessId(IntPtr hWnd, out int ProcessId);
+
+            // Open a process
+            [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            static extern int OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+            // Get the process path for a window
+            [DllImport("psapi.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            static extern int GetModuleFileNameEx(IntPtr hProcess, IntPtr hModule, StringBuilder lpFilename, int nSize);
             
+
             private static bool Callback(int hWnd, int lparam) {
-                StringBuilder sb = new StringBuilder(256);
-                int res = GetWindowText((IntPtr)hWnd, sb, 256);
-                int pId;
-                int tId = GetWindowThreadProcessId((IntPtr)hWnd, out pId);
-                _WinStructList.Add(new WinStruct { MainWindowHandle = hWnd, WinTitle = sb.ToString(), ProcessId = pId });
+                int processId;
+                StringBuilder sb1 = new StringBuilder(1024);
+                StringBuilder sb2 = new StringBuilder(1024);
+
+                int getIdResult         = GetWindowThreadProcessId((IntPtr)hWnd, out processId);
+                int getWindowTextResult = GetWindowText((IntPtr)hWnd, sb1, 1024);
+                int openProcessResult   = OpenProcess((PROCESS_QUERY_INFORMATION+PROCESS_VM_READ), true, processId);
+                int getFileNameResult   = GetModuleFileNameEx((IntPtr)openProcessResult, IntPtr.Zero, sb2, 1024);
+
+                _WinStructList.Add(new WinStruct { MainWindowHandle = hWnd, WinTitle = sb1.ToString(), ProcessPath = sb2.ToString(), ProcessId = processId });
                 return true;
             }  
 
@@ -407,7 +445,7 @@ function Write-Verbose {
     
     if ($settings.Logging.verbosityMode) {
         if ($settings.Logging.verbosityMode -gt 1) {
-            Write-Host(''.PadLeft(11, ' ') + '      + ' + $text)
+            Write-Host(''.PadLeft(11, ' ') + '      + ' + $text) -ForegroundColor 'DarkGray'
         }
 
         Add-Content $logFileFullPath (''.PadLeft(11, ' ') + '      + ' + $text)
@@ -428,6 +466,8 @@ function Exit-Script {
         [Parameter(Mandatory=$false)]
         $text
     )
+
+    $Script:scriptExit = $true
 
     if ($text) {
         Write-Text($text)
@@ -451,6 +491,9 @@ function Exit-WithFatalError {
         [Parameter(Mandatory=$false)]
         $text
     )
+
+    $Script:fatalError = $true
+
 
     if ($text) {
         Write-ColorText('FATAL ERROR: ' + $text) Red
@@ -1006,7 +1049,8 @@ function Import-Settings {
                         }
                     }
 
-                    $thisSetting = $thisSetting | Sort
+                    # We cannot use Sort here, as it would transform an array with only one entry into an integer!
+                    $thisSetting::sort($thisSetting)
                 }
 
                 $setting = $thisSetting
@@ -1453,18 +1497,22 @@ function Get-StressTestProcessInformation {
 
     $windowObj | ForEach-Object {
         $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
-        Write-Verbose(' - WinTitle:     ' + $_.WinTitle)
-        Write-Verbose('   ProcessId:    ' + $_.ProcessId)
-        Write-Verbose('   Process Path: ' + $path)
+        Write-Verbose(' - WinTitle:         ' + $_.WinTitle)
+        Write-Verbose('   MainWindowHandle: ' + $_.MainWindowHandle)
+        Write-Verbose('   ProcessId:        ' + $_.ProcessId)
+        Write-Verbose('   Process Path:     ' + $_.ProcessPath)
+        Write-Verbose('   Process Path (PS):' + $path)
     }
 
     # There might be another window open with the same name as the stress test program (e.g. an Explorer window)
     # Select the correct one
-    Write-Verbose('Filtering the windows for ".*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$":')
+    $searchForProcess = ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
+    
+    Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
 
     $filteredWindowObj = $windowObj | Where-Object {
-        (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -match `
-            ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
+        #(Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -match $searchForProcess
+        $_.ProcessPath -match $searchForProcess
     }
 
     $filteredWindowObj | ForEach-Object {
@@ -1472,7 +1520,16 @@ function Get-StressTestProcessInformation {
         Write-Verbose(' - WinTitle:         ' + $_.WinTitle)
         Write-Verbose('   MainWindowHandle: ' + $_.MainWindowHandle)
         Write-Verbose('   ProcessId:        ' + $_.ProcessId)
-        Write-Verbose('   Process Path:     ' + $path)
+        Write-Verbose('   Process Path:     ' + $_.ProcessPath)
+        Write-Verbose('   Process Path (PS):' + $path)
+    }
+
+
+    # No window found!
+    if (!$filteredWindowObj) {
+        Write-ColorText('FATAL ERROR: Could not find the correct stress test window!') Red
+        Write-ColorText('No window found that matches "' + $searchForProcess + '"') Red
+        Exit-WithFatalError
     }
 
 
@@ -1483,9 +1540,10 @@ function Get-StressTestProcessInformation {
         Write-ColorText('There exist multiple windows with the same name as the stress test program:') Red
         
         $filteredWindowObj | ForEach-Object {
-            $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
+            #$path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
             Write-ColorText(' - Windows Title: ' + $_.WinTitle) Yellow
-            Write-ColorText('   Process Path:  ' + $path) Yellow
+            #Write-ColorText('   Process Path:  ' + $path) Yellow
+            Write-ColorText('   Process Path:  ' + $_.ProcessPath) Yellow
             Write-ColorText('   Process Id:    ' + $_.ProcessId) Yellow
         }
 
@@ -1705,33 +1763,36 @@ function Initialize-Prime95 {
     # depending on the selected test mode (SSE, AVX, AVX2)
     $Script:FFTMinMaxValues = @{
         SSE = @{
-            Smallest = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
-            Small    = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
-            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
-            All      = @{ Min =    4; Max = 32768; }
-            Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
-            Modest   = @{ Min = 1344; Max =  4096; }
+            Smallest  = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
+            Small     = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
+            Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge      = @{ Min = 8960; Max = 32768; }  # New addition
+            All       = @{ Min =    4; Max = 32768; }
+            Heavy     = @{ Min =    4; Max =  1344; }
+            Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Modest    = @{ Min = 1344; Max =  4096; }
         }
 
         AVX = @{
-            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge     = @{ Min = 8960; Max = 32768; }  # New addition
-            All      = @{ Min =    4; Max = 32768; }
-            Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
-            Modest   = @{ Min = 1344; Max =  4096; }
+            Smallest  = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small     = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge      = @{ Min = 8960; Max = 32768; }  # New addition
+            All       = @{ Min =    4; Max = 32768; }
+            Heavy     = @{ Min =    4; Max =  1344; }
+            Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Modest    = @{ Min = 1344; Max =  4096; }
         }
 
         AVX2 = @{
-            Smallest = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small    = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large    = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge     = @{ Min = 8960; Max = 51200; }  # New addition
-            All      = @{ Min =    4; Max = 51200; }
-            Heavy    = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
-            Modest   = @{ Min = 1344; Max =  4096; }
+            Smallest  = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small     = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge      = @{ Min = 8960; Max = 51200; }  # New addition
+            All       = @{ Min =    4; Max = 51200; }
+            Heavy     = @{ Min =    4; Max =  1344; }
+            Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Modest    = @{ Min = 1344; Max =  4096; }
         }
     }
 
@@ -1876,15 +1937,8 @@ function Start-Prime95 {
     #$processId = Start-Process -filepath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Minimized
 
     # This doesn't steal the focus
-    # 0 = Hide
-    # 1 = NormalFocus
-    # 2 = MinimizedFocus
-    # 3 = MaximizedFocus
-    # 4 = NormalNoFocus
-    # 6 = MinimizedNoFocus
-    $windowBehaviour = 0
-    $fullPathToExe   = $stressTestPrograms['prime95']['fullPathToExe']
-    $command         = """${fullPathToExe}"" -t"
+    $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
+    $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
     $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
     # This might be necessary to correctly read the process. Or not
@@ -2193,15 +2247,8 @@ function Start-Aida64 {
         }
 
         # This doesn't steal the focus
-        # 0 = Hide
-        # 1 = NormalFocus
-        # 2 = MinimizedFocus
-        # 3 = MaximizedFocus
-        # 4 = NormalNoFocus
-        # 6 = MinimizedNoFocus
-        $windowBehaviour = 6
-        $fullPathToExe   = $stressTestPrograms['aida64']['fullPathToExe']
-        $command         = """${fullPathToExe}"" /SAFEST /SILENT /SST ${thisMode}"
+        $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
+        $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
         $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
         
         $checkWindowProcess = Get-Process -Id $processId -ErrorAction Ignore
@@ -2470,11 +2517,7 @@ function Initialize-YCruncher {
     }
 
     $modeString = $settings.mode
-    $configName = 'stressTest.cfg'
-    $configFile = $stressTestPrograms['ycruncher']['absolutePath'] + $configName
-
-    $Script:stressTestConfigFileName = $configName
-    $Script:stressTestConfigFilePath = $configFile
+    $configFile = $stressTestPrograms['ycruncher']['configFilePath']
 
     # The log file name and path for this run
     # TODO: Y-Cruncher doesn't seem to create any type of log :(
@@ -2563,19 +2606,11 @@ function Start-YCruncher {
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(("conhost.exe """ + $stressTestPrograms['ycruncher']['fullPathToExe'] + """ config """ + $stressTestConfigFilePath + """"), 6) # 6 = MinimizedNoFocus
 
     # 0 = Hide
-    # 1 = NormalFocus
-    # 2 = MinimizedFocus
-    # 3 = MaximizedFocus
-    # 4 = NormalNoFocus
-    # 6 = MinimizedNoFocus
-    $windowBehaviour = 6
-
     # Apparently on some computers (not mine) the windows title is not set to the binary path, so the Get-StressTestProcessInformation function doesn't work
     # Therefore we're now using "cmd /C start" to be able to set a window title...
-    $fileName      = $stressTestPrograms['ycruncher']['processName'] + '.' + $stressTestPrograms['ycruncher']['processNameExt']
-    $fullPathToExe = $stressTestPrograms['ycruncher']['fullPathToExe']
-    $command       = "cmd /C start /MIN ""Y-Cruncher - ${fileName}"" ""${fullPathToExe}"" priority:2 config ""${stressTestConfigFilePath}"""
-    $processId     = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
+    $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
+    $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
+    $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
     Write-Verbose('The executed command:')
     Write-Verbose($command)
@@ -2788,12 +2823,12 @@ function Test-ProcessUsage {
         $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction Ignore
     }
 
-    # Does the process still exist?
-    $stressTestProcess = Get-Process $processName -ErrorAction Ignore
+    # Does the stress test process still exist?
+    $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
     
 
     # 1. The process doesn't exist anymore, immediate error
-    if (!$stressTestProcess) {
+    if (!$checkProcess) {
         $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t exist anymore.'
     }
 
@@ -2876,7 +2911,7 @@ function Test-ProcessUsage {
 
                     # The additional check
                     # Do the whole process path procedure again
-                    $thisProcessId = $stressTestProcess.Id[0]
+                    $thisProcessId = $checkProcess.Id[0]
 
                     Write-Verbose('Process Id: ' + $thisProcessId)
 
@@ -3090,9 +3125,12 @@ function Test-ProcessUsage {
 .DESCRIPTION
     The main functionality
 #>
+Write-Text('Starting the CoreCycler...')
+
 
 
 # Get the default and the user settings
+# This is early because we want to be able to get the verbosityMode
 Get-Settings
 
 
@@ -3215,23 +3253,35 @@ catch {
 
 
 
+# Get the final stress test program file paths and command lines
+foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
+    $stressTestPrograms[$testProgram.Name]['absolutePath']   = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
+    $stressTestPrograms[$testProgram.Name]['fullPathToExe']  = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
+    $stressTestPrograms[$testProgram.Name]['configFilePath'] = $testProgram.Value['absolutePath'] + $testProgram.Value['configName']
+
+    # Generate the command line
+    $data = @{
+        '%fileName%'       = $testProgram.Value['processName'] + '.' + $testProgram.Value['processNameExt']
+        '%fullPathToExe%'  = $testProgram.Value['fullPathToExe'] + '.' + $testProgram.Value['processNameExt']
+        '%mode%'           = $settings[$testProgram.Name].mode
+        '%configFilePath%' = $testProgram.Value['configFilePath']
+    }
+
+    $command = $stressTestPrograms[$testProgram.Name]['command']
+
+    foreach ($key in $data.Keys) {
+        $command = $command.replace($key, $data.$key)
+    }
+
+    $stressTestPrograms[$testProgram.Name]['command'] = $command
+}
+
 
 # The name of the selected stress test program
 $selectedStressTestProgram = $stressTestPrograms[$settings.General.stressTestProgram]['displayName']
 
 # Set the correct process name
 $processName = $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']
-
-# Check if the stress test process is already running
-$stressTestProcess = Get-Process $processName -ErrorAction Ignore
-
-# Some programs share the same process for stress testing and for displaying the main window, and some not
-if ($stressTestProgramsWithSameProcess.Contains($settings.General.stressTestProgram)) {
-    $windowProcess = $stressTestProcess
-}
-else {
-    $windowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
-}
 
 
 # The expected CPU usage for the running stress test process
@@ -3279,23 +3329,10 @@ $cpuCheckIterations = [Math]::Floor($settings.General.runtimePerCore / $cpuUsage
 $runtimeRemaining   = $settings.General.runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
 
 
-# Close all existing instances of the stress test program and start a new one with our config
-if ($stressTestProcess -or $windowProcess) {
-    Write-Verbose('There already exists an instance of ' + $selectedStressTestProgram + ', trying to close it')
-
-    if ($windowProcess) {
-        Write-Verbose('Window Process ID: ' + $windowProcess.Id + ' - ProcessName: ' + $windowProcess.ProcessName)
-    }
-    if ($stressTestProcess) {
-        Write-Verbose('Stress Test ID: ' + $stressTestProcess.Id + ' - ProcessName: ' + $stressTestProcess.ProcessName)
-    }
-
-    Close-StressTestProgram
-}
-
-# Get the core test mode if it's set to default
+# Get the actual core test mode
 $coreTestOrderMode = $settings.General.coreTestOrder
 
+# If set to default, switch between alternate for more than 8 cores and random for up to 8 cores
 if ($settings.General.coreTestOrder -eq 'default') {
     if ($numPhysCores -gt 8) {
         $coreTestOrderMode = 'alternate'
@@ -3305,421 +3342,602 @@ if ($settings.General.coreTestOrder -eq 'default') {
     }
 }
 
+# If we find only numbers (and a comma), transform it into an array
+elseif ($settings.General.coreTestOrder -match '\d+') {
+    $coreTestOrderMode = 'custom'
 
-# All the cores in the system
-$allCores = @(0..($numPhysCores-1))
-$coresToTest = $allCores
-
-# Subtract ignored cores
-$coresToTest = $allCores | ? {$_ -notin $settings.General.coresToIgnore}
-
-
-# Create the required config files for the stress test program
-Initialize-StressTestProgram
-
-
-# Get the current datetime
-$timestamp = Get-Date -format 'yyyy-MM-dd HH:mm:ss'
-
-
-# Start messages
-$headline     = ' CoreCycler v' + $version + ' started at ' + $timestamp + ' '
-$padding      = 80 - $headline.Length
-$paddingLeft  = [Math]::Ceiling($padding / 2)
-$paddingRight = [Math]::Floor($padding / 2)
-
-# Start messages
-Write-ColorText('--------------------------------------------------------------------------------') Green
-Write-ColorText(''.PadLeft($paddingLeft, '-') + $headline + ''.PadRight($paddingRight, '-')) Green
-Write-ColorText('--------------------------------------------------------------------------------') Green
-
-# Verbosity
-if ($settings.Logging.verbosityMode -eq 1) {
-    Write-ColorText('Verbose mode is ENABLED: .. Writing to log file') Cyan
-}
-elseif ($settings.Logging.verbosityMode -eq 2) {
-    Write-ColorText('Verbose mode is ENABLED: .. Displaying in terminal') Cyan
-}
-
-# Display some initial information
-Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpper()) Cyan
-Write-ColorText('Selected test mode: ....... ' + $settings.mode) Cyan
-Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
-Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
-Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
-Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore)) Cyan
-Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + $(if ($settings.General.coreTestOrder.ToLower() -eq 'default') {' (' + $coreTestOrderMode.ToUpper() + ')'})) Cyan
-Write-ColorText('Number of iterations: ..... ' + $settings.General.maxIterations) Cyan
-
-# Print a message if we're ignoring certain cores
-if ($settings.General.coresToIgnore.Length -gt 0) {
-    $coresToIgnoreString = (($settings.General.coresToIgnore | sort) -join ', ')
-    Write-ColorText('Ignored cores: ............ ' + $coresToIgnoreString) Cyan
-    Write-ColorText('--------------------------------------------------------------------------------') Cyan
-}
-
-if ($settings.mode -eq 'CUSTOM') {
-    Write-ColorText('') Cyan
-    Write-ColorText('Custom settings:') Cyan
-    Write-ColorText('----------------') Cyan
-    Write-ColorText('CpuSupportsAVX  = ' + $settings.Custom.CpuSupportsAVX) Cyan
-    Write-ColorText('CpuSupportsAVX2 = ' + $settings.Custom.CpuSupportsAVX2) Cyan
-    Write-ColorText('CpuSupportsFMA3 = ' + $settings.Custom.CpuSupportsFMA3) Cyan
-    Write-ColorText('MinTortureFFT   = ' + $settings.Custom.MinTortureFFT) Cyan
-    Write-ColorText('MaxTortureFFT   = ' + $settings.Custom.MaxTortureFFT) Cyan
-    Write-ColorText('TortureMem      = ' + $settings.Custom.TortureMem) Cyan
-    Write-ColorText('TortureTime     = ' + $settings.Custom.TortureTime) Cyan
-}
-else {
-    if ($settings.General.stressTestProgram -eq 'prime95') {
-        Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
+    $settings.General.coreTestOrder -split ',\s*' | ForEach-Object {
+        if ($_ -match '^\d+$') {
+            $coreTestOrderCustom += [Int] $_
+        }
     }
 }
 
-Write-ColorText('--------------------------------------------------------------------------------') Cyan
 
-
-# Display the log file location(s)
-Write-ColorText('The log files for this run are stored in:') Cyan
-Write-ColorText($logFilePathAbsolute) Cyan
-Write-ColorText((' - CoreCycler:').PadRight(17, ' ') + $logFileName) Cyan
-
-if ($stressTestLogFileName) {
-    Write-ColorText((' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ':').PadRight(17, ' ') + $stressTestLogFileName) Cyan
-}
-
-Write-ColorText('--------------------------------------------------------------------------------') Cyan
-Write-Text('')
-
-
-# Start the stress test program
-Start-StressTestProgram
-
-
-# Try to get the affinity of the stress test program process. If not found, abort
+# Wrap the main functionality in a try {} block, so that the finally {} block is executed even if CTRL+C is pressed
 try {
-    $null = $stressTestProcess.ProcessorAffinity
+    # Check if the stress test process is already running
+    $stressTestProcess = Get-Process $processName -ErrorAction Ignore
 
-    Write-Verbose('The current affinity of the process: ' + $stressTestProcess.ProcessorAffinity)
-}
-catch {
-    Exit-WithFatalError('Process ' + $processName + ' not found!')
-}
+    # Some programs share the same process for stress testing and for displaying the main window, and some not
+    if ($stressTestProgramsWithSameProcess.Contains($settings.General.stressTestProgram)) {
+        $windowProcess = $stressTestProcess
+    }
+    else {
+        $windowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
+    }
 
 
-# If Aida64 was started, try to clear any error messages from previous runs
-if ($settings.General.stressTestProgram -eq 'aida64') {
-    Write-Verbose('Trying to clear Aida64 error messages from previous runs')
+    # Close all existing instances of the stress test program and start a new one with our config
+    if ($stressTestProcess -or $windowProcess) {
+        Write-Verbose('There already exists an instance of ' + $selectedStressTestProgram + ', trying to close it')
 
-    $initFunctions = [scriptblock]::Create(@"
-        function Send-CommandToAida64 { ${function:Send-CommandToAida64} }
-        function Write-Verbose { ${function:Write-Verbose} }
+        if ($windowProcess) {
+            Write-Verbose('Window Process ID: ' + $windowProcess.Id + ' - ProcessName: ' + $windowProcess.ProcessName)
+        }
+        if ($stressTestProcess) {
+            Write-Verbose('Stress Test ID: ' + $stressTestProcess.Id + ' - ProcessName: ' + $stressTestProcess.ProcessName)
+        }
+
+        Close-StressTestProgram
+    }
+
+
+    # Create the required config files for the stress test program
+    Initialize-StressTestProgram
+
+
+    # Get the current datetime
+    $timestamp = Get-Date -format 'yyyy-MM-dd HH:mm:ss'
+
+
+    # Start messages
+    $headline     = ' CoreCycler v' + $version + ' started at ' + $timestamp + ' '
+    $padding      = 80 - $headline.Length
+    $paddingLeft  = [Math]::Ceiling($padding / 2)
+    $paddingRight = [Math]::Floor($padding / 2)
+
+    # Start messages
+    Write-ColorText('--------------------------------------------------------------------------------') Green
+    Write-ColorText(''.PadLeft($paddingLeft, '-') + $headline + ''.PadRight($paddingRight, '-')) Green
+    Write-ColorText('--------------------------------------------------------------------------------') Green
+
+    # Verbosity
+    if ($settings.Logging.verbosityMode -eq 1) {
+        Write-ColorText('Verbose mode is ENABLED: .. Writing to log file') Cyan
+    }
+    elseif ($settings.Logging.verbosityMode -eq 2) {
+        Write-ColorText('Verbose mode is ENABLED: .. Displaying in terminal') Cyan
+    }
+
+    # Display some initial information
+    Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpper()) Cyan
+    Write-ColorText('Selected test mode: ....... ' + $settings.mode) Cyan
+    Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
+    Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
+    Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
+    Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore)) Cyan
+    Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
+    Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + $(if ($settings.General.coreTestOrder.ToLower() -eq 'default') {' (' + $coreTestOrderMode.ToUpper() + ')'})) Cyan
+    Write-ColorText('Number of iterations: ..... ' + $settings.General.maxIterations) Cyan
+
+    # Print a message if we're ignoring certain cores
+    if ($settings.General.coresToIgnore.Length -gt 0) {
+        $coresToIgnoreString = (($settings.General.coresToIgnore | sort) -join ', ')
+        Write-ColorText('Ignored cores: ............ ' + $coresToIgnoreString) Cyan
+        Write-ColorText('--------------------------------------------------------------------------------') Cyan
+    }
+
+    if ($settings.mode -eq 'CUSTOM') {
+        Write-ColorText('') Cyan
+        Write-ColorText('Custom settings:') Cyan
+        Write-ColorText('----------------') Cyan
+        Write-ColorText('CpuSupportsAVX  = ' + $settings.Custom.CpuSupportsAVX) Cyan
+        Write-ColorText('CpuSupportsAVX2 = ' + $settings.Custom.CpuSupportsAVX2) Cyan
+        Write-ColorText('CpuSupportsFMA3 = ' + $settings.Custom.CpuSupportsFMA3) Cyan
+        Write-ColorText('MinTortureFFT   = ' + $settings.Custom.MinTortureFFT) Cyan
+        Write-ColorText('MaxTortureFFT   = ' + $settings.Custom.MaxTortureFFT) Cyan
+        Write-ColorText('TortureMem      = ' + $settings.Custom.TortureMem) Cyan
+        Write-ColorText('TortureTime     = ' + $settings.Custom.TortureTime) Cyan
+    }
+    else {
+        if ($settings.General.stressTestProgram -eq 'prime95') {
+            Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
+        }
+    }
+
+    Write-ColorText('--------------------------------------------------------------------------------') Cyan
+
+
+    # Display the log file location(s)
+    Write-ColorText('The log files for this run are stored in:') Cyan
+    Write-ColorText($logFilePathAbsolute) Cyan
+    Write-ColorText((' - CoreCycler:').PadRight(17, ' ') + $logFileName) Cyan
+
+    if ($stressTestLogFileName) {
+        Write-ColorText((' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ':').PadRight(17, ' ') + $stressTestLogFileName) Cyan
+    }
+
+    Write-ColorText('--------------------------------------------------------------------------------') Cyan
+    Write-Text('')
+
+
+    # Start the stress test program
+    Start-StressTestProgram
+
+
+    # Try to get the affinity of the stress test program process. If not found, abort
+    try {
+        $null = $stressTestProcess.ProcessorAffinity
+
+        Write-Verbose('The current affinity of the process: ' + $stressTestProcess.ProcessorAffinity)
+    }
+    catch {
+        Exit-WithFatalError('Process ' + $processName + ' not found!')
+    }
+
+
+    # If Aida64 was started, try to clear any error messages from previous runs
+    if ($settings.General.stressTestProgram -eq 'aida64') {
+        Write-Verbose('Trying to clear Aida64 error messages from previous runs')
+
+        $initFunctions = [scriptblock]::Create(@"
+            function Send-CommandToAida64 { ${function:Send-CommandToAida64} }
+            function Write-Verbose { ${function:Write-Verbose} }
 "@)
 
-    $clearAidaMessages = Start-Job -ScriptBlock {
-        param(
-            $SendMessageDefinition,
-            $windowProcessMainWindowHandler,
-            $settings,
-            $logFileFullPath
-        )
+        $clearAidaMessages = Start-Job -ScriptBlock {
+            param(
+                $SendMessageDefinition,
+                $windowProcessMainWindowHandler,
+                $settings,
+                $logFileFullPath
+            )
 
-        $SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
+            $SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
 
-        Start-Sleep 3
+            Start-Sleep 3
 
-        # Send the command a couple of times
-        # Unfortunately we cannot get any Write-Verbose without adding a Wait-Job
-        for ($i = 0; $i -lt 3; $i++) {
-            Send-CommandToAida64 'dismiss'
-            Start-Sleep 500
-        }
-    } -InitializationScript $initFunctions -ArgumentList $SendMessageDefinition, $windowProcessMainWindowHandler, $settings, $logFileFullPath
-}
-
-# Start with the CPU test
-# Repeat the whole check $settings.General.maxIterations times
-for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration++) {
-    $timestamp = Get-Date -format HH:mm:ss
-
-    # Check if all of the cores have thrown an error, and if so, abort
-    # Only if the skipCoreOnError setting is set
-    if ($settings.General.skipCoreOnError -and $coresWithError.Length -eq ($numPhysCores - $settings.General.coresToIgnore.Length)) {
-        # Also close the stress test program process to not let it run unnecessarily
-        Close-StressTestProgram
-        
-        Write-Text($timestamp + ' - All Cores have thrown an error, aborting!')
-        Exit-Script
+            # Send the command a couple of times
+            # Unfortunately we cannot get any Write-Verbose without adding a Wait-Job
+            for ($i = 0; $i -lt 3; $i++) {
+                Send-CommandToAida64 'dismiss'
+                Start-Sleep 500
+            }
+        } -InitializationScript $initFunctions -ArgumentList $SendMessageDefinition, $windowProcessMainWindowHandler, $settings, $logFileFullPath
     }
 
 
-    Write-ColorText('') Yellow
-    Write-ColorText($timestamp + ' - Iteration ' + $iteration) Yellow
-    Write-ColorText('----------------------------------') Yellow
+    # All the cores in the system
+    $allCores = @(0..($numPhysCores-1))
+    $coresToTest = $allCores
+
+    # If a custom test order was provided, override the available cores
+    if ($coreTestOrderMode -eq 'custom') {
+        $coresToTest = $coreTestOrderCustom
+    }
+
+    # Remove ignored cores
+    $coresToTest = $coresToTest | ? {$_ -notin $settings.General.coresToIgnore}
+
+    Write-Verbose('All cores that could be tested: ' + ($allCores -Join ', '))
+    Write-Verbose('The preliminary test order:     ' + ($coresToTest -Join ', '))
 
 
-    $previousCoreNumber = $null
-    $availableCores     = $coresToTest
-    $halfCores          = $numPhysCores / 2
-    
-    # Iterate over each core
-    # Named for loop
-    :coreLoop for ($coreNumber = 0; $coreNumber -lt $numPhysCores; $coreNumber++) {
-        $startDateThisCore  = (Get-Date)
-        $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $settings.General.runtimePerCore)
-        $timestamp          = $startDateThisCore.ToString("HH:mm:ss")
-        $affinity           = [System.IntPtr][Int64] 0
-        $actualCoreNumber   = $coreNumber
-        $cpuNumbersArray    = @()
+    # Start with the CPU test
+    # Repeat the whole check $settings.General.maxIterations times
+    for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration++) {
+        $timestamp = Get-Date -format HH:mm:ss
 
 
-        # Get the current CPU core(s)
-        # If the core test order mode is random or alternate, we need to get the actual core to tests
+        # Define the available cores
+        $coreTestOrderArray = $coresToTest
+        $halfCores          = $numPhysCores / 2
+        $numAvailableCores  = $coreTestOrderArray.Length
+        $previousCoreNumber = $null
+
+
+        # Check if all of the cores have thrown an error, and if so, abort
+        # Only if the skipCoreOnError setting is set
+        if ($settings.General.skipCoreOnError -and $coresWithError.Length -eq ($coreTestOrderArray | Sort-Object | Get-Unique).Length) {
+            # Also close the stress test program process to not let it run unnecessarily
+            Close-StressTestProgram
+            
+            Write-ColorText($timestamp + ' - All Cores have thrown an error, aborting!') Yellow
+            Exit-Script
+        }
+
+
+        Write-ColorText('') Yellow
+        Write-ColorText($timestamp + ' - Iteration ' + $iteration) Yellow
+        Write-ColorText('----------------------------------') Yellow
+
+
+        # Build the available cores array for the various core test orders
+        # We're leaving it in this loop because for random we want a different order on each iteration
+        # and I like to have it all in one place instead of scattered around different places
         if ($coreTestOrderMode -eq 'alternate') {
-            Write-Verbose('Alternating test order selected, getting the core to test...')
-            Write-Verbose('Previous core: ' + $previousCoreNumber)
+            Write-Verbose('Alternating test order selected, building the test array...')
 
-            if ($previousCoreNumber -ne $null) {
-                if ($previousCoreNumber -lt $halfCores) {
-                    $actualCoreNumber = $previousCoreNumber + $halfCores
+            # Start fresh
+            $coreTestOrderArray = @()
+
+            # 0, $halfCores, 0+1, $halfCores+1, ...
+            # TODO: Maybe find a better way to handle ignored cores
+            for ($i = 0; $i -lt $numPhysCores; $i++) {
+                $currentCoreNumber = 0
+
+                if ($previousCoreNumber -ne $null) {
+                    if ($previousCoreNumber -lt $halfCores) {
+                        $currentCoreNumber = [Int] ($previousCoreNumber + $halfCores)
+                    }
+                    else {
+                        $currentCoreNumber = [Int] ($previousCoreNumber - $halfCores + 1)
+                    }
                 }
-                else {
-                    $actualCoreNumber = $previousCoreNumber - $halfCores + 1
-                }
-            }
 
-            $previousCoreNumber = $actualCoreNumber
-        }
-        elseif ($coreTestOrderMode -eq 'random') {
-            Write-Verbose('Random test order selected, getting the core to test...')
-            Write-Verbose('Still available cores: ' + ($availableCores -Join ', '))
-            $actualCoreNumber = $availableCores | Get-Random
-        }
-        else {
-            Write-Verbose('Sequential test order selected, getting the next core in line...')
-        }
+                $previousCoreNumber = $currentCoreNumber
 
-
-        # If the number of threads is more than 1
-        if ($settings.General.numberOfThreads -gt 1) {
-            for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
-                # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
-                $thisCPUNumber    = ($actualCoreNumber * 2) + $currentThread
-                $cpuNumbersArray += $thisCPUNumber
-                $affinity        += [System.IntPtr][Int64] [Math]::Pow(2, $thisCPUNumber)
-            }
-        }
-
-        # Only one thread
-        else {
-            # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
-            # Otherwise, it's the same value
-            $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
-            $cpuNumbersArray += $cpuNumber
-            $affinity         = [System.IntPtr][Int64] [Math]::Pow(2, $cpuNumber)
-        }
-
-        Write-Verbose('The selected core to test: ' + $actualCoreNumber)
-
-        $cpuNumberString = (($cpuNumbersArray | sort) -join ' and ')
-
-
-        # Skip if this core is in the ignored cores array
-        if ($settings.General.coresToIgnore -contains $actualCoreNumber) {
-            # Ignore it silently
-            Write-Verbose('Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping')
-            continue
-        }
-
-        # Skip if this core is stored in the error core array
-        if ($settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
-            Write-Text($timestamp + ' - Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
-            continue
-        }
-
-
-        # Apparently Aida64 doesn't like having the affinity set to 1
-        # Possible workaround: Set it to 2 instead
-        # This also poses a problem when testing two threads on core 0, so we're skipping this core for the time being
-        if ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 1) {
-            Write-ColorText('           Notice!') Black Yellow
-
-            # If Hyperthreading / SMT is enabled
-            if ($isHyperthreadingEnabled) {
-                Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
-                Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
                 
-                $affinity        = [System.IntPtr][Int64] 2
-                $cpuNumber       = 1
-                $cpuNumberString = 1
+                if (!$settings.General.coresToIgnore.Contains($currentCoreNumber)) {
+                    $coreTestOrderArray += $currentCoreNumber
+                }
+            }
+        }
+
+        # Randomized
+        elseif ($coreTestOrderMode -eq 'random') {
+            Write-Verbose('Random test order selected, building the test array...')
+            $coreTestOrderArray = $coreTestOrderArray | Sort-Object { Get-Random }
+        }
+
+        # Custom
+        elseif ($coreTestOrderMode -eq 'custom') {
+            Write-Verbose('Custom test order selected, keeping the test array...')
+            # This was set above already, no need to change it
+            # It also already doesn't include the ignored cores
+        }
+
+        # Sequential, do nothing
+        else {
+            Write-Verbose('Sequential test order selected, keeping the test array...')
+            # This was set above already, no need to change it
+            # It also already doesn't include the ignored cores
+        }
+
+        Write-Verbose('The final test order:  ' + ($coreTestOrderArray -Join ', '))
+
+
+        # Iterate over each core
+        # Named for loop
+        #:coreLoop for ($coreNumber = 0; $coreNumber -lt $numPhysCores; $coreNumber++) {
+        :coreLoop for ($i = 0; $i -lt $numAvailableCores; $i++) {
+            $startDateThisCore  = (Get-Date)
+            $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $settings.General.runtimePerCore)
+            $timestamp          = $startDateThisCore.ToString("HH:mm:ss")
+            $affinity           = [System.IntPtr][Int64] 0
+            $actualCoreNumber   = [Int] $coreTestOrderArray[0]
+            $cpuNumbersArray    = @()
+
+            Write-Verbose('Still available cores: ' + ($coreTestOrderArray -Join ', '))
+
+
+            # If the number of threads is more than 1
+            if ($settings.General.numberOfThreads -gt 1) {
+                for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
+                    # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
+                    $thisCPUNumber    = ($actualCoreNumber * 2) + $currentThread
+                    $cpuNumbersArray += $thisCPUNumber
+                    $affinity        += [System.IntPtr][Int64] [Math]::Pow(2, $thisCPUNumber)
+                }
             }
 
-            # For disabled Hyperthreading / SMT, there's not much we can do. So skipping it
+            # Only one thread
             else {
-                Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on Core 0 only.') Black Yellow
-                Write-ColorText('           Normally we''d fall back to thread 2 on Core 0, but since Hyperthreading / SMT is disabled, we cannot do this.') Black Yellow
-                Write-ColorText('           Therefore we''re skipping this core.') Black Yellow
+                # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
+                # Otherwise, it's the same value
+                $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
+                $cpuNumbersArray += $cpuNumber
+                $affinity         = [System.IntPtr][Int64] [Math]::Pow(2, $cpuNumber)
+            }
 
-                Write-Verbose('Skipping this core due to Aida64 not running correctly on Core 0 CPU 0 and Hyperthreading / SMT is disabled')
+            Write-Verbose('The selected core to test: ' + $actualCoreNumber)
+
+            $cpuNumberString = (($cpuNumbersArray | sort) -join ' and ')
+
+
+            # Skip if this core is in the ignored cores array
+            # Note: This shouldn't happen anymore, as we have removed the cores from the availableCores array
+            if ($settings.General.coresToIgnore -contains $actualCoreNumber) {
+                # Ignore it silently
+                Write-Verbose('Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping')
+
+                # Remove this core from the array of still available cores
+                $coreTestOrderArray = $coreTestOrderArray[1..$coreTestOrderArray.Length]
                 continue
             }
-        }
 
-        # Aida64 running on CPU 0 and CPU 1 (2 threads)
-        elseif ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 3) {
-            Write-ColorText('           Notice!') Black Yellow
-            Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
-            Write-ColorText('           So you might see an error due to decreased CPU usage.') Black Yellow
+            # Skip if this core is stored in the error core array and the flag is set
+            if ($settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
+                Write-Text($timestamp + ' - Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
 
-            # TODO?
-            #$affinity = 
-        }
-        
-
-        # If $settings.General.restartTestProgramForEachCore is set, restart the stress test program for each core
-        if ($settings.General.restartTestProgramForEachCore -and ($iteration -gt 1 -or $availableCores.Length -lt $coresToTest.Length)) {
-            Write-Verbose('restartTestProgramForEachCore is set, restarting the test program...')
-
-            # Set the flag to only stop the stress test program if possible
-            Close-StressTestProgram $true
-
-            # If the delayBetweenCores setting is set, wait for the defined amount
-            if ($settings.General.delayBetweenCores -gt 0) {
-                Write-Text('           Idling for ' + $settings.General.delayBetweenCores + ' seconds before continuing to the next core...')
-
-                # Also adjust the expected end time for this delay
-                $endDateThisCore += New-TimeSpan -Seconds $settings.General.delayBetweenCores
-
-                Start-Sleep -Seconds $settings.General.delayBetweenCores
+                # Remove this core from the array of still available cores
+                $coreTestOrderArray = $coreTestOrderArray[1..$coreTestOrderArray.Length]
+                continue
             }
 
-            # Set the flag to only start the stress test program if possible
-            Start-StressTestProgram $true
-        }
+
+            # Apparently Aida64 doesn't like having the affinity set to 1
+            # Possible workaround: Set it to 2 instead
+            # This also poses a problem when testing two threads on core 0, so we're skipping this core for the time being
+            if ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 1) {
+                Write-ColorText('           Notice!') Black Yellow
+
+                # If Hyperthreading / SMT is enabled
+                if ($isHyperthreadingEnabled) {
+                    Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
+                    Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
+                    
+                    $affinity        = [System.IntPtr][Int64] 2
+                    $cpuNumber       = 1
+                    $cpuNumberString = 1
+                }
+
+                # For disabled Hyperthreading / SMT, there's not much we can do. So skipping it
+                else {
+                    Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on Core 0 only.') Black Yellow
+                    Write-ColorText('           Normally we''d fall back to thread 2 on Core 0, but since Hyperthreading / SMT is disabled, we cannot do this.') Black Yellow
+                    Write-ColorText('           Therefore we''re skipping this core.') Black Yellow
+
+                    Write-Verbose('Skipping this core due to Aida64 not running correctly on Core 0 CPU 0 and Hyperthreading / SMT is disabled')
+
+                    # Remove this core from the array of still available cores
+                    $coreTestOrderArray = $coreTestOrderArray[1..$coreTestOrderArray.Length]
+                    continue
+                }
+            }
+
+            # Aida64 running on CPU 0 and CPU 1 (2 threads)
+            elseif ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 3) {
+                Write-ColorText('           Notice!') Black Yellow
+                Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
+                Write-ColorText('           So you might see an error due to decreased CPU usage.') Black Yellow
+
+                # TODO?
+                #$affinity = 
+            }
+            
+
+            # If $settings.General.restartTestProgramForEachCore is set, restart the stress test program for each core
+            if ($settings.General.restartTestProgramForEachCore -and ($iteration -gt 1 -or $coreTestOrderArray.Length -lt $coresToTest.Length)) {
+                Write-Verbose('restartTestProgramForEachCore is set, restarting the test program...')
+
+                # Set the flag to only stop the stress test program if possible
+                Close-StressTestProgram $true
+
+                # If the delayBetweenCores setting is set, wait for the defined amount
+                if ($settings.General.delayBetweenCores -gt 0) {
+                    Write-Text('           Idling for ' + $settings.General.delayBetweenCores + ' seconds before continuing to the next core...')
+
+                    # Also adjust the expected end time for this delay
+                    $endDateThisCore += New-TimeSpan -Seconds $settings.General.delayBetweenCores
+
+                    Start-Sleep -Seconds $settings.General.delayBetweenCores
+                }
+
+                # Set the flag to only start the stress test program if possible
+                Start-StressTestProgram $true
+            }
 
 
-        # Remove this core from the array of still available cores
-        $availableCores = $availableCores | ? {$_ -ne $actualCoreNumber}
-        
-       
-        # This core has not thrown an error yet, run the test
-        $timestamp = (Get-Date).ToString("HH:mm:ss")
-        Write-Text($timestamp + ' - Set to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
-        
-        # We need System.IntPtr for the affinity
-        $affinity = [System.IntPtr][Int64] $affinity
+            # Remove this core from the array of still available cores
+            $coreTestOrderArray = $coreTestOrderArray[1..$coreTestOrderArray.Length]
+            
+           
+            # This core has not thrown an error yet, run the test
+            $timestamp = (Get-Date).ToString("HH:mm:ss")
+            Write-Text($timestamp + ' - Set to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
+            
+            # We need System.IntPtr for the affinity
+            $affinity = [System.IntPtr][Int64] $affinity
 
-        # Set the affinity to a specific core
-        try {
-            Write-Verbose('Setting the affinity to ' + $affinity)
-
-            $stressTestProcess.ProcessorAffinity = $affinity
-        }
-        catch {
-            # Apparently setting the affinity can fail on the first try, so make another attempt
-            Write-Verbose('Setting the affinity has failed, trying again...')
-            Start-Sleep -Milliseconds 300
-
+            # Set the affinity to a specific core
             try {
-                $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
+                Write-Verbose('Setting the affinity to ' + $affinity)
+
+                $stressTestProcess.ProcessorAffinity = $affinity
+            }
+            catch {
+                # Apparently setting the affinity can fail on the first try, so make another attempt
+                Write-Verbose('Setting the affinity has failed, trying again...')
+                Start-Sleep -Milliseconds 300
+
+                try {
+                    $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
+                }
+                catch {
+                    Close-StressTestProgram
+                    Exit-WithFatalError('Could not set the affinity to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')!')                
+                }
+            }
+
+            # Check if the affinity is correct
+            $checkingAffinity = $stressTestProcess.ProcessorAffinity
+
+            if ($checkingAffinity -ne $affinity) {
+                Write-Verbose('The affinity could NOT be set correctly!')
+                Write-Verbose(' - affinity trying to set: ' + $affinity)
+                Write-Verbose(' - actual affinity:        ' + $checkingAffinity)
+
+                Exit-WithFatalError('The affinity could not be set correctly!')
+            }
+
+
+            Write-Verbose('Successfully set the affinity to ' + $affinity)
+
+
+            # Set the process priority
+            try {
+                # PriorityClass values:
+                # Idle
+                # BelowNormal
+                # Normal
+                # AboveNormal
+                # High
+                # RealTime
+                $stressTestProcess.PriorityClass = 'High'
+
+                # There's also a "SetPriority" property, which seems to be a WMI only property
+                # Possible values:
+                #    64 - Low
+                # 16384 - Below normal
+                #    32 - Normal
+                # 32768 - Above normal
+                #   128 - High
+                #   256 - Realtime
+                #
+                # Return codes:
+                #  0  - Successful completion 
+                #  2  - Access denied 
+                #  3  - Insufficient privilege 
+                #  8  - Unknown failure 
+                #  9  - Path not found 
+                # 21  - Invalid parameter 
+                # 22+ - Other
+
+                # Get-WmiObject win32_process -Filter 'Name="prime95.exe"'
+                # $wmiStressTestProcess = Get-WmiObject win32_process -Filter ('Handle="' + $stressTestProcess.Id + '"')
+                # $setPriority = $wmiStressTestProcess.SetPriority(128)
+                # $setPriority.ReturnValue
             }
             catch {
                 Close-StressTestProgram
-                Exit-WithFatalError('Could not set the affinity to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')!')                
+                Exit-WithFatalError('Could not set the priority of the stress test process!')
             }
-        }
 
-        # Check if the affinity is correct
-        $checkingAffinity = $stressTestProcess.ProcessorAffinity
+            # If this core is stored in the error core array and the skipCoreOnError setting is not set, display the amount of errors
+            if (!$settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
+                $text  = '           Note: This core has previously thrown ' + $coresWithErrorsCounter[$actualCoreNumber] + ' error'
+                $text += $(if ($coresWithErrorsCounter[$actualCoreNumber] -gt 1) {'s'})
+                
+                Write-Text($text)
+            }
 
-        if ($checkingAffinity -ne $affinity) {
-            Write-Verbose('The affinity could NOT be set correctly!')
-            Write-Verbose(' - affinity trying to set: ' + $affinity)
-            Write-Verbose(' - actual affinity:        ' + $checkingAffinity)
-
-            Exit-WithFatalError('The affinity could not be set correctly!')
-        }
+            Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore) + '...')
 
 
-        Write-Verbose('Successfully set the affinity to ' + $affinity)
+            # Make a check each x seconds for the CPU power usage
+            for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
+                $nowDateTime = (Get-Date)
+                $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
 
 
-        # Set the process priority
-        try {
-            # PriorityClass values:
-            # Idle
-            # BelowNormal
-            # Normal
-            # AboveNormal
-            # High
-            # RealTime
-            $stressTestProcess.PriorityClass = 'High'
+                # Make this the last iteration if the remaining time is close enough
+                if ($difference.TotalSeconds -le $cpuUsageCheckInterval) {
+                    $checkNumber = $cpuCheckIterations
+                    $waitTime    = [Math]::Max(0, $difference.TotalSeconds - 1)
+                    Start-Sleep -Seconds $waitTime
+                }
+                else {
+                    Start-Sleep -Seconds $cpuUsageCheckInterval
+                }
+                
 
-            # There's also a "SetPriority" property, which seems to be a WMI only property
-            # Possible values:
-            #    64 - Low
-            # 16384 - Below normal
-            #    32 - Normal
-            # 32768 - Above normal
-            #   128 - High
-            #   256 - Realtime
-            #
-            # Return codes:
-            #  0  - Successful completion 
-            #  2  - Access denied 
-            #  3  - Insufficient privilege 
-            #  8  - Unknown failure 
-            #  9  - Path not found 
-            # 21  - Invalid parameter 
-            # 22+ - Other
+                # Check if the process is still using enough CPU process power
+                try {
+                    Test-ProcessUsage $actualCoreNumber
+                }
+                
+                # On error, the Prime95 process is not running anymore, so skip this core
+                catch {
+                    Write-Verbose('There has been some error in Test-ProcessUsage, checking (#1)')
 
-            # Get-WmiObject win32_process -Filter 'Name="prime95.exe"'
-            # $wmiStressTestProcess = Get-WmiObject win32_process -Filter ('Handle="' + $stressTestProcess.Id + '"')
-            # $setPriority = $wmiStressTestProcess.SetPriority(128)
-            # $setPriority.ReturnValue
-        }
-        catch {
-            Close-StressTestProgram
-            Exit-WithFatalError('Could not set the priority of the stress test process!')
-        }
+                    # There is an error message
+                    if ($Error -and $Error[0].ToString() -eq '999') {
+                        # Try to close the stress test program process if it is still running
+                        Write-Verbose('Trying to close the stress test program to re-start it')
+                        
+                        # Set the flag to only stop the stress test program if possible
+                        Close-StressTestProgram $true
+                        
 
-        # If this core is stored in the error core array and the skipCoreOnError setting is not set, display the amount of errors
-        if (!$settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
-            $text  = '           Note: This core has previously thrown ' + $coresWithErrorsCounter[$actualCoreNumber] + ' error'
-            $text += $(if ($coresWithErrorsCounter[$actualCoreNumber] -gt 1) {'s'})
+                        # If the stopOnError flag is set, stop at this point
+                        if ($settings.General.stopOnError) {
+                            Write-Text('')
+                            Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
+
+                            if ($settings.General.stressTestProgram -eq 'prime95') {
+                                # Display the results.txt file name for Prime95 for this run
+                                Write-Text('')
+                                Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                                Write-ColorText($stressTestLogFilePath) Cyan
+                            }
+
+                            # And the name of the log file for this run
+                            Write-Text('')
+                            Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+                            Write-ColorText($logfileFullPath) Cyan
+                            Write-Text('')
+                            
+                            Exit-Script
+                        }
+
+
+                        # Try to restart the stress test program and continue with the next core
+                        # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
+                        # This will be taken care of in another routine
+                        if (!$settings.General.restartTestProgramForEachCore) {
+                            Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
+
+                            $timestamp = Get-Date -format HH:mm:ss
+                            Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
+
+                            # Start the stress test program again
+                            # Set the flag to only start the stress test program if possible
+                            Start-StressTestProgram $true
+                        }
+                    }
+
+                    # Unknown error
+                    else {
+                        Write-ColorText('FATAL ERROR:') Red
+                        Write-ErrorText $Error
+                        Exit-WithFatalError
+                    }
+                }
+
+                # Get the current CPU frequency
+                $currentCpuInfo = Get-CpuFrequency $cpuNumber
+                Write-Verbose('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
+
+
+                # Suspend and resume the stress test
+                if ($settings.General.suspendPeriodically) {
+                    Write-Verbose('Suspending the stress test process')
+                    $suspended = Suspend-ProcessWithDebugMethod $stressTestProcess
+                    Write-Verbose('Suspended: ' + $suspended)
+
+                    Start-Sleep -Milliseconds 1000
+
+                    Write-Verbose('Resuming the stress test process')
+                    $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
+                    Write-Verbose('Resumed: ' + $resumed)
+                }
+            }
             
-            Write-Text($text)
-        }
-
-        Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore) + '...')
-
-
-        # Make a check each x seconds for the CPU power usage
-        for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
-            $nowDateTime = (Get-Date)
-            $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
-
-
-            # Make this the last iteration if the remaining time is close enough
-            if ($difference.TotalSeconds -le $cpuUsageCheckInterval) {
-                $checkNumber = $cpuCheckIterations
-                $waitTime    = [Math]::Max(0, $difference.TotalSeconds - 1)
-                Start-Sleep -Seconds $waitTime
-            }
-            else {
-                Start-Sleep -Seconds $cpuUsageCheckInterval
-            }
+            # Wait for the remaining runtime
+            Start-Sleep -Seconds $runtimeRemaining
             
-
-            # Check if the process is still using enough CPU process power
+            # One last check
             try {
+                Write-Verbose('One last CPU usage check before finishing this core')
                 Test-ProcessUsage $actualCoreNumber
             }
             
             # On error, the Prime95 process is not running anymore, so skip this core
             catch {
-                Write-Verbose('There has been some error in Test-ProcessUsage, checking')
+                Write-Verbose('There has been some error in Test-ProcessUsage, checking (#2)')
+
 
                 # There is an error message
                 if ($Error -and $Error[0].ToString() -eq '999') {
@@ -3767,13 +3985,6 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                     }
                 }
 
-
-                # Something else happened (although this shouldn't happen anymore)
-                if ($Error -and $Error[0].ToString() -eq '999') {
-                    Write-Verbose($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
-                    continue coreLoop
-                }
-
                 # Unknown error
                 else {
                     Write-ColorText('FATAL ERROR:') Red
@@ -3782,96 +3993,105 @@ for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration+
                 }
             }
 
-            # Get the current CPU frequency
-            $currentCpuInfo = Get-CpuFrequency $cpuNumber
-            Write-Verbose('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
-
-
-            # Suspend and resume the stress test
-            if ($settings.General.suspendPeriodically) {
-                Write-Verbose('Suspending the stress test process')
-                $suspended = Suspend-ProcessWithDebugMethod $stressTestProcess
-                Write-Verbose('Suspended: ' + $suspended)
-
-                Start-Sleep -Milliseconds 1000
-
-                Write-Verbose('Resuming the stress test process')
-                $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
-                Write-Verbose('Resumed: ' + $resumed)
-            }
+            $timestamp = (Get-Date).ToString("HH:mm:ss")
+            Write-Text($timestamp + ' - Completed the test on Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
         }
         
-        # Wait for the remaining runtime
-        Start-Sleep -Seconds $runtimeRemaining
         
-        # One last check
-        try {
-            Write-Verbose('One last CPU usage check before finishing this core')
-            Test-ProcessUsage $actualCoreNumber
-        }
-        
-        # On error, the Prime95 process is not running anymore, so skip this core
-        catch {
-            Write-Verbose('There has been some error in Test-ProcessUsage, checking')
-
-            if ($Error -and $Error[0].ToString() -eq '111') {
-                Write-Verbose($selectedStressTestProgram + ' seems to have stopped with an error at Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
-                continue
+        # Print out the cores that have thrown an error so far
+        if ($coresWithError.Length -gt 0) {
+            if ($settings.General.skipCoreOnError) {
+                Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
             }
             else {
-                Write-ColorText('FATAL ERROR:') Red
-                Write-ErrorText $Error
-                Exit-WithFatalError
-            }
-        }
+                Write-ColorText('The following cores have thrown an error:') Blue
 
-        $timestamp = (Get-Date).ToString("HH:mm:ss")
-        Write-Text($timestamp + ' - Completed the test on Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
-    }
-    
-    
-    # Print out the cores that have thrown an error so far
-    if ($coresWithError.Length -gt 0) {
-        if ($settings.General.skipCoreOnError) {
-            Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
-        }
-        else {
-            Write-ColorText('The following cores have thrown an error:') Blue
+                $coreWithTwoDigitsHasError = $false
 
-            $coreWithTwoDigitsHasError = $false
+                foreach ($entry in $coresWithErrorsCounter.GetEnumerator()) {
+                    if ( $entry.Name -gt 9 -and $entry.Value -gt 0) {
+                        $coreWithTwoDigitsHasError = $true
+                        break
+                    }
+                }
+                
+                foreach ($entry in ($coresWithErrorsCounter.GetEnumerator() | Sort Name)) {
+                    # No error, skip
+                    if ($entry.Value -lt 1) {
+                        continue
+                    }
 
-            foreach ($entry in $coresWithErrorsCounter.GetEnumerator()) {
-                if ( $entry.Name -gt 9 -and $entry.Value -gt 0) {
-                    $coreWithTwoDigitsHasError = $true
-                    break
+                    $corePadding = $(if ($coreWithTwoDigitsHasError) {' '} else {''})
+                    $coreText  = $(if ($entry.Name -lt 10) {$corePadding})
+                    $coreText += $entry.Name.ToString()
+
+                    $textErrors      = 'error'
+                    $textIterations  = 'iteration'
+
+                    $textErrors     += $(if ($entry.Value -gt 1) {'s'})
+                    $textIterations += $(if ($iteration -gt 1) {'s'})
+
+                    Write-ColorText('    - Core ' + $coreText + ': ' + $entry.Value.ToString() + ' ' + $textErrors + ' in ' + $iteration + ' ' + $textIterations) Blue
                 }
             }
-            
-            foreach ($entry in ($coresWithErrorsCounter.GetEnumerator() | Sort Name)) {
-                # No error, skip
-                if ($entry.Value -lt 1) {
-                    continue
-                }
-
-                $corePadding = $(if ($coreWithTwoDigitsHasError) {' '} else {''})
-                $coreText  = $(if ($entry.Name -lt 10) {$corePadding})
-                $coreText += $entry.Name.ToString()
-
-                $textErrors      = 'error'
-                $textIterations  = 'iteration'
-
-                $textErrors     += $(if ($entry.Value -gt 1) {'s'})
-                $textIterations += $(if ($iteration -gt 1) {'s'})
-
-                Write-ColorText('    - Core ' + $coreText + ': ' + $entry.Value.ToString() + ' ' + $textErrors + ' in ' + $iteration + ' ' + $textIterations) Blue
-            }
         }
+
+        Write-Verbose('----------------------------------')
+        Write-Verbose('Iteration complete')
+        Write-Verbose('----------------------------------')
     }
+
+
+    # The CoreCycler has finished
+    $timestamp = Get-Date -format HH:mm:ss
+    Write-ColorText($timestamp + ' - CoreCycler finished!') Green
+    Close-StressTestProgram
+    Exit-Script
 }
 
+# This should execute even if CTRL+C is pressed
+# Although probably no output is generated for it anymore
+# Maybe the user wants to check the stress test program output after terminating the script
+finally {
+    # Don't do anything after a fatal error
+    if ($fatalError) {
+        exit
+    }
 
-# The CoreCycler has finished
-$timestamp = Get-Date -format HH:mm:ss
-Write-ColorText($timestamp + ' - CoreCycler finished!') Green
-Close-StressTestProgram
-Exit-Script
+    # Don't do anything when Exit-Script has been called
+    if ($scriptExit) {
+        exit
+    }
+    
+
+    $timestamp = Get-Date -format HH:mm:ss
+    
+    Write-ColorText($timestamp + ' - Terminating the script...') Red
+
+    # If the stress test program is still running and using enough CPU power, close it
+    $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
+    
+    Write-Verbose('Checking CPU usage: ' + $processCPUPercentage + '%')
+
+    # Close only if we're using still enough CPU power
+    if ($processCPUPercentage -ge $minProcessUsage) {
+        Write-Verbose('The stress test program is still using enough CPU power, so we can try to close it')
+        Write-Text('           Trying to close the stress test program...')
+        Close-StressTestProgram
+
+        Write-ColorText('Please check if the selected stress test program "' + $selectedStressTestProgram + '" is still running!') Yellow
+    }
+    else {
+        Write-ColorText('The stress test program seems to have stopped.') Yellow
+        Write-ColorText('Not killing the process so you can check if there was some error.') Yellow
+
+        Write-ColorText('Please make sure to close "' + $selectedStressTestProgram + '" after you checked it!') Yellow
+    }
+
+    Write-ColorText('Check for these processes:') Yellow
+    Write-ColorText(' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']) Cyan
+    
+    if ($stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) {
+        Write-ColorText(' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) Cyan
+    }
+}
