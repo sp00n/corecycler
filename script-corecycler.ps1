@@ -1767,36 +1767,36 @@ function Initialize-Prime95 {
     # depending on the selected test mode (SSE, AVX, AVX2)
     $Script:FFTMinMaxValues = @{
         SSE = @{
-            Smallest  = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
-            Small     = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
-            Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge      = @{ Min = 8960; Max = 32768; }  # New addition
-            All       = @{ Min =    4; Max = 32768; }
-            Moderate  = @{ Min = 1344; Max =  4096; }
-            Heavy     = @{ Min =    4; Max =  1344; }
-            Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Smallest   = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
+            Small      = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
+            Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge       = @{ Min = 8960; Max = 32768; }  # New addition
+            All        = @{ Min =    4; Max = 32768; }
+            Moderate   = @{ Min = 1344; Max =  4096; }
+            Heavy      = @{ Min =    4; Max =  1344; }
+            HeavyShort = @{ Min =    4; Max =   160; }
         }
 
         AVX = @{
-            Smallest  = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small     = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge      = @{ Min = 8960; Max = 32768; }  # New addition
-            All       = @{ Min =    4; Max = 32768; }
-            Moderate  = @{ Min = 1344; Max =  4096; }
-            Heavy     = @{ Min =    4; Max =  1344; }
-            Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Smallest   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge       = @{ Min = 8960; Max = 32768; }  # New addition
+            All        = @{ Min =    4; Max = 32768; }
+            Moderate   = @{ Min = 1344; Max =  4096; }
+            Heavy      = @{ Min =    4; Max =  1344; }
+            HeavyShort = @{ Min =    4; Max =   160; }
         }
 
         AVX2 = @{
-            Smallest  = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small     = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large     = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge      = @{ Min = 8960; Max = 51200; }  # New addition
-            All       = @{ Min =    4; Max = 51200; }
-            Moderate  = @{ Min = 1344; Max =  4096; }
-            Heavy     = @{ Min =    4; Max =  1344; }
-            Heavy_old = @{ Min =    4; Max =   144; }  # Originally   4 ...  158
+            Smallest   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            Small      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            Huge       = @{ Min = 8960; Max = 51200; }  # New addition
+            All        = @{ Min =    4; Max = 51200; }
+            Moderate   = @{ Min = 1344; Max =  4096; }
+            Heavy      = @{ Min =    4; Max =  1344; }
+            HeavyShort = @{ Min =    4; Max =   160; }
         }
     }
 
