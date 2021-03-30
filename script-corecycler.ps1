@@ -2276,8 +2276,8 @@ function Start-Aida64 {
     $timestamp = Get-Date -format HH:mm:ss
     Write-Text($timestamp + ' - Waiting for Aida64 to load the stress test...')
 
-    # Repeat the whole process up to 3 times, i.e. 3x10x0,5 = 15 seconds total runtime before it errors out
-    :startProcessLoop for ($i = 1; $i -le 3; $i++) {
+    # Repeat the whole process up to 6 times, i.e. 6x10x0,5 = 30 seconds total runtime before it errors out
+    :startProcessLoop for ($i = 1; $i -le 6; $i++) {
         if ($startOnlyStressTest) {
             # Send a keyboard command to the Aida64 window to start the stress test process
             Send-CommandToAida64 'start'
@@ -2384,14 +2384,17 @@ function Close-Aida64 {
     # The stress test window cannot be closed gracefully, as it has no main window
     # We could just kill it, but this leaves behind a tray icon and an error message the next time Aida is opened
     # Instead, we send a keystroke command to the Aida64 window. Funky!
-    if ($closeOnlyStressTest -and $stressTestProcessId) {
-        Write-Verbose('The stress test process does exist')
+    if ($stressTestProcessId) {
+        Write-Verbose('The stress test process id is set, assuming the process exists as well')
 
         $thisStressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
         # The process may be suspended
         if ($thisStressTestProcess) {
             $resumed = Resume-ProcessWithDebugMethod $thisStressTestProcess
+        }
+        else {
+            Write-Verbose('The stress test process id is set, but no stress test process was found!')
         }
 
         # We can only send a keyboard command if the main window also still exists
@@ -2458,36 +2461,64 @@ function Close-Aida64 {
 
             # The process may be suspended
             if ($windowProcess) {
+                Write-Verbose('The process may be suspended, resuming')
                 $resumed = Resume-ProcessWithDebugMethod $windowProcess
             }
 
-            # This returns false if no window is found with this handle
-            if (!$SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0) | Out-Null) {
-                #'Process Window not found!'
-            }
+            Write-Verbose('Sending the close message to the main window')
 
-            # We've send the close request, let's wait up to 3 seconds
-            elseif ($windowProcess -and !$windowProcess.HasExited) {
-                #'Waiting for the exit'
-                Write-Verbose('Sent the close message, waiting for the program to exit')
-                $null = $windowProcess.WaitForExit(3000)
+            # Send the message to close the main window
+            # The window may still be blocked from the stress test process being closed, so repeat if necessary
+            for ($i = 0; $i -lt 5; $i++) {
+                [Void] $SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0)
+
+                # We've send the close request, let's wait a second for it to actually exit
+                if ($windowProcess -and !$windowProcess.HasExited) {
+                    $timestamp = Get-Date -format HH:mm:ss
+                    Write-Verbose($timestamp + ' - Sent the close message, waiting for the program to exit')
+                    $null = $windowProcess.WaitForExit(1500)
+                }
+
+                $hasExited = $windowProcess.HasExited
+                Write-Verbose('         - ... has exited: ' + $hasExited)
+
+                if ($windowProcess.HasExited) {
+                    Write-Verbose('The main window has exited')
+                    break
+                }
             }
         }
         
-        Write-Verbose('Checking if the main window process still exists:')
-        Write-Verbose('Get-Process "' + $stressTestPrograms['aida64']['processName'] + '"')
+        $timestamp = Get-Date -format HH:mm:ss
+        Write-Verbose($timestamp + ' - Checking if the main window process still exists:')
         
         # If the window is still here at this point, just kill the process
         $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction Ignore
 
         if ($windowProcess) {
-            Write-Verbose('Still there, could not gracefully close Aida64, killing the process')
+            Write-Verbose('Still there, could not gracefully close Aida64, forcefully killing the process')
             
             # Unfortunately this will leave any tray icons behind
             Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
         }
-        else {
+
+        # Check if both processes are gone
+        $checkWindowProcess     = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction Ignore
+        $checkStressTestProcess = Get-Process $stressTestPrograms['aida64']['processNameForLoad'] -ErrorAction Ignore
+
+        if (!$checkWindowProcess -and !$checkStressTestProcess) {
             Write-Verbose('Aida64 closed')
+        }
+        else {
+            if ($checkWindowProcess) {
+                Write-Verbose('The main window process still exists')
+            }
+
+            if ($checkStressTestProcess) {
+                Write-Verbose('The stress test process still exists')
+            }
+
+            Write-Verbose('Could not close Aida64 successfully. Actually this is weird and should not happen.')
         }
     }
 
@@ -2841,37 +2872,44 @@ function Test-ProcessUsage {
     if (!$stressTestError -and $settings.General.stressTestProgram -eq 'prime95') {
 
         # Look for a line with an "error" string in the last 3 lines
-        $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
+        $primeErrorResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
         
         # Found the "error" string in the results.txt
-        if ($primeResults.Length -gt 0) {
+        if ($primeErrorResults.Length -gt 0) {
             # Get the line number of the last error message in the results.txt
             $p95Errors = Select-String $stressTestLogFilePath -Pattern ERROR
-            $lastError = $p95Errors | Select-Object -Last 1 -Property LineNumber, Line
+            $currentError = $p95Errors | Select-Object -Last 1 -Property LineNumber, Line
+            $currentPreviousError = $Script:previousError
 
             # If it's the same line number and message than the previous error, ignore it, it's a false positive
-            if ($lastError.LineNumber -eq $previousError.LineNumber -and $lastError.Line -eq $previousError.Line) {
+            if ($currentPreviousError -and $currentError.LineNumber -eq $currentPreviousError.LineNumber -and $currentError.Line -eq $currentPreviousError.Line) {
                 Write-Verbose($timestamp)
-                Write-Verbose('Found an error, but it''s a false positive, because the line number and error message')
-                Write-Verbose('matches the previous error message.')
-
-                Write-Verbose('This error:')
-                Write-Verbose((Write-Output($lastError | Format-Table | Out-String)).Trim())
-
-                Write-Verbose('Previous error:')
-                Write-Verbose((Write-Output($previousError | Format-Table | Out-String)).Trim())
+                Write-Verbose('Found an error in the last 5 lines of the results.txt, but it''s a false positive,')
+                Write-Verbose('because the line number and error message matches the previous error message.')
+                Write-Verbose('>>>>> Ignore this error and continue')
             }
 
             # This is a true error now
             else {
                 # Store the error message for future use
-                $Script:previousError = $lastError
+                $Script:previousError = $currentError
 
                 Write-Verbose($timestamp)
-                Write-Verbose('Found an error:')
-                Write-Verbose((Write-Output($lastError | Format-Table | Out-String)).Trim())
+                Write-Verbose('Found an error in the last 5 lines of the results.txt!')
 
-                $stressTestError = $primeResults
+                $stressTestError = $primeErrorResults
+            }
+
+            Write-Verbose('This error:')
+            Write-Verbose('LineNumber  Line')
+            Write-Verbose('----------  ----')
+            Write-Verbose($currentError.LineNumber.ToString().PadLeft(10, ' ') + '  ' + $currentError.Line)
+
+            if ($currentPreviousError) {
+                Write-Verbose('The previous error:')
+                Write-Verbose('LineNumber  Line')
+                Write-Verbose('----------  ----')
+                Write-Verbose($currentPreviousError.LineNumber.ToString().PadLeft(10, ' ') + '  ' + $currentPreviousError.Line)
             }
         }
     }
@@ -3129,7 +3167,7 @@ function Test-ProcessUsage {
 .DESCRIPTION
     The main functionality
 #>
-Write-Text('Starting the CoreCycler...')
+Write-Host('Starting the CoreCycler...')
 
 
 
@@ -3422,6 +3460,7 @@ try {
     Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
     Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore)) Cyan
     Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
+    Write-ColorText('Restart for each core: .... ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ON' } else { 'OFF' }))) Cyan
     Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + $(if ($settings.General.coreTestOrder.ToLower() -eq 'default') {' (' + $coreTestOrderMode.ToUpper() + ')'})) Cyan
     Write-ColorText('Number of iterations: ..... ' + $settings.General.maxIterations) Cyan
 
@@ -3900,7 +3939,7 @@ try {
                             # Set the flag to only start the stress test program if possible
                             Start-StressTestProgram $true
                         }
-                    }
+                    }   # End: if ($Error -and $Error[0].ToString() -eq '999')
 
                     # Unknown error
                     else {
@@ -3908,7 +3947,11 @@ try {
                         Write-ErrorText $Error
                         Exit-WithFatalError
                     }
-                }
+
+
+                    # Continue to the next core
+                    continue coreLoop
+                }   # End: catch
 
                 # Get the current CPU frequency
                 $currentCpuInfo = Get-CpuFrequency $cpuNumber
@@ -3927,7 +3970,7 @@ try {
                     $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
                     Write-Verbose('Resumed: ' + $resumed)
                 }
-            }
+            }   # End: for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++)
             
             # Wait for the remaining runtime
             Start-Sleep -Seconds $runtimeRemaining
@@ -3995,11 +4038,11 @@ try {
                     Write-ErrorText $Error
                     Exit-WithFatalError
                 }
-            }
+            }   # End: catch
 
             $timestamp = (Get-Date).ToString("HH:mm:ss")
             Write-Text($timestamp + ' - Completed the test on Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
-        }
+        }   # End: :coreLoop for ($i = 0; $i -lt $numAvailableCores; $i++) {
         
         
         # Print out the cores that have thrown an error so far
@@ -4043,7 +4086,7 @@ try {
         Write-Verbose('----------------------------------')
         Write-Verbose('Iteration complete')
         Write-Verbose('----------------------------------')
-    }
+    }   # End for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration++)
 
 
     # The CoreCycler has finished
