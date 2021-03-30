@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0 RC4
+    0.8.0.0 RC5
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                   = '0.8.0.0 RC4'
+$version                   = '0.8.0.0 RC5'
 $startDateTime             = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -1890,35 +1890,34 @@ function Initialize-Prime95 {
     
     # Default settings
     else {
-        # No memory testing ("In-Place")
-        # 1 minute per FFT size
-        Add-Content $configFile2 ('TortureMem=0')
-        Add-Content $configFile2 ('TortureTime=1')
+        Add-Content $configFile2 ('TortureMem=0')                   # No memory testing ("In-Place")
+        Add-Content $configFile2 ('TortureTime=1')                  # 1 minute per FFT size
     }
 
     # Set the FFT sizes
-    Add-Content $configFile2 ('MinTortureFFT=' + $minFFTSize)
-    Add-Content $configFile2 ('MaxTortureFFT=' + $maxFFTSize)
+    Add-Content $configFile2 ('MinTortureFFT=' + $minFFTSize)       # The minimum FFT size to test
+    Add-Content $configFile2 ('MaxTortureFFT=' + $maxFFTSize)       # The maximum FFT size to test
     
 
     # Get the correct TortureWeak setting
     Add-Content $configFile2 ('TortureWeak=' + $(Get-TortureWeakValue))
     
-    Add-Content $configFile2 ('V24OptionsConverted=1')
-    Add-Content $configFile2 ('V30OptionsConverted=1')
-    Add-Content $configFile2 ('WorkPreference=0')
-    Add-Content $configFile2 ('WGUID_version=2')
+    Add-Content $configFile2 ('V24OptionsConverted=1')              # Flag that the options were already converted from an older version (v24)
+    Add-Content $configFile2 ('V30OptionsConverted=1')              # Flag that the options were already converted from an older version (v29)
+    Add-Content $configFile2 ('ExitOnX=1')                          # No minimizing to the tray on close (x)
+    Add-Content $configFile2 ('ResultsFileTimestampInterval=60')    # Write to the results.txt every 60 seconds
+    Add-Content $configFile2 ('EnableSetAffinity=0')                # Don't let Prime automatically assign the CPU affinty, we're doing this on our own
+    Add-Content $configFile2 ('EnableSetPriority=0')                # Don't let Prime automatically assign the CPU priority, we're setting it to "High"
+    
+    # No PrimeNet functionality, just stress testing
     Add-Content $configFile2 ('StressTester=1')
     Add-Content $configFile2 ('UsePrimenet=0')
-    Add-Content $configFile2 ('ExitOnX=1')
-    Add-Content $configFile2 ('ResultsFileTimestampInterval=60')
 
-    # We're setting the affinity and process/thread priority ourselves
-    Add-Content $configFile2 ('EnableSetAffinity=0')
-    Add-Content $configFile2 ('EnableSetPriority=0')
+    #Add-Content $configFile2 ('WGUID_version=2')                   # The algorithm used to generate the Windows GUID. Not important
+    #Add-Content $configFile2 ('WorkPreference=0')                  # This seems to be a PrimeNet only setting
 
-    Add-Content $configFile2 ('[PrimeNet]')
-    Add-Content $configFile2 ('Debug=0')
+    #Add-Content $configFile2 ('[PrimeNet]')
+    #Add-Content $configFile2 ('Debug=0')
 }
 
 
