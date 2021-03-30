@@ -1872,9 +1872,10 @@ function Initialize-Prime95 {
     }
 
 
-    # There's an 80 character limit for the ini settings, so we're using an ugly workaround to put the log file into the /logs/ directory:
-    # - set the working dir to the logs directory
-    # - then set the paths to the prime.txt and local.txt relative to that logs directory
+    # In 30.4 there's an 80 character limit for the ini settings, so we're using an ugly workaround to put the log file into the /logs/ directory:
+    # - set the working directory to the directory where the CoreCycler script is located
+    # - then set the paths to the prime.txt and local.txt relative to that working directory
+    # This should keep us below 80 characters
     Set-Content $configFile2 ('WorkingDir='  + $PSScriptRoot)
     
     # Set the custom results.txt file name
