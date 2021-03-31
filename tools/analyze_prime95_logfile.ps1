@@ -11,10 +11,10 @@ $logFileDirectory = '..\logs\'
 # The name of the log file to analyze
 $logFileName = ''
 
-
 # The script tries to autodetect the FFT preset and test mode used in the log file, but you can specify them here
-$testMode  = '' # SSE, AVX, AVX
-$fftPreset = '' # Smallest, Small, Large, Huge, All
+$testMode        = 'auto'   # "auto" or SSE, AVX, AVX
+$fftPreset       = 'auto'   # "auto" or Smallest, Small, Large, Huge, All
+$numberOfThreads = 'auto'   # "auto" or the number of threads used (1 or 2)
 
 
 # The FFT size array to be able to analyze the log file
@@ -160,38 +160,46 @@ if (!$filePath -or $filePath.Length -eq 0 -or !(Test-Path $filePath -PathType le
 }
 
 
-$allFFTSizesInLogfile       = @()
-$allUniqueFFTSizesInLogfile = @()
-$selectedFFTSizesArray      = @()
-$allFFTSizesInLogifle       = @()
-$foundFFTSizesIteration     = @()
-$foundFFTSizesUnique        = @()
-$foundTestModesMinMax       = @()
-$detectedTestModesFFT       = @()
-$detectedFftPreset          = $null
-$autodetectedTestMode       = $false
-$autodetectedFftPreset      = $false
-$foundTestModesMinMax       = @()
-$detectedTestModesFFT       = @()
-$testModesToCheck           = @()
-$logfile                    = Get-Content $filePath
-$regexFFT                   = '^Self\-test (\d+)K passed!$'
-$regexTime                  = '^\[(.*)]$'
-$curLineNumber              = 0
-$startLineNumber            = 1
-$startOfNewIteration        = $true
-$months                     = @('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
-$iterations                 = @()
-$durations                  = @()
+$allFFTSizesInLogfile        = @()
+$allUniqueFFTSizesInLogfile  = @()
+$selectedFFTSizesArray       = @()
+$allFFTSizesInLogifle        = @()
+$foundFFTSizesIteration      = @()
+$foundFFTSizesUnique         = @()
+$foundTestModesMinMax        = @()
+$detectedTestModesFFT        = @()
+$detectedFftPreset           = $null
+$detectedNumberOfThreads     = $null
+$autodetectedTestMode        = $false
+$autodetectedFftPreset       = $false
+$autodetectedNumberOfThreads = $false
+$foundTestModesMinMax        = @()
+$detectedTestModesFFT        = @()
+$testModesToCheck            = @()
+$logfile                     = Get-Content $filePath
+$regexFFT                    = '^Self\-test (\d+)K passed!$'
+$regexTime                   = '^\[(.*)]$'
+$curLineNumber               = 0
+$startLineNumber             = 1
+$startOfNewIteration         = $true
+$months                      = @('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+$iterations                  = @()
+$durations                   = @()
+
+
+# Set the testMode, fftPreset and numberOfThreads to 'auto' if they're not set at all
+$testMode        = $(if (!$testMode        -or $testMode.Length -eq 0)        { 'auto' } else { $testMode })
+$fftPreset       = $(if (!$fftPreset       -or $fftPreset.Length -eq 0)       { 'auto' } else { $fftPreset })
+$numberOfThreads = $(if (!$numberOfThreads -or $numberOfThreads.Length -eq 0) { 'auto' } else { $numberOfThreads })
 
 
 # Autodetect the FFT size
-if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length -eq 0) {
+if ($testMode -eq 'auto' -or $fftPreset -eq 'auto') {
     Write-Host ('')
     Write-Host ('Autodetecting the used FFT preset and test mode in the log file') -ForegroundColor Blue
     Write-Host ('---------------------------------------------------------------') -ForegroundColor Blue
 
-    Write-Host -NoNewline ('Analyzing log file: ....... ') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Analyzing log file: ............... ') -ForegroundColor Cyan
     Write-Host ($filePath) -ForegroundColor Yellow
 
 
@@ -203,19 +211,43 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length 
         }
     }
 
+    # Try to detect if one or two threads were used
+    # For two threads, there should be multiple instances where the same FFT sizes appears back-to-back
+    # We shouldn't need to worry about FFT "drift", as the threads run on the same core with the same speed
+    if ($numberOfThreads -eq 'auto' -or $numberOfThreads -gt 2 -or $numberOfThreads -lt 1) {
+        $hitsForBackToBack = 0
+
+        # Check the first 50 lines to determine if we have back-to-back entries
+        for ($i = 1; $i -le 50; $i++) {
+            if ($allFFTSizesInLogfile[$i] -eq $allFFTSizesInLogfile[$i-1]) {
+                $hitsForBackToBack++
+            }
+        }
+
+        #'hitsForBackToBack: ' + $hitsForBackToBack
+
+        # Let's set a totally arbitrary limit at 5
+        if ($hitsForBackToBack -gt 5) {
+            $detectedNumberOfThreads = 2
+        }
+        else {
+            $detectedNumberOfThreads = 1
+        }
+    }
+
+
     $allUniqueFFTSizesInLogfile = $allFFTSizesInLogfile | Select -Unique
 
     $minFoundFFTSize = ($allFFTSizesInLogfile | Measure -Min).Minimum
     $maxFoundFFTSize = ($allFFTSizesInLogfile | Measure -Max).Maximum
 
-
-    Write-Host -NoNewline ('Minimum FFT Size found: ... ') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Minimum FFT Size found: ........... ') -ForegroundColor Cyan
     Write-Host ($minFoundFFTSize) -ForegroundColor Yellow
-    Write-Host -NoNewline ('Maximum FFT Size found: ... ') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Maximum FFT Size found: ........... ') -ForegroundColor Cyan
     Write-Host ($maxFoundFFTSize) -ForegroundColor Yellow
 
     # If there was a test mode provided
-    if ($testMode -and $testMode.Length -gt 0) {
+    if ($testMode -ne 'auto') {
         $testModesToCheck += $testMode
     }
     else {
@@ -224,7 +256,7 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length 
     }
 
     # No FFT preset was provided
-    if (!$fftPreset -or $fftPreset.Length -eq 0) {
+    if ($fftPreset -eq 'auto') {
         # Go through the provided or all of the test modes
         foreach ($testModeBeingChecked in $testModesToCheck) {
             # Check if the min and max values match
@@ -326,7 +358,7 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length 
 
 
     # A test mode was provided, check if it appears in the detected modes
-    if ($testMode -and $testMode.Length -gt 0 -and !$detectedTestModesFFT.Contains($testMode)) {
+    if ($testMode -ne 'auto' -and !$detectedTestModesFFT.Contains($testMode)) {
         Write-Host ('ERROR: The provided test mode doesn''t match the data in the log file!') -ForegroundColor Red
 
         Read-Host -Prompt 'Press Enter to exit'
@@ -334,14 +366,14 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length 
     }
 
 
-    if (!$testMode -or $testMode.Length -eq 0) {
+    if ($testMode -eq 'auto') {
         $autodetectedTestMode = $true
         
-        Write-Host -NoNewline ('Autodetected Test Mode: ... ') -ForegroundColor Cyan
+        Write-Host -NoNewline ('Autodetected Test Mode: ........... ') -ForegroundColor Cyan
         Write-Host ($detectedTestModesFFT -Join ' or ') -ForegroundColor Yellow        
     }
     else {
-        Write-Host -NoNewline ('Provided Test Mode: ....... ') -ForegroundColor Cyan
+        Write-Host -NoNewline ('Provided Test Mode: ............... ') -ForegroundColor Cyan
         Write-Host ($testMode) -ForegroundColor Yellow
     }
 
@@ -349,13 +381,26 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length 
     if ($detectedFftPreset -and $detectedFftPreset.Length -gt 0) {
         $autodetectedFftPreset = $true
 
-        Write-Host -NoNewline ('Autodetected FFT Preset: .. ') -ForegroundColor Cyan
+        Write-Host -NoNewline ('Autodetected FFT Preset: .......... ') -ForegroundColor Cyan
         Write-Host ($fftPreset) -ForegroundColor Yellow
     }
     else {
-        Write-Host -NoNewline ('Provided FFT Preset: ...... ') -ForegroundColor Cyan
+        Write-Host -NoNewline ('Provided FFT Preset: .............. ') -ForegroundColor Cyan
         Write-Host ($fftPreset) -ForegroundColor Yellow
     }
+
+
+    if ($detectedNumberOfThreads -and $detectedNumberOfThreads.Length -gt 0) {
+        $autodetectedNumberOfThreads = $true
+
+        Write-Host -NoNewline ('Autodetected Number of Threads: ... ') -ForegroundColor Cyan
+        Write-Host ($detectedNumberOfThreads) -ForegroundColor Yellow
+    }
+    else {
+        Write-Host -NoNewline ('Provided FFT Number of Threads: ... ') -ForegroundColor Cyan
+        Write-Host ($numberOfThreads) -ForegroundColor Yellow
+    }
+
 
     Write-Host ('')
     
@@ -369,8 +414,12 @@ if (!$testMode -or $testMode.Length -eq 0 -or !$fftPreset -or $fftPreset.Length 
 
     # No test mode was provided, and there's more than one possible candidate
     # Set the test mode to the first entry if no test mode was provided
-    if (!$testMode -or $testMode.Length -eq 0) {
+    if ($testMode -eq 'auto') {
         $testMode = $detectedTestModesFFT[0]
+    }
+
+    if ($numberOfThreads -eq 'auto') {
+        $numberOfThreads = $detectedNumberOfThreads
     }
 }
 
@@ -390,12 +439,36 @@ catch {
 }
 
 
+$previousFFTSize = -1
+
+
+# Now process the FFT sizes
 foreach ($line in $logfile) {
     $curLineNumber++
-
+    
     if ($line -match $regexFFT) {
         $fftSize = [Int]$matches[1]
         $matches.Clear()
+
+        #'Current FFT Size:  ' + $fftSize
+        #'Previous FFT Size: ' + $previousFFTSize
+
+        # If we're on two threads, ignore this FFT size if it's the same as the previous one
+        # Skip
+        if ($numberOfThreads -eq 2) {
+            if ($fftSize -eq $previousFFTSize) {
+                #'Back-to-back FFT size found! - ' + $fftSize + ' <-> ' + $previousFFTSize
+                
+                # Reset the previous FFT size so that we can catch if there are actually two "real" FFTs with the same size back-to-back
+                $previousFFTSize = -1
+                continue
+            }
+
+            else {
+                $previousFFTSize = $fftSize
+                
+            }
+        }
 
         # Store the found FFT size
         $foundFFTSizesIteration += $fftSize
@@ -609,22 +682,32 @@ Write-Host ($filePath) -ForegroundColor Yellow
 
 
 if ($autodetectedTestMode) {
-    Write-Host -NoNewline ('Detected Test Mode: .... ') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Detected Test Mode: ........... ') -ForegroundColor Cyan
     Write-Host ($detectedTestModesFFT -Join ' or ') -ForegroundColor Yellow
 }
 else {
-    Write-Host -NoNewline ('Selected Test Mode: .... ') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Selected Test Mode: ........... ') -ForegroundColor Cyan
     Write-Host ($testMode) -ForegroundColor Yellow    
 }
 
 if ($autodetectedFftPreset) {
-    Write-Host -NoNewline ('Detected FFT Preset: ... ') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Detected FFT Preset: .......... ') -ForegroundColor Cyan
     Write-Host ($fftPreset) -ForegroundColor Yellow
 }
 else {
-    Write-Host -NoNewline ('Selected FFT Preset: ... ') -ForegroundColor Cyan
+    Write-Host -NoNewline ('Selected FFT Preset: .......... ') -ForegroundColor Cyan
     Write-Host ($fftPreset) -ForegroundColor Yellow   
 }
+
+if ($autodetectedNumberOfThreads) {
+    Write-Host -NoNewline ('Detected Number of Threads: ... ') -ForegroundColor Cyan
+    Write-Host ($numberOfThreads) -ForegroundColor Yellow
+}
+else {
+    Write-Host -NoNewline ('Selected Number of Threads: ... ') -ForegroundColor Cyan
+    Write-Host ($numberOfThreads) -ForegroundColor Yellow   
+}
+
 
 if ($detectedTestModesFFT.Length -gt 1) {
     Write-Host ('')

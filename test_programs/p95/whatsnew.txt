@@ -1,5 +1,5 @@
-New features in Version 30.4 of prime95.exe
--------------------------------------------
+New features in Version 30.4/30.5 of prime95.exe
+------------------------------------------------
 
 1) Faster P-1 stage 2.
 2) Faster ECM stage 1 and stage 2.
