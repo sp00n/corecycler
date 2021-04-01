@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0 RC5
+    0.8.0.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                   = '0.8.0.0 RC5'
+$version                   = '0.8.0.0'
 $startDateTime             = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -3658,7 +3658,7 @@ try {
             $startDateThisCore  = (Get-Date)
             $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $settings.General.runtimePerCore)
             $timestamp          = $startDateThisCore.ToString("HH:mm:ss")
-            $affinity           = [System.IntPtr][Int64] 0
+            $affinity           = [Int64] 0
             $actualCoreNumber   = [Int] $coreTestOrderArray[0]
             $cpuNumbersArray    = @()
 
@@ -3671,7 +3671,7 @@ try {
                     # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
                     $thisCPUNumber    = ($actualCoreNumber * 2) + $currentThread
                     $cpuNumbersArray += $thisCPUNumber
-                    $affinity        += [System.IntPtr][Int64] [Math]::Pow(2, $thisCPUNumber)
+                    $affinity        += [Int64] [Math]::Pow(2, $thisCPUNumber)
                 }
             }
 
@@ -3681,7 +3681,7 @@ try {
                 # Otherwise, it's the same value
                 $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
                 $cpuNumbersArray += $cpuNumber
-                $affinity         = [System.IntPtr][Int64] [Math]::Pow(2, $cpuNumber)
+                $affinity         = [Int64] [Math]::Pow(2, $cpuNumber)
             }
 
             Write-Verbose('The selected core to test: ' + $actualCoreNumber)
@@ -3721,7 +3721,7 @@ try {
                     Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
                     Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
                     
-                    $affinity        = [System.IntPtr][Int64] 2
+                    $affinity        = [Int64] 2
                     $cpuNumber       = 1
                     $cpuNumberString = 1
                 }
@@ -3781,9 +3781,6 @@ try {
             $timestamp = (Get-Date).ToString("HH:mm:ss")
             Write-Text($timestamp + ' - Set to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
             
-            # We need System.IntPtr for the affinity
-            $affinity = [System.IntPtr][Int64] $affinity
-
             # Set the affinity to a specific core
             try {
                 Write-Verbose('Setting the affinity to ' + $affinity)
