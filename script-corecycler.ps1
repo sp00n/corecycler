@@ -3882,7 +3882,7 @@ try {
                 Start-Sleep -Milliseconds 300
 
                 try {
-                    $stressTestProcess.ProcessorAffinity = [System.IntPtr][Int64] $affinity
+                    $stressTestProcess.ProcessorAffinity = $affinity
                 }
                 catch {
                     Close-StressTestProgram
