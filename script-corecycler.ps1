@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0 RC5
+    0.8.1.0 RC1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,36 +17,43 @@
 #>
 
 # Global variables
-$version                   = '0.8.0.0 RC5'
-$startDateTime             = Get-Date -format yyyy-MM-dd_HH-mm-ss
-$logFilePath               = 'logs'
-$logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
-$logFileName               = 'CoreCycler_' + $startDateTime + '.log'
-$logFileFullPath           = $logFilePathAbsolute + $logFileName
-$settings                  = $null
-$selectedStressTestProgram = $null
-$windowProcess             = $null
-$windowProcessId           = $null
-$stressTestProcess         = $null
-$stressTestProcessId       = $null
-$processCounterPathId      = $null
-$processCounterPathTime    = $null
-$coresWithError            = $null
-$coresWithErrorsCounter    = $null
-$previousError             = $null
-$stressTestLogFileName     = $null
-$stressTestLogFilePath     = $null
-$prime95CPUSettings        = $null
-$FFTSizes                  = $null
-$FFTMinMaxValues           = $null
-$minFFTSize                = $null
-$maxFFTSize                = $null
-$cpuTestMode               = $null
-$coreTestOrderMode         = $null
-$coreTestOrderCustom       = @()
-$scriptExit                = $false
-$fatalError                = $false
-$otherError                = $false
+$version                    = '0.8.1.0 RC1'
+$startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
+$logFilePath                = 'logs'
+$logFilePathAbsolute        = $PSScriptRoot + '\' + $logFilePath + '\'
+$logFileName                = 'CoreCycler_' + $startDateTime + '.log'
+$logFileFullPath            = $logFilePathAbsolute + $logFileName
+$settings                   = $null
+$selectedStressTestProgram  = $null
+$useAutomaticRuntimePerCore = $false
+$windowProcess              = $null
+$windowProcessId            = $null
+$stressTestProcess          = $null
+$stressTestProcessId        = $null
+$processCounterPathId       = $null
+$processCounterPathTime     = $null
+$coresWithError             = $null
+$coresWithErrorsCounter     = $null
+$previousError              = $null
+$stressTestLogFileName      = $null
+$stressTestLogFilePath      = $null
+$prime95CPUSettings         = $null
+$FFTSizes                   = $null
+$FFTMinMaxValues            = $null
+$minFFTSize                 = $null
+$maxFFTSize                 = $null
+$fftSubarray                = $null
+$cpuTestMode                = $null
+$coreTestOrderMode          = $null
+$coreTestOrderCustom        = @()
+$scriptExit                 = $false
+$fatalError                 = $false
+$otherError                 = $false
+$previousFileSize           = $null
+$previousPassedFFTSize      = $null
+$isPrime95                  = $false
+$isAida64                   = $false
+$isYCruncher                = $false
 
 
 # Set the title
@@ -68,6 +75,32 @@ $stressTestPrograms = @{
         'processNameExt'     = 'exe'
         'processNameForLoad' = 'prime95'
         'processPath'        = 'test_programs\p95'
+        'configName'         = $null
+        'configFilePath'     = $null
+        'absolutePath'       = $null
+        'fullPathToExe'      = $null
+        'command'            = """%fullPathToExe%"" -t"
+        'windowBehaviour'    = 0
+        'testModes'          = @(
+            'SSE',
+            'AVX',
+            'AVX2',
+            'CUSTOM'
+        )
+        'windowNames'        = @(
+            '^Prime95 \- Self\-Test$',
+            '^Prime95 \- Not running$',
+            '^Prime95 \- Waiting for work$',
+            '^Prime95$'
+        )
+    }
+
+    'prime95_dev' = @{
+        'displayName'        = 'Prime95 DEV'
+        'processName'        = 'prime95_dev'
+        'processNameExt'     = 'exe'
+        'processNameForLoad' = 'prime95_dev'
+        'processPath'        = 'test_programs\p95_dev'
         'configName'         = $null
         'configFilePath'     = $null
         'absolutePath'       = $null
@@ -148,7 +181,7 @@ $stressTestPrograms = @{
 
 # Programs where both the main window and the stress test are the same process
 $stressTestProgramsWithSameProcess = @(
-    'prime95', 'ycruncher'
+    'prime95', 'prime95_dev', 'ycruncher'
 )
 
 
@@ -1066,8 +1099,13 @@ function Import-Settings {
 
                 # Parse the runtime per core (seconds, minutes, hours)
                 if ($name -eq 'runtimePerCore') {
+                    # It can be set to "auto"
+                    if ($value.ToString().ToLower() -eq 'auto') {
+                        $thisSetting = 'auto'
+                    }
+
                     # Parse the hours, minutes, seconds
-                    if ($value.indexOf('h') -ge 0 -or $value.indexOf('m') -ge 0 -or $value.indexOf('s') -ge 0) {
+                    elseif ($value.indexOf('h') -ge 0 -or $value.indexOf('m') -ge 0 -or $value.indexOf('s') -ge 0) {
                         $hasMatched = $value -match '((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
                         $seconds = [Double] $matches.hours * 60 * 60 + [Double] $matches.minutes * 60 + [Double] $matches.seconds
                         $thisSetting = [Int] $seconds
@@ -1082,6 +1120,7 @@ function Import-Settings {
 
                 # String values
                 elseif ($settingsWithStrings.Contains($name)) {
+                    # Convert some to lower case
                     if ($settingsToLowercase.Contains($name)) {
                         $thisSetting = ([String] $value).ToLower()
                     }
@@ -1202,14 +1241,20 @@ function Get-Settings {
     }
 
 
+    # Set the correct flag 
+    $Script:isPrime95   = $(if ($settings.General.stressTestProgram -eq 'prime95' -or $settings.General.stressTestProgram -eq 'prime95_dev') { $true } else { $false })
+    $Script:isAida64    = $(if ($settings.General.stressTestProgram -eq 'aida64') { $true } else { $false })
+    $Script:isYCruncher = $(if ($settings.General.stressTestProgram -eq 'ycruncher') { $true } else { $false })
+
+
     # Set the general "mode" setting
-    if ($settings.General.stressTestProgram -eq 'prime95') {
+    if ($isPrime95) {
         $settings.mode = $settings.Prime95.mode
     }
-    elseif ($settings.General.stressTestProgram -eq 'aida64') {
+    elseif ($isAida64) {
         $settings.mode = $settings.Aida64.mode
     }
-    elseif ($settings.General.stressTestProgram -eq 'ycruncher') {
+    elseif ($isYCruncher) {
         $settings.mode = $settings.YCruncher.mode
     }
 
@@ -1248,7 +1293,7 @@ function Get-Settings {
 .DESCRIPTION
     Get the formatted runtime per core string
 .PARAMETER seconds
-    [Int] The runtime in seconds
+    Mixed. Either [Int] The runtime in seconds or [String] If set to "auto"
 .OUTPUTS
     [String] The formatted runtime string
 #>
@@ -1256,6 +1301,17 @@ function Get-FormattedRuntimePerCoreString {
     param (
         $seconds
     )
+
+    if ($seconds.ToString().ToLower() -eq 'auto') {
+        $returnString = 'AUTOMATIC'
+
+        if ($isAida64 -or $isYCruncher) {
+            $returnString += ' (' + [Math]::Round($script:runtimePerCore/60, 2) + ' minutes)'
+        }
+
+        return $returnString
+    }
+
 
     $runtimePerCoreStringArray = @()
     $timeSpan = [TimeSpan]::FromSeconds($seconds)
@@ -1619,14 +1675,17 @@ function Get-StressTestProcessInformation {
     [Void]
 #>
 function Initialize-Prime95 {
+    # This may be prime95 or prime95_dev
+    $p95Version = $settings.General.stressTestProgram
+
     # Check if the prime95.exe exists
     Write-Verbose('Checking if prime95.exe exists at:')
-    Write-Verbose($stressTestPrograms['prime95']['fullPathToExe'] + '.' + $stressTestPrograms['prime95']['processNameExt'])
+    Write-Verbose($stressTestPrograms[$p95Version]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Version]['processNameExt'])
 
-    if (!(Test-Path ($stressTestPrograms['prime95']['fullPathToExe'] + '.' + $stressTestPrograms['prime95']['processNameExt']) -PathType leaf)) {
+    if (!(Test-Path ($stressTestPrograms[$p95Version]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Version]['processNameExt']) -PathType leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Prime95!') Red
         Write-ColorText('Make sure to download and extract Prime95 into the following directory:') Red
-        Write-ColorText($stressTestPrograms['prime95']['absolutePath']) Yellow
+        Write-ColorText($stressTestPrograms[$p95Version]['absolutePath']) Yellow
         Write-Text ''
         Write-ColorText('You can download Prime95 from:') Red
         Write-ColorText('https://www.mersenne.org/download/') Cyan
@@ -1830,9 +1889,15 @@ function Initialize-Prime95 {
     }
 
 
+    # Get the sub array for the selected FFT preset
+    $startKey = [Array]::indexOf($FFTSizes[$cpuTestMode], $minFFTSize)
+    $endKey   = [Array]::indexOf($FFTSizes[$cpuTestMode], $maxFFTSize)
+    $Script:fftSubarray = $FFTSizes[$cpuTestMode][$startKey..$endKey]
+
+
     $modeString  = $settings.mode
-    $configFile1 = $stressTestPrograms['prime95']['absolutePath'] + 'local.txt'
-    $configFile2 = $stressTestPrograms['prime95']['absolutePath'] + 'prime.txt'
+    $configFile1 = $stressTestPrograms[$p95Version]['absolutePath'] + 'local.txt'
+    $configFile2 = $stressTestPrograms[$p95Version]['absolutePath'] + 'prime.txt'
 
 
     # The Prime95 results.txt file name and path for this run
@@ -1879,8 +1944,8 @@ function Initialize-Prime95 {
     Set-Content $configFile2 ('WorkingDir='  + $PSScriptRoot)
     
     # Set the custom results.txt file name
-    Add-Content $configFile2 ('prime.ini='   + $stressTestPrograms['prime95']['processPath'] + '\prime.txt')
-    Add-Content $configFile2 ('local.ini='   + $stressTestPrograms['prime95']['processPath'] + '\local.txt')
+    Add-Content $configFile2 ('prime.ini='   + $stressTestPrograms[$p95Version]['processPath'] + '\prime.txt')
+    Add-Content $configFile2 ('local.ini='   + $stressTestPrograms[$p95Version]['processPath'] + '\local.txt')
     Add-Content $configFile2 ('results.txt=' + $logFilePath + '\' + $stressTestLogFileName)
     
     # Custom settings
@@ -2752,13 +2817,13 @@ function Close-YCruncher {
 function Initialize-StressTestProgram {
     Write-Verbose('Initalizing the stress test program')
 
-    if ($settings.General.stressTestProgram -eq 'prime95') {
+    if ($isPrime95) {
         Initialize-Prime95 $settings.mode
     }
-    elseif ($settings.General.stressTestProgram -eq 'aida64') {
+    elseif ($isAida64) {
         Initialize-Aida64
     }
-    elseif ($settings.General.stressTestProgram -eq 'ycruncher') {
+    elseif ($isYCruncher) {
         Initialize-YCruncher
     }
     else {
@@ -2783,13 +2848,13 @@ function Start-StressTestProgram {
 
     Write-Verbose('Starting the stress test program')
 
-    if ($settings.General.stressTestProgram -eq 'prime95') {
+    if ($isPrime95) {
         Start-Prime95 $startOnlyStressTest
     }
-    elseif ($settings.General.stressTestProgram -eq 'aida64') {
+    elseif ($isAida64) {
         Start-Aida64 $startOnlyStressTest
     }
-    elseif ($settings.General.stressTestProgram -eq 'ycruncher') {
+    elseif ($isYCruncher) {
         Start-YCruncher $startOnlyStressTest
     }
     else {
@@ -2814,13 +2879,13 @@ function Close-StressTestProgram {
 
     Write-Verbose('Trying to close the stress test program')
 
-    if ($settings.General.stressTestProgram -eq 'prime95') {
+    if ($isPrime95) {
         Close-Prime95 $closeOnlyStressTest
     }
-    elseif ($settings.General.stressTestProgram -eq 'aida64') {
+    elseif ($isAida64) {
         Close-Aida64 $closeOnlyStressTest
     }
-    elseif ($settings.General.stressTestProgram -eq 'ycruncher') {
+    elseif ($isYCruncher) {
         Close-YCruncher $closeOnlyStressTest
     }
     else {
@@ -2854,7 +2919,7 @@ function Test-ProcessUsage {
     # Get the content of the results.txt file
     $resultFileHandle = $false
 
-    if ($settings.General.stressTestProgram -eq 'prime95') {
+    if ($isPrime95) {
         $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction Ignore
     }
 
@@ -2869,7 +2934,7 @@ function Test-ProcessUsage {
 
     
     # 2. If using Prime95, parse the results.txt file and look for an error message
-    if (!$stressTestError -and $settings.General.stressTestProgram -eq 'prime95') {
+    if (!$stressTestError -and $isPrime95) {
 
         # Look for a line with an "error" string in the last 3 lines
         $primeErrorResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
@@ -2926,7 +2991,7 @@ function Test-ProcessUsage {
         if ($processCPUPercentage -le $minProcessUsage) {
 
             # For Prime95
-            if ($settings.General.stressTestProgram -eq 'prime95') {
+            if ($isPrime95) {
                 # Try to read the error from Prime95's results.txt
                 # Look for a line with an "error" string in the last 3 lines
                 $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
@@ -3027,7 +3092,7 @@ function Test-ProcessUsage {
 
         # Try to get more detailed error information
         # Prime95
-        if ($settings.General.stressTestProgram -eq 'prime95') {
+        if ($isPrime95) {
             Write-Verbose('The stress test program is Prime95, trying to look for an error message in the results.txt')
 
             # DEBUG
@@ -3142,13 +3207,13 @@ function Test-ProcessUsage {
 
 
         # Aida64
-        elseif ($settings.General.stressTestProgram -eq 'aida64') {
+        elseif ($isAida64) {
             Write-Verbose('The stress test program is Aida64, no detailed error detection available')
         }
 
 
         # Y-Cruncher
-        elseif ($settings.General.stressTestProgram -eq 'ycruncher') {
+        elseif ($isYCruncher) {
             Write-Verbose('The stress test program is Y-Cruncher, no detailed error detection available')
         }
 
@@ -3361,14 +3426,35 @@ for ($i = 0; $i -lt $numPhysCores; $i++) {
 }
 
 
+# The runtime per core
+$runtimePerCore = $settings.General.runtimePerCore
+
+# It may be set to "auto"
+if ($settings.General.runtimePerCore.ToString().ToLower() -eq 'auto') {
+    # For Prime95, we're setting the runtimePerCore to 24 hours as a temporary value
+    # For Aida64 and Y-Cruncher, we're using 10 minutes
+    if ($isPrime95) {
+        $runtimePerCore = 24 * 60 * 60  # 24 hours as a temporary value
+        $useAutomaticRuntimePerCore = $true
+    }
+    elseif ($isAida64) {
+        $runtimePerCore = 10 * 60
+    }
+    elseif ($isYCruncher) {
+        $runtimePerCore = 10 * 60
+    }
+}
+
+
 # Check the CPU usage each x seconds
 # This currently also controls the interval of the suspendPeriodically functionality
 $cpuUsageCheckInterval = 10
 
 
 # Calculate the amount of interval checks for the CPU power check
-$cpuCheckIterations = [Math]::Floor($settings.General.runtimePerCore / $cpuUsageCheckInterval)
-$runtimeRemaining   = $settings.General.runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
+# Note: we cannot calculate this when the runtimePerCore is set to "auto"
+$cpuCheckIterations = [Math]::Floor($runtimePerCore / $cpuUsageCheckInterval)
+$runtimeRemaining   = $runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
 
 
 # Get the actual core test mode
@@ -3484,7 +3570,7 @@ try {
         Write-ColorText('TortureTime     = ' + $settings.Custom.TortureTime) Cyan
     }
     else {
-        if ($settings.General.stressTestProgram -eq 'prime95') {
+        if ($isPrime95) {
             Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
         }
     }
@@ -3521,7 +3607,7 @@ try {
 
 
     # If Aida64 was started, try to clear any error messages from previous runs
-    if ($settings.General.stressTestProgram -eq 'aida64') {
+    if ($isAida64) {
         Write-Verbose('Trying to clear Aida64 error messages from previous runs')
 
         $initFunctions = [scriptblock]::Create(@"
@@ -3656,11 +3742,14 @@ try {
         #:coreLoop for ($coreNumber = 0; $coreNumber -lt $numPhysCores; $coreNumber++) {
         :coreLoop for ($i = 0; $i -lt $numAvailableCores; $i++) {
             $startDateThisCore  = (Get-Date)
-            $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $settings.General.runtimePerCore)
+            $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
             $timestamp          = $startDateThisCore.ToString("HH:mm:ss")
-            $affinity           = [System.IntPtr][Int64] 0
+            $affinity           = [Int64] 0
             $actualCoreNumber   = [Int] $coreTestOrderArray[0]
             $cpuNumbersArray    = @()
+            $allPassedFFTs      = [System.Collections.ArrayList]::new()
+            $uniquePassedFFTs   = [System.Collections.ArrayList]::new()
+
 
             Write-Verbose('Still available cores: ' + ($coreTestOrderArray -Join ', '))
 
@@ -3671,7 +3760,7 @@ try {
                     # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
                     $thisCPUNumber    = ($actualCoreNumber * 2) + $currentThread
                     $cpuNumbersArray += $thisCPUNumber
-                    $affinity        += [System.IntPtr][Int64] [Math]::Pow(2, $thisCPUNumber)
+                    $affinity        += [Int64] [Math]::Pow(2, $thisCPUNumber)
                 }
             }
 
@@ -3681,7 +3770,7 @@ try {
                 # Otherwise, it's the same value
                 $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
                 $cpuNumbersArray += $cpuNumber
-                $affinity         = [System.IntPtr][Int64] [Math]::Pow(2, $cpuNumber)
+                $affinity         = [Int64] [Math]::Pow(2, $cpuNumber)
             }
 
             Write-Verbose('The selected core to test: ' + $actualCoreNumber)
@@ -3713,7 +3802,7 @@ try {
             # Apparently Aida64 doesn't like having the affinity set to 1
             # Possible workaround: Set it to 2 instead
             # This also poses a problem when testing two threads on core 0, so we're skipping this core for the time being
-            if ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 1) {
+            if ($isAida64 -and $affinity -eq 1) {
                 Write-ColorText('           Notice!') Black Yellow
 
                 # If Hyperthreading / SMT is enabled
@@ -3721,7 +3810,7 @@ try {
                     Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
                     Write-ColorText('           Setting it to thread 2 of Core 0 instead (Core 0 CPU 1).') Black Yellow
                     
-                    $affinity        = [System.IntPtr][Int64] 2
+                    $affinity        = [Int64] 2
                     $cpuNumber       = 1
                     $cpuNumberString = 1
                 }
@@ -3741,7 +3830,7 @@ try {
             }
 
             # Aida64 running on CPU 0 and CPU 1 (2 threads)
-            elseif ($settings.General.stressTestProgram -eq 'aida64' -and $affinity -eq 3) {
+            elseif ($isAida64 -and $affinity -eq 3) {
                 Write-ColorText('           Notice!') Black Yellow
                 Write-ColorText('           Apparently Aida64 doesn''t like running the stress test on the first thread of Core 0.') Black Yellow
                 Write-ColorText('           So you might see an error due to decreased CPU usage.') Black Yellow
@@ -3781,9 +3870,6 @@ try {
             $timestamp = (Get-Date).ToString("HH:mm:ss")
             Write-Text($timestamp + ' - Set to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
             
-            # We need System.IntPtr for the affinity
-            $affinity = [System.IntPtr][Int64] $affinity
-
             # Set the affinity to a specific core
             try {
                 Write-Verbose('Setting the affinity to ' + $affinity)
@@ -3866,11 +3952,86 @@ try {
                 Write-Text($text)
             }
 
-            Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore) + '...')
+            if ($useAutomaticRuntimePerCore) {
+                Write-Text('           Running until all FFT sizes have been tested...')
+            }
+            else {
+                Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore) + '...')
+            }
 
 
             # Make a check each x seconds for the CPU power usage
             for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
+                # If the runtime per core is set to auto
+                # We need to check if all the FFT sizes have been tested
+                if ($useAutomaticRuntimePerCore -and $isPrime95) {
+                    $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction Ignore
+
+                    if ($resultFileHandle) {
+                        Write-Verbose('Automatic runtime per core selected, trying to determine if all the FFT sizes have been tested')
+
+                        # Get the current file size of the log file
+                        $fileSize = $resultFileHandle.Length
+
+                        # Only perform the check if the file size has increased
+                        if ($fileSize -gt $previousFileSize) {
+                            Write-Verbose('The file size of the log has changed, looking for new passed FFT sizes')
+
+                            # Get the last couple of lines from the results file and check for the passed FFT sizes
+                            $primeResults = $resultFileHandle | Get-Content -Tail 6
+                            $primeResultLines = $primeResults | Where-Object { $_ -like '*passed*' }
+
+                            # Get hte last passed FFT size
+                            $hasMatched = ($primeResultLines | Select-Object -Last 1) -match 'Self\-test (\d+)K passed'
+                            $lastPassedFFTSize = [Int] $matches[1]
+
+                            Write-Verbose('The last passed FFT size:     ' + $lastPassedFFTSize)
+                            Write-Verbose('The previous passed FFT size: ' + $previousPassedFFTSize)
+
+                            # TODO: Can there be instances where the same FFT size can appear twice, and it is actually a real passed FFT size?
+                            # -> 2 Threads, here the FFT sizes appear back-to-back
+                            # -> Randomized FFT order, and the last passed FFT is the same as the first new one? Does this happen? I don't think it does
+                            if ($lastPassedFFTSize -ne $previousPassedFFTSize) {
+                                Write-Verbose('New FFT size appeared, adding it to the array')
+
+                                # Enter the last passed FFT sizes arrays, both all and unique
+                                [Void] $allPassedFFTs.Add($lastPassedFFTSize)
+
+                                if (!($uniquePassedFFTs -contains $lastPassedFFTSize)) {
+                                    [Void] $uniquePassedFFTs.Add($lastPassedFFTSize)
+                                }
+
+                                Write-Verbose('All passed FFTs:')
+                                Write-Verbose($allPassedFFTs -Join ', ')
+                                Write-Verbose('All unique passed FFTs:')
+                                Write-Verbose($uniquePassedFFTs -Join ', ')
+
+                                Write-Verbose('The length of the FFT sub array currently being tested: ' + $fftSubarray.Count)
+                                Write-Verbose('The length of the already tested unique FFT array:      ' + $uniquePassedFFTs.Count)
+
+                                # Store the previously passed FFT size
+                                $previousPassedFFTSize = $lastPassedFFTSize
+
+                                # Check if the number of unique tested FFT sizes matches the number of FFT sizes for this preset and test mode
+                                # We need .Count here, because [System.Collections.ArrayList].Length doesn't return the expected value
+                                if ($uniquePassedFFTs.Count -eq $fftSubarray.Count) {
+                                    # TODO: Do we also need to compare the individual FFT sizes here, or do we trust
+                                    # that the number of unique FFT sizes alone is sufficient?
+
+                                    Write-Verbose('The number of unique FFT sizes matches the number of FFT sizes for the preset!')
+                                    Write-Verbose('We can end the test on this core now and continue to the next')
+                                    Write-Text('           All FFT sizes have been tested for this core, continuing to the next one')
+
+                                    continue coreLoop
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+
+                # The regular behavior for the core check
                 $nowDateTime = (Get-Date)
                 $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
 
@@ -3909,7 +4070,7 @@ try {
                             Write-Text('')
                             Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
-                            if ($settings.General.stressTestProgram -eq 'prime95') {
+                            if ($isPrime95) {
                                 # Display the results.txt file name for Prime95 for this run
                                 Write-Text('')
                                 Write-ColorText('Prime95''s results log file can be found at:') Cyan
@@ -4000,7 +4161,7 @@ try {
                         Write-Text('')
                         Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
-                        if ($settings.General.stressTestProgram -eq 'prime95') {
+                        if ($isPrime95) {
                             # Display the results.txt file name for Prime95 for this run
                             Write-Text('')
                             Write-ColorText('Prime95''s results log file can be found at:') Cyan

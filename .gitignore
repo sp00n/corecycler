@@ -6,3 +6,4 @@ logs/**
 test_programs/aida64/*
 !test_programs/aida64/aida64.txt
 test_programs/y-cruncher/Binaries/*.cfg
+test_programs/p95_dev/*
