@@ -206,7 +206,7 @@ if ($testMode -eq 'auto' -or $fftPreset -eq 'auto') {
 
     # If no preset was provided 
     foreach ($line in $logfile) {
-        if ($line -match $regexFFT) {
+        if ($line -Match $regexFFT) {
             $allFFTSizesInLogfile += [Int]$matches[1]
         }
     }
@@ -446,7 +446,7 @@ $previousFFTSize = -1
 foreach ($line in $logfile) {
     $curLineNumber++
     
-    if ($line -match $regexFFT) {
+    if ($line -Match $regexFFT) {
         $fftSize = [Int]$matches[1]
         $matches.Clear()
 
@@ -495,27 +495,27 @@ foreach ($line in $logfile) {
 
             # Start time
             # 1 line above
-            if ($logfile[$startLineNumber-1] -match $regexTime) {
+            if ($logfile[$startLineNumber-1] -Match $regexTime) {
                 $startDateStr = $matches[1]
             }
             # 1 line below
-            elseif ($logfile[$startLineNumber] -match $regexTime) {
+            elseif ($logfile[$startLineNumber] -Match $regexTime) {
                 $startDateStr = $matches[1]
             }
             # 2 lines above
-            elseif ($logfile[$startLineNumber-2] -match $regexTime) {
+            elseif ($logfile[$startLineNumber-2] -Match $regexTime) {
                 $startDateStr = $matches[1]
             }
             # 2 lines below
-            elseif ($logfile[$startLineNumber+1] -match $regexTime) {
+            elseif ($logfile[$startLineNumber+1] -Match $regexTime) {
                 $startDateStr = $matches[1]
             }
             # 3 lines above
-            elseif ($logfile[$startLineNumber-3] -match $regexTime) {
+            elseif ($logfile[$startLineNumber-3] -Match $regexTime) {
                 $startDateStr = $matches[1]
             }
             # 3 lines below
-            elseif ($logfile[$startLineNumber+2] -match $regexTime) {
+            elseif ($logfile[$startLineNumber+2] -Match $regexTime) {
                 $startDateStr = $matches[1]
             }
 
@@ -523,27 +523,27 @@ foreach ($line in $logfile) {
 
             # End time
             # 1 line above
-            if ($logfile[$curLineNumber-1] -match $regexTime) {
+            if ($logfile[$curLineNumber-1] -Match $regexTime) {
                 $startDateStr = $matches[1]
             }
             # 1 line below
-            elseif ($logfile[$curLineNumber] -match $regexTime) {
+            elseif ($logfile[$curLineNumber] -Match $regexTime) {
                 $endDateStr = $matches[1]
             }
             # 2 lines above
-            elseif ($logfile[$curLineNumber-2] -match $regexTime) {
+            elseif ($logfile[$curLineNumber-2] -Match $regexTime) {
                 $endDateStr = $matches[1]
             }
             # 2 lines below
-            elseif ($logfile[$curLineNumber+1] -match $regexTime) {
+            elseif ($logfile[$curLineNumber+1] -Match $regexTime) {
                 $endDateStr = $matches[1]
             }
             # 3 lines above
-            elseif ($logfile[$curLineNumber-3] -match $regexTime) {
+            elseif ($logfile[$curLineNumber-3] -Match $regexTime) {
                 $endDateStr = $matches[1]
             }
             # 3 lines below
-            elseif ($logfile[$curLineNumber+2] -match $regexTime) {
+            elseif ($logfile[$curLineNumber+2] -Match $regexTime) {
                 $endDateStr = $matches[1]
             }
 
@@ -557,19 +557,21 @@ foreach ($line in $logfile) {
 
             if ($startDateStr) {
                 # Sun Mar 14 23:34:00 2021
-                $startDateArr = $startDateStr.Split(' ')
-                $month        = (([Array]::indexOf($months, $startDateArr[1]) + 1).toString()).PadLeft(2, '0')
-                $day          = $startDateArr[2].toString().PadLeft(2, '0')
-                $conStartStr  = $startDateArr[4] + '-' + $month + '-' + $day + ' ' + $startDateArr[3]
+                # Thu Apr  1 01:41:21 2021
+                $startDateArr = $startDateStr -Split '\s+'
+                $month        = (([Array]::indexOf($months, $startDateArr[1].ToString().Trim()) + 1).ToString()).PadLeft(2, '0')
+                $day          = $startDateArr[2].ToString().Trim().PadLeft(2, '0')
+                $conStartStr  = $startDateArr[4].ToString().Trim() + '-' + $month + '-' + $day + ' ' + $startDateArr[3].ToString().Trim()
                 $startDate    = Get-Date -Date $conStartStr
             }
 
             if ($endDateStr) {
                 # Sun Mar 14 23:34:00 2021
-                $endDateArr = $endDateStr.Split(' ')
-                $month      = (([Array]::indexOf($months, $endDateArr[1]) + 1).toString()).PadLeft(2, '0')
-                $day        = $endDateArr[2].toString().PadLeft(2, '0')
-                $conEndStr  = $endDateArr[4] + '-' + $month + '-' + $day + ' ' + $endDateArr[3]
+                # Thu Apr  1 01:41:21 2021
+                $endDateArr = $endDateStr -Split '\s+'
+                $month      = (([Array]::indexOf($months, $endDateArr[1].ToString().Trim()) + 1).ToString()).PadLeft(2, '0')
+                $day        = $endDateArr[2].ToString().Trim().PadLeft(2, '0')
+                $conEndStr  = $endDateArr[4].ToString().Trim() + '-' + $month + '-' + $day + ' ' + $endDateArr[3].ToString().Trim()
                 $endDate    = Get-Date -Date $conEndStr
             }
 
