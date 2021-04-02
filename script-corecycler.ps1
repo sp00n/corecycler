@@ -51,6 +51,7 @@ $fatalError                 = $false
 $otherError                 = $false
 $previousFileSize           = $null
 $previousPassedFFTSize      = $null
+$previousPassedFFTEntry     = $null
 $isPrime95                  = $false
 $isAida64                   = $false
 $isYCruncher                = $false
@@ -2942,7 +2943,7 @@ function Test-ProcessUsage {
         # Found the "error" string in the results.txt
         if ($primeErrorResults.Length -gt 0) {
             # Get the line number of the last error message in the results.txt
-            $p95Errors = Select-String $stressTestLogFilePath -Pattern ERROR
+            $p95Errors = Select-String $stressTestLogFilePath -Pattern 'ERROR'
             $currentError = $p95Errors | Select-Object -Last 1 -Property LineNumber, Line
             $currentPreviousError = $Script:previousError
 
@@ -2985,7 +2986,7 @@ function Test-ProcessUsage {
         # Get the CPU percentage
         $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
         
-        Write-Verbose($timestamp + ' - ...checking CPU usage: ' + $processCPUPercentage + '%')
+        Write-Verbose($timestamp + ' - checking CPU usage: ' + $processCPUPercentage + '%')
 
         # It doesn't use enough CPU power
         if ($processCPUPercentage -le $minProcessUsage) {
@@ -3032,24 +3033,24 @@ function Test-ProcessUsage {
                     $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
                     $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
 
-                    Write-Verbose($timestamp + ' - ...checking CPU usage again (#' + $i + '): ' + $thisProcessCPUPercentage + '%')
+                    Write-Verbose($timestamp + ' - checking CPU usage again (#' + $i + '): ' + $thisProcessCPUPercentage + '%')
 
                     # If we have recovered, break and continue with stresss testing
                     if ($thisProcessCPUPercentage -ge $minProcessUsage) {
-                        Write-Verbose('           ...the process seems to have recovered, continuing with stress testing')
+                        Write-Verbose('           the process seems to have recovered, continuing with stress testing')
                         break;
                     }
 
                     else {
                         # Set the error variable if $maxChecks has been reached
                         if ($i -eq $maxChecks) {
-                            Write-Verbose('           ...still not enough usage, throw an error')
+                            Write-Verbose('           still not enough usage, throw an error')
 
                             # We don't care about an error string here anymore
                             $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'                            
                         }
                         else {
-                            Write-Verbose('           ...still not enough usage (#' + $i + ')')
+                            Write-Verbose('           still not enough usage (#' + $i + ')')
                         }
                     }
                 }
@@ -3960,78 +3961,251 @@ try {
             }
 
 
-            # Make a check each x seconds for the CPU power usage
+            # Make a check each x seconds
+            # - to check the CPU power usage
+            # - to check if all FFT sizes have passed
+            # - to suspend and resume the stress test process
             for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
-                # If the runtime per core is set to auto
+                Write-Verbose('')
+                
+                # If the runtime per core is set to auto and we're running Prime95
                 # We need to check if all the FFT sizes have been tested
                 if ($useAutomaticRuntimePerCore -and $isPrime95) {
-                    $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction Ignore
+                    while ($true) {
+                        $timestamp = Get-Date -format HH:mm:ss
+                        Write-Verbose($timestamp + ' - Automatic runtime per core selected')
+                        Write-Verbose('           Trying to determine if all the FFT sizes have been tested')
+                        
+                        $proceed = $false
+                        
+                        # Try to get the results.txt log file
+                        $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction Ignore
 
-                    if ($resultFileHandle) {
-                        Write-Verbose('Automatic runtime per core selected, trying to determine if all the FFT sizes have been tested')
-
-                        # Get the current file size of the log file
-                        $fileSize = $resultFileHandle.Length
+                        # No file, no check
+                        if (!$resultFileHandle) {
+                            Write-Verbose('           The stress test log file doesn''t exist yet')
+                            break
+                        }
 
                         # Only perform the check if the file size has increased
-                        if ($fileSize -gt $previousFileSize) {
-                            Write-Verbose('The file size of the log has changed, looking for new passed FFT sizes')
+                        # The size has increased, so something must have changed
+                        # It's either a new passed FFT entry, a [Timestamp], or an error
+                        if ($resultFileHandle.Length -le $previousFileSize) {
+                            Write-Verbose('           No file size change for the log file')
 
-                            # Get the last couple of lines from the results file and check for the passed FFT sizes
-                            $primeResults = $resultFileHandle | Get-Content -Tail 6
-                            $primeResultLines = $primeResults | Where-Object { $_ -like '*passed*' }
+                            # Store the file size of the log file
+                            $previousFileSize = $resultFileHandle.Length
+                            break;
+                        }
 
-                            # Get hte last passed FFT size
-                            $hasMatched = ($primeResultLines | Select-Object -Last 1) -match 'Self\-test (\d+)K passed'
-                            $lastPassedFFTSize = [Int] $matches[1]
+                        Write-Verbose('           The file size of the log has changed, looking for new passed FFT sizes')
 
-                            Write-Verbose('The last passed FFT size:     ' + $lastPassedFFTSize)
-                            Write-Verbose('The previous passed FFT size: ' + $previousPassedFFTSize)
+                        # Store the file size of the log file
+                        $previousFileSize = $resultFileHandle.Length
 
-                            # TODO: Can there be instances where the same FFT size can appear twice, and it is actually a real passed FFT size?
-                            # -> 2 Threads, here the FFT sizes appear back-to-back
-                            # -> Randomized FFT order, and the last passed FFT is the same as the first new one? Does this happen? I don't think it does
-                            if ($lastPassedFFTSize -ne $previousPassedFFTSize) {
-                                Write-Verbose('New FFT size appeared, adding it to the array')
 
-                                # Enter the last passed FFT sizes arrays, both all and unique
-                                [Void] $allPassedFFTs.Add($lastPassedFFTSize)
+                        # Check for an error, if we've found one, we don't even need to process any further
+                        $primeErrorResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
 
-                                if (!($uniquePassedFFTs -contains $lastPassedFFTSize)) {
-                                    [Void] $uniquePassedFFTs.Add($lastPassedFFTSize)
+                        if ($primeErrorResults) {
+                            Write-Verbose('           Found an error entry in the last 3 lines, proceed to the error check')
+                            break
+                        }
+
+
+                        # Get the last 4 lines with the passed FFT sizes
+                        $lastPassedFFTSizeResults = Select-String $resultFileHandle -Pattern 'passed!' | Select-Object -Last 4 -Property LineNumber, Line
+
+
+                        # No passed FFT sizes found
+                        if (!$lastPassedFFTSizeResults) {
+                            Write-Verbose('           No passed FFT sizes found, assuming we''re at the very beginning of the test')
+                            break
+                        }
+
+
+                        # The most current FFT size entry
+                        $lastPassedFFTSizeEntry = $lastPassedFFTSizeResults[$lastPassedFFTSizeResults.Length-1]
+
+                        # The FFT size four passes ago (may be empty)
+                        $passedFFTSizeEntryMinusFour = $lastPassedFFTSizeResults[$lastPassedFFTSizeResults.Length-4]
+
+
+                        # There's no previous entry, nothing to compare to
+                        if (!$previousPassedFFTEntry) {
+                            Write-Verbose('           No previous FFT entry found, assuming only one size has passed yet')
+                        }
+
+                        # The current FFT size entry exactly matches the last entry
+                        elseif ($previousPassedFFTEntry.LineNumber -eq $lastPassedFFTSizeEntry.LineNumber -and `
+                                $previousPassedFFTEntry.Line -eq $lastPassedFFTSizeEntry.Line `
+                        ) {
+                            Write-Verbose('           The previous FFT entry excatly matches the current one, ignoring')
+                            Write-Verbose('           [Line ' + $lastPassedFFTSizeEntry.LineNumber + '] ' + $lastPassedFFTSizeEntry.Line)
+                            break
+                        }
+
+                        # We now have established that the new FFT size entry doesn't match the old one
+                        # It may be the same FFT size, but at least it's not on the same line
+
+
+                        # Get the actual FFT size of the entry
+                        $hasMatched = $lastPassedFFTSizeEntry.Line -match 'Self\-test (\d+)K passed'
+                        $lastPassedFFTSize = [Int] $matches[1]
+
+                        Write-Verbose('           The last passed FFT size:     ' + $lastPassedFFTSize)
+                        Write-Verbose('           The previous passed FFT size: ' + $previousPassedFFTSize)
+
+
+                        # We now need to distinguish between one and two threads
+                        #
+                        # For one thread:
+                        # If the size of the log file has changed, but the same FFT size was repeated, it's a "true" FFT size entry
+                        # So at this point we can assume that it is a real entry
+                        #
+                        # For two threads:
+                        # After two consecutive entries with the same FFT size, reset the previous FFT variable
+                        # The third consecutive entry must be a "real" entry
+                        # We're using the fourth consecutive entry, otherwise it might hit twice
+                        if ($settings.General.numberOfThreads -eq 1) {
+                            $proceed = $true
+                        }
+
+                        elseif ($settings.General.numberOfThreads -eq 2) {
+                            Write-Verbose('           2 threads selected, performing additional checks')
+
+                            # If the FFT size isn't the same as the previous one, all good
+                            if ($lastPassedFFTSizeEntry.Line -ne $previousPassedFFTEntry.Line) {
+                                Write-Verbose('           This and the previous FFT size are different, proceed')
+                                $proceed = $true
+                            }
+
+                            # This and the previous FFT size are the same
+                            # Two consecutive entries with the same FFT are expected for two threads
+                            # If the FFT size for the pass four runs ago is still the same, assume it is a real entry
+                            else {
+                                Write-Verbose('           This and the previous FFT size are the same')
+
+                                # If there's no fourth entry yet, we're at the beginning, so wait for the next iteration
+                                if (!$passedFFTSizeEntryMinusFour) {
+                                    Write-Verbose('           No fourth passed FFT size present yet, check again next turn')
+                                    break
                                 }
 
-                                Write-Verbose('All passed FFTs:')
-                                Write-Verbose($allPassedFFTs -Join ', ')
-                                Write-Verbose('All unique passed FFTs:')
-                                Write-Verbose($uniquePassedFFTs -Join ', ')
+                                # Four consecutive entries with the same FFT size mean that it's a "real" entry
+                                elseif ($passedFFTSizeEntryMinusFour.Line -eq $lastPassedFFTSizeEntry.Line) {
+                                    Write-Verbose(           'Four consecutive lines with the same FFT size, proceed')
+                                    $proceed = $true
+                                }
 
-                                Write-Verbose('The length of the FFT sub array currently being tested: ' + $fftSubarray.Count)
-                                Write-Verbose('The length of the already tested unique FFT array:      ' + $uniquePassedFFTs.Count)
-
-                                # Store the previously passed FFT size
-                                $previousPassedFFTSize = $lastPassedFFTSize
-
-                                # Check if the number of unique tested FFT sizes matches the number of FFT sizes for this preset and test mode
-                                # We need .Count here, because [System.Collections.ArrayList].Length doesn't return the expected value
-                                if ($uniquePassedFFTs.Count -eq $fftSubarray.Count) {
-                                    # TODO: Do we also need to compare the individual FFT sizes here, or do we trust
-                                    # that the number of unique FFT sizes alone is sufficient?
-
-                                    Write-Verbose('The number of unique FFT sizes matches the number of FFT sizes for the preset!')
-                                    Write-Verbose('We can end the test on this core now and continue to the next')
-                                    Write-Text('           All FFT sizes have been tested for this core, continuing to the next one')
-
-                                    continue coreLoop
+                                # There are not four consecutive lines yet
+                                else {
+                                    Write-Verbose('           There are not yet four consecutive FFT sizes with the same size, check again next turn')
+                                    # Do nothing and wait for the next iteration(?)
                                 }
                             }
                         }
-                    }
-                }
+
+
+                        if ($proceed) {
+                            # Enter the last passed FFT sizes arrays, both all and unique
+                            [Void] $allPassedFFTs.Add($lastPassedFFTSize)
+
+                            if (!($uniquePassedFFTs -contains $lastPassedFFTSize)) {
+                                [Void] $uniquePassedFFTs.Add($lastPassedFFTSize)
+                            }
+
+                            Write-Verbose('           All passed FFTs:')
+                            Write-Verbose('           ' + ($allPassedFFTs -Join ', '))
+                            Write-Verbose('           All unique passed FFTs:')
+                            Write-Verbose('           ' + ($uniquePassedFFTs -Join ', '))
+
+                            Write-Verbose('           The length of the FFT sub array currently being tested: ' + $fftSubarray.Count)
+                            Write-Verbose('           The length of the already tested unique FFT array:      ' + $uniquePassedFFTs.Count)
+
+
+                            # Store this entry so that we can check against it in the next iteration
+                            $previousPassedFFTEntry = $lastPassedFFTSizeEntry
+                            $previousPassedFFTSize  = $lastPassedFFTSize
+
+
+                            # Check if the number of unique tested FFT sizes matches the number of FFT sizes for this preset and test mode
+                            # We need .Count here, because [System.Collections.ArrayList].Length doesn't return the expected value
+                            if ($uniquePassedFFTs.Count -eq $fftSubarray.Count) {
+                                # TODO: Do we also need to compare the individual FFT sizes here, or do we trust
+                                # that the number of unique FFT sizes alone is sufficient?
+
+                                Write-Verbose('           The number of unique FFT sizes matches the number of FFT sizes for the preset!')
+                                Write-Verbose('           We can end the test on this core now and continue to the next')
+                                Write-Text('           All FFT sizes have been tested for this core, continuing to the next one')
+
+                                continue coreLoop
+                            }
+                        }
+
+
+                        # Break out of the while ($true) loop, we only want one iteration
+                        break
 
 
 
-                # The regular behavior for the core check
+                        <#
+                        # The old code
+
+                        # Get the last couple of lines from the results file and check for the passed FFT sizes
+                        $primeResults = $resultFileHandle | Get-Content -Tail 6
+                        $primeResultLines = $primeResults | Where-Object { $_ -like '*passed*' }
+
+                        # Get the last passed FFT size
+                        $hasMatched = ($primeResultLines | Select-Object -Last 1) -match 'Self\-test (\d+)K passed'
+                        $lastPassedFFTSize = [Int] $matches[1]
+
+                        Write-Verbose('The last passed FFT size:     ' + $lastPassedFFTSize)
+                        Write-Verbose('The previous passed FFT size: ' + $previousPassedFFTSize)
+
+                        # TODO: Can there be instances where the same FFT size can appear twice, and it is actually a real passed FFT size?
+                        # -> 2 Threads, here the FFT sizes appear back-to-back
+                        # -> Randomized FFT order, and the last passed FFT is the same as the first new one? Does this happen? I don't think it does
+                        if ($lastPassedFFTSize -ne $previousPassedFFTSize) {
+                            Write-Verbose('New FFT size appeared, adding it to the array')
+
+                            # Enter the last passed FFT sizes arrays, both all and unique
+                            [Void] $allPassedFFTs.Add($lastPassedFFTSize)
+
+                            if (!($uniquePassedFFTs -contains $lastPassedFFTSize)) {
+                                [Void] $uniquePassedFFTs.Add($lastPassedFFTSize)
+                            }
+
+                            Write-Verbose('All passed FFTs:')
+                            Write-Verbose($allPassedFFTs -Join ', ')
+                            Write-Verbose('All unique passed FFTs:')
+                            Write-Verbose($uniquePassedFFTs -Join ', ')
+
+                            Write-Verbose('The length of the FFT sub array currently being tested: ' + $fftSubarray.Count)
+                            Write-Verbose('The length of the already tested unique FFT array:      ' + $uniquePassedFFTs.Count)
+
+                            # Store the previously passed FFT size
+                            $previousPassedFFTSize = $lastPassedFFTSize
+
+                            # Check if the number of unique tested FFT sizes matches the number of FFT sizes for this preset and test mode
+                            # We need .Count here, because [System.Collections.ArrayList].Length doesn't return the expected value
+                            if ($uniquePassedFFTs.Count -eq $fftSubarray.Count) {
+                                # TODO: Do we also need to compare the individual FFT sizes here, or do we trust
+                                # that the number of unique FFT sizes alone is sufficient?
+
+                                Write-Verbose('The number of unique FFT sizes matches the number of FFT sizes for the preset!')
+                                Write-Verbose('We can end the test on this core now and continue to the next')
+                                Write-Text('           All FFT sizes have been tested for this core, continuing to the next one')
+
+                                continue coreLoop
+                            }
+                        }
+                        #>
+
+                    }   # End while ($true)
+                }   # End if ($useAutomaticRuntimePerCore -and $isPrime95)
+
+
                 $nowDateTime = (Get-Date)
                 $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
 
@@ -4114,6 +4288,7 @@ try {
                     continue coreLoop
                 }   # End: catch
 
+
                 # Get the current CPU frequency
                 $currentCpuInfo = Get-CpuFrequency $cpuNumber
                 Write-Verbose('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
@@ -4131,8 +4306,13 @@ try {
                     $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
                     Write-Verbose('Resumed: ' + $resumed)
                 }
+
+
             }   # End: for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++)
             
+
+
+
             # Wait for the remaining runtime
             Start-Sleep -Seconds $runtimeRemaining
             
