@@ -1,7 +1,20 @@
-<##
- # Get the duration of each iteration for a specific FFT size
- # Helps to find a suitable value for the runtimePerCore setting
- #>
+<#
+.AUTHOR
+    sp00n
+.DESCRIPTION
+    Get the duration of each iteration for a specific FFT size
+    Helps to find a suitable value for the runtimePerCore setting
+.LINK
+    Helps to find a suitable value for the runtimePerCore setting
+.LICENSE
+    Creative Commons "CC BY-NC-SA"
+    https://creativecommons.org/licenses/by-nc-sa/4.0/
+    https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+.NOTES
+    Instead of providing the log file in this file, you can also pass the name in the command line
+    E.g. .\analyze_prime95_logfile.ps1 "Prime95_results.txt"
+    The passed argument will always take precedence over the one provided in this file
+#>
 
 # The directory of where the log file can be found
 # You can use an absolute or relative path from where this script is located
@@ -15,6 +28,12 @@ $logFileName = ''
 $testMode        = 'auto'   # "auto" or SSE, AVX, AVX
 $fftPreset       = 'auto'   # "auto" or Smallest, Small, Large, Huge, All
 $numberOfThreads = 'auto'   # "auto" or the number of threads used (1 or 2)
+
+
+# If there was a log file passed as an argument, use this instead of the provided one here
+if ($args[0]) {
+    $logFileName = $args[0]
+}
 
 
 # The FFT size array to be able to analyze the log file
@@ -453,14 +472,18 @@ foreach ($line in $logfile) {
         #'Current FFT Size:  ' + $fftSize
         #'Previous FFT Size: ' + $previousFFTSize
 
+        # Compare the FFT size to the previous one
         # If we're on two threads, ignore this FFT size if it's the same as the previous one
-        # Skip
         if ($numberOfThreads -eq 2) {
             if ($fftSize -eq $previousFFTSize) {
                 #'Back-to-back FFT size found! - ' + $fftSize + ' <-> ' + $previousFFTSize
                 
                 # Reset the previous FFT size so that we can catch if there are actually two "real" FFTs with the same size back-to-back
+                # It can happen if e.g. one iteration ends with the same FFT size that the next one starts with
+                # (23040K seems to be a candidate for this in the Huge preset)
                 $previousFFTSize = -1
+
+                # Skip
                 continue
             }
 
