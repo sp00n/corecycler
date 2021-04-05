@@ -46,6 +46,7 @@ $fftSubarray                = $null
 $lastFilePosition           = 0
 $lineCounter                = 0
 $allLogEntries              = [System.Collections.ArrayList]::new()
+$allFFTLogEntries           = [System.Collections.ArrayList]::new()
 $cpuTestMode                = $null
 $coreTestOrderMode          = $null
 $coreTestOrderCustom        = @()
@@ -604,6 +605,7 @@ function Get-PerformanceCounterIDs {
     # The string contains two-line pairs
     # The first line is the ID
     # The second line is the name
+    # TODO: Maybe make it more robust by actually checking the order of the ID and Text
     for ($i = 0; $i -lt $numCounters; $i += 2) {
         $counterId   = [Int] $allCounters[$i]
         $counterName = [String] $allCounters[$i+1]
@@ -3054,7 +3056,7 @@ function Test-ProcessUsage {
                 $maxChecks = 3
 
                 # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
-                for ($i = 1; $i -le $maxChecks; $i++) {
+                for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
                     Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
 
                     Start-Sleep -Milliseconds $waitTime
@@ -3075,7 +3077,7 @@ function Test-ProcessUsage {
                     $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
                     $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
 
-                    Write-Verbose($timestamp + ' - checking CPU usage again (#' + $i + '): ' + $thisProcessCPUPercentage + '%')
+                    Write-Verbose($timestamp + ' - checking CPU usage again (#' + $curCheck + '): ' + $thisProcessCPUPercentage + '%')
 
                     # If we have recovered, break and continue with stresss testing
                     if ($thisProcessCPUPercentage -ge $minProcessUsage) {
@@ -3085,14 +3087,14 @@ function Test-ProcessUsage {
 
                     else {
                         # Set the error variable if $maxChecks has been reached
-                        if ($i -eq $maxChecks) {
+                        if ($curCheck -eq $maxChecks) {
                             Write-Verbose('           still not enough usage, throw an error')
 
                             # We don't care about an error string here anymore
                             $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'                            
                         }
                         else {
-                            Write-Verbose('           still not enough usage (#' + $i + ')')
+                            Write-Verbose('           still not enough usage (#' + $curCheck + ')')
                         }
                     }
                 }
@@ -3264,6 +3266,86 @@ function Test-ProcessUsage {
         throw '999'
     }
 }
+
+
+<#
+.DESCRIPTION
+    Get the (new) entries from the Prime95 results.txt and store them in a global variable
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+    Sets global variables:
+    - $previousFileSize
+    - $lastFilePosition
+    - $lineCounter
+    - $allLogEntries
+#>
+function Get-Prime95LogfileEntries {
+    $timestamp = Get-Date -format HH:mm:ss
+    Write-Verbose($timestamp + ' - Getting new log file entries')
+
+    # Try to get the results.txt log file
+    $resultFileHandle = Get-Item -Path $stressTestLogFilePath -ErrorAction Ignore
+
+
+    # No file, no check
+    if (!$resultFileHandle) {
+        Write-Verbose('           The stress test log file doesn''t exist yet')
+        return $false
+    }
+
+
+    # Only perform the check if the file size has increased
+    # The size has increased, so something must have changed
+    # It's either a new passed FFT entry, a [Timestamp], or an error
+    if ($resultFileHandle.Length -le $previousFileSize) {
+        Write-Verbose('           No file size change for the log file')
+        return $false
+    }
+
+    # Store the file size of the log file
+    $Script:previousFileSize = $resultFileHandle.Length
+
+    Write-Verbose('           Getting new log entries starting at position ' + $lastFilePosition + ' / Line ' + $lineCounter)
+
+    # Initialize the file stream
+    $fileStream = [System.IO.FileStream]::new(`
+        $stressTestLogFilePath,`
+        [System.IO.FileMode]::Open,`                                        # Open the file
+        [System.IO.FileAccess]::Read,`                                      # Open the file only for reading
+        [System.IO.FileShare]::ReadWrite + [System.IO.FileShare]::Delete`   # Allow other processes to read, write and delete the file
+    )
+
+    # Initialize the stream reader that accesses the file stream
+    $streamReader = [System.IO.StreamReader]::new($fileStream)
+
+    # We may need to reset the buffer due to a bug:
+    # http://geekninja.blogspot.com/2007/07/streamreader-annoying-design-decisions.html
+    $streamReader.DiscardBufferedData()
+
+    # Set the pointer to the last file position (offset, beginning)
+    [Void] $streamReader.BaseStream.Seek($lastFilePosition, [System.IO.SeekOrigin]::Begin)
+
+    # Get all the new lines since the last check
+    while ($streamReader.Peek() -gt -1) {
+        $lineCounter++
+        $line = $streamReader.ReadLine()
+
+        [Void] $Script:allLogEntries.Add(@{
+            LineNumber = $lineCounter
+            Line       = $line
+        })
+    }
+
+    # Store the current position as the new last position for the next iteration
+    $Script:lastFilePosition = $streamReader.BaseStream.Position
+    $Script:lineCounter      = $lineCounter
+
+    # Close the file
+    $streamReader.Close()
+}
+
 
 
 
@@ -3779,8 +3861,7 @@ try {
 
         # Iterate over each core
         # Named for loop
-        #:coreLoop for ($coreNumber = 0; $coreNumber -lt $numPhysCores; $coreNumber++) {
-        :coreLoop for ($i = 0; $i -lt $numAvailableCores; $i++) {
+        :coreLoop for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++) {
             $startDateThisCore  = (Get-Date)
             $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
             $timestamp          = $startDateThisCore.ToString("HH:mm:ss")
@@ -4089,6 +4170,8 @@ try {
 
 
                         # Check for an error, if we've found one, we don't even need to process any further
+                        # Note: there is a potential to miss log entries this way
+                        # However, since the script either stops at this point or the stress test program is restarted, we don't really need to worry about this
                         $primeErrorResults = $newLineEntries | Where-Object {$_.Line -match '.*error.*'}
 
                         if ($primeErrorResults) {
@@ -4145,8 +4228,8 @@ try {
                         }
                         
 
-                        for ($i = 0; $i -lt $foundFFTSizeLines.Length; $i++) {
-                            $currentResultLineEntry = $foundFFTSizeLines[$i]
+                        for ($currentLineIndex = 0; $currentLineIndex -lt $foundFFTSizeLines.Length; $currentLineIndex++) {
+                            $currentResultLineEntry = $foundFFTSizeLines[$currentLineIndex]
                             $insert = $false
 
                             Write-Verbose('')
@@ -4162,20 +4245,15 @@ try {
                                 $numLinesWithSameFFTSize = 1
 
                                 # Does this line also appear in the last line?
-                                $curIndex = $allLogEntries.Count - 1
+                                $curCheckIndex = $allFFTLogEntries.Count - 1
 
-                                #Write-Verbose('           curIndex:      ' + $curIndex)
-                                #Write-Verbose('           This line:     ' + $currentResultLineEntry.Line)
-                                #Write-Verbose('           curIndex line: ' + $allLogEntries[$curIndex].Line)
-                                #Write-Verbose('           is equal:      ' + ($currentResultLineEntry.Line -eq $allLogEntries[$curIndex].Line))
-
-                                while ($curIndex -ge 0 -and $allLogEntries[$curIndex] -and $currentResultLineEntry.Line -eq $allLogEntries[$curIndex].Line) {
-                                    Write-Verbose('           curIndex:      ' + $curIndex)
-                                    Write-Verbose('           This line:     ' + $currentResultLineEntry.Line)
-                                    Write-Verbose('           curIndex line: ' + $allLogEntries[$curIndex].Line)
+                                while ($curCheckIndex -ge 0 -and $allFFTLogEntries[$curCheckIndex] -and $currentResultLineEntry.Line -eq $allFFTLogEntries[$curCheckIndex].Line) {
+                                    Write-Verbose('           curCheckIndex:      ' + $curCheckIndex)
+                                    Write-Verbose('           This line:          ' + $currentResultLineEntry.Line)
+                                    Write-Verbose('           curCheckIndex line: ' + $allFFTLogEntries[$curCheckIndex].Line)
                                     Write-Verbose('           Increasing the numLinesWithSameFFTSize counter')
 
-                                    $curIndex--
+                                    $curCheckIndex--
                                     $numLinesWithSameFFTSize++
                                 }
 
@@ -4200,14 +4278,14 @@ try {
 
                             # Store the entry itself
                             Write-Verbose('           Line number of this entry:         ' + $currentResultLineEntry.LineNumber)
-                            Write-Verbose('           Line number of the previous entry: ' + $allLogEntries[$allLogEntries.Count-1].LineNumber)
+                            Write-Verbose('           Line number of the previous entry: ' + $allFFTLogEntries[$allFFTLogEntries.Count-1].LineNumber)
 
                             if (
-                                $allLogEntries.Count -eq 0 -or `
-                                ($allLogEntries.Count -gt 0 -and $currentResultLineEntry.LineNumber -ne $allLogEntries[$allLogEntries.Count-1].LineNumber)`
+                                $allFFTLogEntries.Count -eq 0 -or `
+                                ($allFFTLogEntries.Count -gt 0 -and $currentResultLineEntry.LineNumber -ne $allFFTLogEntries[$allFFTLogEntries.Count-1].LineNumber)`
                             ) {
-                                Write-Verbose('           + Adding this line to the allLogEntries array')
-                                [Void] $allLogEntries.Add($currentResultLineEntry)
+                                Write-Verbose('           + Adding this line to the allFFTLogEntries array')
+                                [Void] $allFFTLogEntries.Add($currentResultLineEntry)
                             }
 
 
@@ -4822,7 +4900,7 @@ try {
 
             $timestamp = (Get-Date).ToString("HH:mm:ss")
             Write-Text($timestamp + ' - Completed the test on Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
-        }   # End: :coreLoop for ($i = 0; $i -lt $numAvailableCores; $i++) {
+        }   # End: :coreLoop for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++)
         
         
         # Print out the cores that have thrown an error so far
