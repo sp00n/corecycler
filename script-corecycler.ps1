@@ -3026,12 +3026,12 @@ function Test-ProcessUsage {
     if (!$stressTestError -and $isPrime95) {
 
         # Look for a line with an "error" string in the new log entries
-        $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'}
+        $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
         
         # Found the "error" string
         if ($primeErrorResults.Length -gt 0) {
             # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-            $stressTestError = $primeErrorResults
+            $stressTestError = $primeErrorResults.Line
 
             Write-Verbose($timestamp)
             Write-Verbose('Found an error in the new entries of the results.txt!')
@@ -3052,12 +3052,12 @@ function Test-ProcessUsage {
             # For Prime95
             if ($isPrime95) {
                 # Look for a line with an "error" string in the new log entries
-                $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'}
+                $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
                 
                 # Found the "error" string
                 if ($primeErrorResults.Length -gt 0) {
                     # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-                    $stressTestError = $primeErrorResults
+                    $stressTestError = $primeErrorResults.Line
                 }
             }
 
@@ -3687,9 +3687,9 @@ try {
         'Displaying debug messages in terminal'
     )
 
-    $logLevel = [Math]::Max([Math]::Min(0, $settings.Logging.logLevel), 4)
+    $logLevel = [Math]::Min([Math]::Max(0, $settings.Logging.logLevel), 4)
 
-    Write-ColorText('Log Level set to: ......... [' + $logLevel + '] - ' + $logLevelText[$logLevel]) Cyan
+    Write-ColorText('Log Level set to: ......... ' + $logLevel + ' [' + $logLevelText[$logLevel] + ']') Cyan
 
     # Display some initial information
     Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpper()) Cyan
