@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.0.0
+    0.8.0.1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                   = '0.8.0.0'
+$version                   = '0.8.0.1'
 $startDateTime             = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath               = 'logs'
 $logFilePathAbsolute       = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -2932,8 +2932,28 @@ function Test-ProcessUsage {
                 $primeResults = $resultFileHandle | Get-Content -Tail 3 | Where-Object {$_ -like '*error*'}
 
                 # Found the "error" string in the results.txt
+                # We also have to check for false positives here!
                 if ($primeResults.Length -gt 0) {
-                    $stressTestError = $primeResults
+                    $currentPreviousError = $Script:previousError
+
+                    # If it's the same line number and message than the previous error, ignore it, it's a false positive
+                    if ($currentPreviousError -and $currentError.LineNumber -eq $currentPreviousError.LineNumber -and $currentError.Line -eq $currentPreviousError.Line) {
+                        Write-Verbose($timestamp)
+                        Write-Verbose('Found an error in the last 3 lines of the results.txt, but it''s a false positive,')
+                        Write-Verbose('because the line number and error message matches the previous error message.')
+                        Write-Verbose('>>>>> Ignore this error and continue')
+                    }
+
+                    # This is a true error now
+                    else {
+                        # Store the error message for future use
+                        $Script:previousError = $currentError
+
+                        Write-Verbose($timestamp)
+                        Write-Verbose('Found an error in the last 3 lines of the results.txt!')
+
+                        $stressTestError = $primeErrorResults
+                    }
                 }
             }
 
