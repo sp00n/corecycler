@@ -29,10 +29,10 @@ Also, PBO technically voids the warranty of your CPU, so use it at your own risk
 
 INCLUDED SOFTWARE
 -----------------
-The script itself is a PowerShell script, but it uses the included Prime95 version 30.4b9 to actually do the stress 
-testing. You can also move your own copy of Prime95 into the /p95 directory if you want to be on the safe side (good 
-choice!).
-To download Prime95, go to the official site at https://www.mersenne.org/download/ (however, the 30.4 version used 
+The script itself is a PowerShell script, but it uses the included Prime95 version 30.5b2 to actually do the stress 
+testing. You can also move your own copy of Prime95 into the /test_programs/p95 directory if you want to be on the 
+safe side (good choice!).
+To download Prime95, go to the official site at https://www.mersenne.org/download/ (however, the 30.5 version used 
 here is at the time of writing only available through their forum).
 
 Beginning with version 0.8 it also supports Aida64 and Y-Cruncher, however it does NOT include Aida64 by default.
