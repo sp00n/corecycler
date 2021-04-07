@@ -3014,11 +3014,15 @@ function Test-ProcessUsage {
 
     # Does the stress test process still exist?
     $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
+
+    # What type of error occurred (PROCESSMISSING, FATALERROR, CPULOAD)
+    $errorType = $null
     
 
     # 1. The process doesn't exist anymore, immediate error
     if (!$checkProcess) {
         $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t exist anymore.'
+        $errorType = 'PROCESSMISSING'
     }
 
     
@@ -3032,6 +3036,7 @@ function Test-ProcessUsage {
         if ($primeErrorResults.Length -gt 0) {
             # We don't need to check for a false alarm anymore, as we're already checking only new log entries
             $stressTestError = $primeErrorResults.Line
+            $errorType = 'FATALERROR'
 
             Write-Verbose($timestamp)
             Write-Verbose('Found an error in the new entries of the results.txt!')
@@ -3058,6 +3063,7 @@ function Test-ProcessUsage {
                 if ($primeErrorResults.Length -gt 0) {
                     # We don't need to check for a false alarm anymore, as we're already checking only new log entries
                     $stressTestError = $primeErrorResults.Line
+                    $errorType = 'FATALERROR'
                 }
             }
 
@@ -3100,16 +3106,19 @@ function Test-ProcessUsage {
                     }
 
                     else {
-                        # Set the error variable if $maxChecks has been reached
-                        if ($curCheck -eq $maxChecks) {
+                        if ($curCheck -lt $maxChecks) {
+                            Write-Verbose('           still not enough usage (#' + $curCheck + ')')
+                        }
+                        
+                        # Reached the maximum amount of checks for the CPU usage
+                        else {
                             Write-Verbose('           still not enough usage, throw an error')
 
                             # We don't care about an error string here anymore
-                            $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'                            
+                            $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'
+                            $errorType = 'CPULOAD'
                         }
-                        else {
-                            Write-Verbose('           still not enough usage (#' + $curCheck + ')')
-                        }
+
                     }
                 }
             }
@@ -3120,6 +3129,7 @@ function Test-ProcessUsage {
     # We now have an error message, process
     if ($stressTestError) {
         Write-Verbose('There has been an error with the stress test program!')
+        Write-Verbose('Error type: ' + $errorType)
 
         # Store the core number in the array
         $Script:coresWithError += $coreNumber
@@ -3141,6 +3151,28 @@ function Test-ProcessUsage {
         }
 
 
+        # If running Prime95, make one additional check if the result.txt now has an error entry
+        if ($isPrime95 -and $errorType -ne "FATALERROR") {
+            $timestamp = Get-Date -format HH:mm:ss
+
+            Write-Verbose($timestamp + ' - The stress test program is Prime95, trying to look for an error message in the results.txt')
+            
+            Get-Prime95LogfileEntries
+
+            # Look for a line with an "error" string in the new log entries
+            $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
+            
+            # Found the "error" string
+            if ($primeErrorResults.Length -gt 0) {
+                # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                $stressTestError = $primeErrorResults.Line
+
+                Write-Verbose($timestamp)
+                Write-Verbose('           Now found an error in the new entries of the results.txt!')
+            }
+        }
+
+
         # Put out an error message
         $timestamp = Get-Date -format HH:mm:ss
         Write-ColorText('ERROR: ' + $timestamp) Magenta
@@ -3152,8 +3184,6 @@ function Test-ProcessUsage {
         # Try to get more detailed error information
         # Prime95
         if ($isPrime95) {
-            Write-Verbose('The stress test program is Prime95, trying to look for an error message in the results.txt')
-
             # Try to determine the last run FFT size
             # If the results.txt doesn't exist, assume that it was on the very first iteration
             # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Large FFT sizes
@@ -3223,8 +3253,12 @@ function Test-ProcessUsage {
                 }
 
                 Write-Verbose('The last 5 entries in the results.txt:')
-                $lastFiveRows | % {
-                    Write-Verbose('- [Line ' + $_.LineNumber + '] ' + $_.Line)
+                $lastFiveRows | ForEach-Object -Begin {
+                    $index = $allLogEntries.Count - 5
+                } `
+                -Process {
+                    Write-Verbose('- [Line ' + $index + '] ' + $_)
+                    $index++
                 }
 
                 Write-Text('')
@@ -3251,8 +3285,12 @@ function Test-ProcessUsage {
 
 
                 Write-Verbose('The last 5 entries in the results.txt:')
-                $lastFiveRows | % {
-                    Write-Verbose('- [Line ' + $_.LineNumber + '] ' + $_.Line)
+                $lastFiveRows | ForEach-Object -Begin {
+                    $index = $allLogEntries.Count - 5
+                } `
+                -Process {
+                    Write-Verbose('- [Line ' + $index + '] ' + $_)
+                    $index++
                 }
 
                 Write-Text('')
