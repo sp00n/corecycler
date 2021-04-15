@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.1.0 RC2
+    0.8.1.0 RC3
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.1.0 RC2'
+$version                    = '0.8.1.0 RC3'
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
 $logFilePathAbsolute        = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -151,7 +151,7 @@ $stressTestPrograms = @{
     }
 
     'ycruncher' = @{
-        'displayName'        = "Y-Cruncher"
+        'displayName'        = "y-Cruncher"
         'processName'        = '' # Depends on the selected modeYCruncher
         'processNameExt'     = 'exe'
         'processNameForLoad' = '' # Depends on the selected modeYCruncher
@@ -160,7 +160,7 @@ $stressTestPrograms = @{
         'configFilePath'     = $null
         'absolutePath'       = $null
         'fullPathToExe'      = $null
-        'command'            = "cmd /C start /MIN ""Y-Cruncher - %fileName%"" ""%fullPathToExe%"" priority:2 config ""%configFilePath%"""
+        'command'            = "cmd /C start /MIN ""y-Cruncher - %fileName%"" ""%fullPathToExe%"" priority:2 config ""%configFilePath%"""
         'windowBehaviour'    = 6
         'testModes'          = @(
             '00-x86',
@@ -658,7 +658,7 @@ function Get-PerformanceCounterIDs {
         $counterId   = [Int] $allCounters[$i]
         $counterName = [String] $allCounters[$i+1]
 
-        if ($englishCounterNames.Contains($counterName) -and !$countersHash.ContainsKey($counterName)) {
+        if ($englishCounterNames -contains $counterName -and !$countersHash.ContainsKey($counterName)) {
             $countersHash[$counterName] = $counterId
         }
 
@@ -1150,17 +1150,19 @@ function Import-Settings {
             # Regular settings cannot be empty
             elseif ($value -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
                 $thisSetting = $null
-
+                
                 # Parse the runtime per core (seconds, minutes, hours)
                 if ($name -eq 'runtimePerCore') {
+                    $valueString = $value.ToString().ToLower()
+
                     # It can be set to "auto"
-                    if ($value.ToString().ToLower() -eq 'auto') {
+                    if ($valueString -eq 'auto') {
                         $thisSetting = 'auto'
                     }
 
                     # Parse the hours, minutes, seconds
-                    elseif ($value.indexOf('h') -ge 0 -or $value.indexOf('m') -ge 0 -or $value.indexOf('s') -ge 0) {
-                        $hasMatched = $value -match '((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
+                    elseif ($valueString.indexOf('h') -ge 0 -or $valueString.indexOf('m') -ge 0 -or $valueString.indexOf('s') -ge 0) {
+                        $hasMatched = $valueString -match '(?-i)((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
                         $seconds = [Double] $matches.hours * 60 * 60 + [Double] $matches.minutes * 60 + [Double] $matches.seconds
                         $thisSetting = [Int] $seconds
                     }
@@ -1173,9 +1175,9 @@ function Import-Settings {
 
 
                 # String values
-                elseif ($settingsWithStrings.Contains($name)) {
+                elseif ($settingsWithStrings -contains $name) {
                     # Convert some to lower case
-                    if ($settingsToLowercase.Contains($name)) {
+                    if ($settingsToLowercase -contains $name) {
                         $thisSetting = ([String] $value).ToLower()
                     }
                     else {
@@ -1290,7 +1292,7 @@ function Get-Settings {
 
 
     # If the selected stress test program is not supported
-    if (!$settings.General.stressTestProgram -or !$stressTestPrograms.Contains($settings.General.stressTestProgram)) {
+    if (!$settings.General.stressTestProgram -or !$stressTestPrograms -contains $settings.General.stressTestProgram) {
         Exit-WithFatalError('The selected stress test program "' + $settings.General.stressTestProgram + '" could not be found!')
     }
 
@@ -1309,25 +1311,26 @@ function Get-Settings {
         $settings.mode = $settings.Aida64.mode.ToUpper()
     }
     elseif ($isYCruncher) {
-        $settings.mode = $settings.YCruncher.mode.ToUpper()
+        $settings.mode = $settings.yCruncher.mode.ToUpper()
     }
 
 
-    # The selected mode for Y-Cruncher = the binary to execute
+    # The selected mode for y-Cruncher = the binary to execute
     # Override the variables
-    $Script:stressTestPrograms['ycruncher']['processName']        = $settings.YCruncher.mode
-    $Script:stressTestPrograms['ycruncher']['processNameForLoad'] = $settings.YCruncher.mode
-    $Script:stressTestPrograms['ycruncher']['fullPathToExe']      = $stressTestPrograms['ycruncher']['absolutePath'] + $settings.YCruncher.mode
-    $Script:stressTestPrograms['ycruncher']['windowNames']        = @('^.*' + $settings.YCruncher.mode + '\.exe$')
+    $yCruncherBinary = $stressTestPrograms['ycruncher']['testModes'] | Where-Object -FilterScript {$_.ToLower() -eq $settings.yCruncher.mode.ToLower()}
+    $Script:stressTestPrograms['ycruncher']['processName']        = $yCruncherBinary
+    $Script:stressTestPrograms['ycruncher']['processNameForLoad'] = $yCruncherBinary
+    $Script:stressTestPrograms['ycruncher']['fullPathToExe']      = $stressTestPrograms['ycruncher']['absolutePath'] + $yCruncherBinary
+    $Script:stressTestPrograms['ycruncher']['windowNames']        = @('^.*' + $yCruncherBinary + '\.exe$')
 
 
     # Sanity check the selected test mode
     # For Aida64, you can set a comma separated list of multiple stress tests
     $modesArray = $settings.mode -Split ',\s*'
-    $modeString = $modesArray -Join '-'
+    $modeString = ($modesArray -Join '-').ToUpper()
 
     foreach ($mode in $modesArray) {
-        if (!$stressTestPrograms[$settings.General.stressTestProgram]['testModes'].Contains($mode)) {
+        if (!$stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $mode) {
             Exit-WithFatalError('The selected test mode "' + $mode + '" is not available for ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + '!')
         }
     }
@@ -1357,10 +1360,11 @@ function Get-FormattedRuntimePerCoreString {
     )
 
     if ($seconds.ToString().ToLower() -eq 'auto') {
-        $returnString = 'AUTOMATIC'
-
         if ($isAida64 -or $isYCruncher) {
-            $returnString += ' (' + [Math]::Round($script:runtimePerCore/60, 2) + ' minutes)'
+            $returnString = [Math]::Round($script:runtimePerCore/60, 2).ToString() + ' minutes (Auto-Mode)'
+        }
+        else {
+            $returnString = 'AUTOMATIC'
         }
 
         return $returnString
@@ -1880,36 +1884,36 @@ function Initialize-Prime95 {
     # depending on the selected test mode (SSE, AVX, AVX2)
     $Script:FFTMinMaxValues = @{
         SSE = @{
-            Smallest   = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
-            Small      = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
-            Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge       = @{ Min = 8960; Max = 32768; }  # New addition
-            All        = @{ Min =    4; Max = 32768; }
-            Moderate   = @{ Min = 1344; Max =  4096; }
-            Heavy      = @{ Min =    4; Max =  1344; }
-            HeavyShort = @{ Min =    4; Max =   160; }
+            SMALLEST   = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
+            SMALL      = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
+            LARGE      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            HUGE       = @{ Min = 8960; Max = 32768; }  # New addition
+            ALL        = @{ Min =    4; Max = 32768; }
+            MODERATE   = @{ Min = 1344; Max =  4096; }
+            HEAVY      = @{ Min =    4; Max =  1344; }
+            HEAVYSHORT = @{ Min =    4; Max =   160; }
         }
 
         AVX = @{
-            Smallest   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge       = @{ Min = 8960; Max = 32768; }  # New addition
-            All        = @{ Min =    4; Max = 32768; }
-            Moderate   = @{ Min = 1344; Max =  4096; }
-            Heavy      = @{ Min =    4; Max =  1344; }
-            HeavyShort = @{ Min =    4; Max =   160; }
+            SMALLEST   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            SMALL      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            LARGE      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            HUGE       = @{ Min = 8960; Max = 32768; }  # New addition
+            ALL        = @{ Min =    4; Max = 32768; }
+            MODERATE   = @{ Min = 1344; Max =  4096; }
+            HEAVY      = @{ Min =    4; Max =  1344; }
+            HEAVYSHORT = @{ Min =    4; Max =   160; }
         }
 
         AVX2 = @{
-            Smallest   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-            Small      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-            Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-            Huge       = @{ Min = 8960; Max = 51200; }  # New addition
-            All        = @{ Min =    4; Max = 51200; }
-            Moderate   = @{ Min = 1344; Max =  4096; }
-            Heavy      = @{ Min =    4; Max =  1344; }
-            HeavyShort = @{ Min =    4; Max =   160; }
+            SMALLEST   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
+            SMALL      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
+            LARGE      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
+            HUGE       = @{ Min = 8960; Max = 51200; }  # New addition
+            ALL        = @{ Min =    4; Max = 51200; }
+            MODERATE   = @{ Min = 1344; Max =  4096; }
+            HEAVY      = @{ Min =    4; Max =  1344; }
+            HEAVYSHORT = @{ Min =    4; Max =   160; }
         }
     }
 
@@ -1927,9 +1931,9 @@ function Initialize-Prime95 {
     }
 
     # Regular preset
-    elseif ($FFTMinMaxValues[$settings.mode].Contains($settings.Prime95.FFTSize)) {
-        $Script:minFFTSize = $FFTMinMaxValues[$settings.mode][$settings.Prime95.FFTSize].Min
-        $Script:maxFFTSize = $FFTMinMaxValues[$settings.mode][$settings.Prime95.FFTSize].Max
+    elseif ($FFTMinMaxValues[$settings.mode].Contains($settings.Prime95.FFTSize.ToUpper())) {   # This needs to be .Contains()
+        $Script:minFFTSize = $FFTMinMaxValues[$settings.mode.ToUpper()][$settings.Prime95.FFTSize.ToUpper()].Min
+        $Script:maxFFTSize = $FFTMinMaxValues[$settings.mode.ToUpper()][$settings.Prime95.FFTSize.ToUpper()].Max
     }
 
     # Something failed
@@ -1992,9 +1996,11 @@ function Initialize-Prime95 {
     $configFile1 = $stressTestPrograms[$p95Version]['absolutePath'] + 'local.txt'
     $configFile2 = $stressTestPrograms[$p95Version]['absolutePath'] + 'prime.txt'
 
+    $FFTSizeString = $settings.Prime95.FFTSize.ToUpper() -Replace '\s',''
+
 
     # The Prime95 results.txt file name and path for this run
-    $Script:stressTestLogFileName = 'Prime95_' + $startDateTime + '_' + $modeString + '_' + $settings.Prime95.FFTSize + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
+    $Script:stressTestLogFileName = 'Prime95_' + $startDateTime + '_' + $modeString + '_' + $FFTSizeString + '_FFT_' + $minFFTSize + 'K-' + $maxFFTSize + 'K.txt'
     $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
     # Create the local.txt and overwrite if necessary
@@ -2218,7 +2224,7 @@ function Initialize-Aida64 {
 
 
     $modesArray = $settings.mode -Split ',\s*'
-    $modeString = $modesArray -Join '-'
+    $modeString = ($modesArray -Join '-').ToUpper()
 
     # TODO: Do we want to offer a way to start Aida64 with admin rights?
     $hasAdminRights = $false
@@ -2687,24 +2693,24 @@ function Close-Aida64 {
 
 <#
 .DESCRIPTION
-    Create the Y-Cruncher config file
+    Create the y-Cruncher config file
     This depends on the $settings.mode variable
 .PARAMETER
     [Void]
 .OUTPUTS
     [Void]
 #>
-function Initialize-YCruncher {
+function Initialize-yCruncher {
     # Check if the selected binary exists
     Write-Verbose('Checking if ' + $stressTestPrograms['ycruncher']['processName'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'] + ' exists at:')
     Write-Verbose($stressTestPrograms['ycruncher']['fullPathToExe'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'])
 
     if (!(Test-Path ($stressTestPrograms['ycruncher']['fullPathToExe'] + '.' + $stressTestPrograms['ycruncher']['processNameExt']) -PathType leaf)) {
-        Write-ColorText('FATAL ERROR: Could not find Y-Cruncher!') Red
-        Write-ColorText('Make sure to download and extract Y-Cruncher into the following directory:') Red
+        Write-ColorText('FATAL ERROR: Could not find y-Cruncher!') Red
+        Write-ColorText('Make sure to download and extract y-Cruncher into the following directory:') Red
         Write-ColorText($stressTestPrograms['ycruncher']['absolutePath']) Yellow
         Write-Text ''
-        Write-ColorText('You can download Y-Cruncher from:') Red
+        Write-ColorText('You can download y-Cruncher from:') Red
         Write-ColorText('http://www.numberworld.org/y-cruncher/#Download') Cyan
         Exit-WithFatalError
     }
@@ -2713,9 +2719,9 @@ function Initialize-YCruncher {
     $configFile = $stressTestPrograms['ycruncher']['configFilePath']
 
     # The log file name and path for this run
-    # TODO: Y-Cruncher doesn't seem to create any type of log :(
+    # TODO: y-Cruncher doesn't seem to create any type of log :(
     #       And I also cannot redirect the output via > logfile.txt 
-    #$Script:stressTestLogFileName = 'Y-Cruncher_' + $startDateTime + '.txt'
+    #$Script:stressTestLogFileName = 'y-Cruncher_' + $startDateTime + '.txt'
     #$Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
 
@@ -2772,16 +2778,16 @@ function Initialize-YCruncher {
 
 <#
 .DESCRIPTION
-    Open Y-Cruncher and set global script variables
+    Open y-Cruncher and set global script variables
 .PARAMETER
     [Void]
 .OUTPUTS
     [Void]
 #>
-function Start-YCruncher {
-    Write-Verbose('Starting Y-Cruncher')
+function Start-yCruncher {
+    Write-Verbose('Starting y-Cruncher')
 
-    $thisMode = $settings.YCruncher.mode
+    $thisMode = $settings.yCruncher.mode
 
     # Minimized to the tray
     #$processId = Start-Process -filepath $stressTestPrograms['ycruncher']['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Hidden
@@ -2793,7 +2799,7 @@ function Start-YCruncher {
 
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
-    # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the Y-Cruncher binary!
+    # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the y-Cruncher binary!
     # The escape character in Visual Basic for double quotes seems to be... a double quote!
     # So a triple double quote is actually interpreted as a single double quote here
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(("conhost.exe """ + $stressTestPrograms['ycruncher']['fullPathToExe'] + """ config """ + $stressTestConfigFilePath + """"), 6) # 6 = MinimizedNoFocus
@@ -2826,7 +2832,7 @@ function Start-YCruncher {
         } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
         if (!$processCounterPathId) {
-            Exit-WithFatalError('Could not find the counter path for the Y-Cruncher instance!')
+            Exit-WithFatalError('Could not find the counter path for the y-Cruncher instance!')
         }
 
         $Script:processCounterPathTime = $processCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
@@ -2844,14 +2850,14 @@ function Start-YCruncher {
 
 <#
 .DESCRIPTION
-    Close Y-Cruncher
+    Close y-Cruncher
 .PARAMETER
     [Void]
 .OUTPUTS
     [Void]
 #>
-function Close-YCruncher {
-    Write-Verbose('Trying to close Y-Cruncher')
+function Close-yCruncher {
+    Write-Verbose('Trying to close y-Cruncher')
 
     # If there is no windowProcessMainWindowHandler id
     # Try to get it
@@ -2868,7 +2874,7 @@ function Close-YCruncher {
             $resumed = Resume-ProcessWithDebugMethod $windowProcess
         }
 
-        Write-Verbose('Trying to gracefully close Y-Cruncher')
+        Write-Verbose('Trying to gracefully close y-Cruncher')
         
         # This returns false if no window is found with this handle
         if (!$SendMessage::SendMessage($windowProcessMainWindowHandler, $SendMessage::WM_CLOSE, 0, 0) | Out-Null) {
@@ -2887,14 +2893,14 @@ function Close-YCruncher {
     $windowProcess = Get-Process $processName -ErrorAction Ignore
 
     if ($windowProcess) {
-        Write-Verbose('Could not gracefully close Y-Cruncher, killing the process')
+        Write-Verbose('Could not gracefully close y-Cruncher, killing the process')
         
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
         Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
-        Write-Verbose('Y-Cruncher closed')
+        Write-Verbose('y-Cruncher closed')
     }
 }
 
@@ -2917,7 +2923,7 @@ function Initialize-StressTestProgram {
         Initialize-Aida64
     }
     elseif ($isYCruncher) {
-        Initialize-YCruncher
+        Initialize-yCruncher
     }
     else {
         Exit-WithFatalError('No stress test program selected!')
@@ -2948,7 +2954,7 @@ function Start-StressTestProgram {
         Start-Aida64 $startOnlyStressTest
     }
     elseif ($isYCruncher) {
-        Start-YCruncher $startOnlyStressTest
+        Start-yCruncher $startOnlyStressTest
     }
     else {
         Exit-WithFatalError('No stress test program selected!')
@@ -2979,7 +2985,7 @@ function Close-StressTestProgram {
         Close-Aida64 $closeOnlyStressTest
     }
     elseif ($isYCruncher) {
-        Close-YCruncher $closeOnlyStressTest
+        Close-yCruncher $closeOnlyStressTest
     }
     else {
         Exit-WithFatalError('No stress test program selected!')
@@ -3188,7 +3194,7 @@ function Test-ProcessUsage {
             # If the results.txt doesn't exist, assume that it was on the very first iteration
             # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Large FFT sizes
             #       So we cannot make an educated guess for these settings
-            #if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['Large'].Max) {
+            #if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['LARGE'].Max) {
             
             # This check is taken from the Prime95 source code:
             # if (fftlen > max_small_fftlen * 2) num_large_lengths++;
@@ -3196,7 +3202,7 @@ function Test-ProcessUsage {
             # Large FFTs are not randomized, Huge FFTs and All FFTs are
 
             # Temporary(?) solution
-            if ($maxFFTSize -le $FFTMinMaxValues['SSE']['Large']['Max']) {
+            if ($maxFFTSize -le $FFTMinMaxValues['SSE']['LARGE']['Max']) {
                 Write-Verbose('The maximum FFT size is within the range where we can still make an educated guess about the failed FFT size')
 
                 # No results file exists yet
@@ -3281,7 +3287,7 @@ function Test-ProcessUsage {
 
                 Write-Verbose('The max FFT size was outside of the range where it still follows a numerical order')
                 Write-Verbose('The selected max FFT size:         ' + $maxFFTSize)
-                Write-Verbose('The limit for the numerical order: ' + $FFTMinMaxValues['SSE']['Large']['Max'])
+                Write-Verbose('The limit for the numerical order: ' + $FFTMinMaxValues['SSE']['LARGE']['Max'])
 
 
                 Write-Verbose('The last 5 entries in the results.txt:')
@@ -3304,9 +3310,9 @@ function Test-ProcessUsage {
         }
 
 
-        # Y-Cruncher
+        # y-Cruncher
         elseif ($isYCruncher) {
-            Write-Verbose('The stress test program is Y-Cruncher, no detailed error detection available')
+            Write-Verbose('The stress test program is y-Cruncher, no detailed error detection available')
         }
 
 
@@ -3552,11 +3558,14 @@ foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
     $stressTestPrograms[$testProgram.Name]['fullPathToExe']  = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
     $stressTestPrograms[$testProgram.Name]['configFilePath'] = $testProgram.Value['absolutePath'] + $testProgram.Value['configName']
 
+    # If we have a comma separated list, remove all spaces and transform to upper case
+    $commandMode = (($settings[$testProgram.Name].mode -Split ',\s*') -Join ',').ToUpper()
+
     # Generate the command line
     $data = @{
         '%fileName%'       = $testProgram.Value['processName'] + '.' + $testProgram.Value['processNameExt']
         '%fullPathToExe%'  = $testProgram.Value['fullPathToExe'] + '.' + $testProgram.Value['processNameExt']
-        '%mode%'           = $settings[$testProgram.Name].mode
+        '%mode%'           = $commandMode
         '%configFilePath%' = $testProgram.Value['configFilePath']
     }
 
@@ -3618,7 +3627,7 @@ $runtimePerCore = $settings.General.runtimePerCore
 # It may be set to "auto"
 if ($settings.General.runtimePerCore.ToString().ToLower() -eq 'auto') {
     # For Prime95, we're setting the runtimePerCore to 24 hours as a temporary value
-    # For Aida64 and Y-Cruncher, we're using 10 minutes
+    # For Aida64 and y-Cruncher, we're using 10 minutes
     if ($isPrime95) {
         $runtimePerCore = 24 * 60 * 60  # 24 hours as a temporary value
         $useAutomaticRuntimePerCore = $true
@@ -3674,7 +3683,7 @@ try {
     $stressTestProcess = Get-Process $processName -ErrorAction Ignore
 
     # Some programs share the same process for stress testing and for displaying the main window, and some not
-    if ($stressTestProgramsWithSameProcess.Contains($settings.General.stressTestProgram)) {
+    if ($stressTestProgramsWithSameProcess -contains $settings.General.stressTestProgram) {
         $windowProcess = $stressTestProcess
     }
     else {
@@ -3731,11 +3740,11 @@ try {
 
     # Display some initial information
     Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpper()) Cyan
-    Write-ColorText('Selected test mode: ....... ' + $settings.mode) Cyan
+    Write-ColorText('Selected test mode: ....... ' + $settings.mode.ToUpper()) Cyan
     Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
     Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
     Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
-    Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore)) Cyan
+    Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpper()) Cyan
     Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
     Write-ColorText('Restart for each core: .... ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ON' } else { 'OFF' }))) Cyan
     Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + $(if ($settings.General.coreTestOrder.ToLower() -eq 'default') {' (' + $coreTestOrderMode.ToUpper() + ')'})) Cyan
@@ -3762,7 +3771,7 @@ try {
     }
     else {
         if ($isPrime95) {
-            Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
+            Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize.ToUpper() + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
         }
     }
 
