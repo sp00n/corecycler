@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.1.0 RC3
+    0.8.1.0 RC4
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.1.0 RC3'
+$version                    = '0.8.1.0 RC4'
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
 $logFilePathAbsolute        = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -1123,7 +1123,8 @@ function Import-Settings {
         # Settings
         '^(.+)\s?=\s?(.+)$' {
             $name, $value = $matches[1..2]
-            $name = $name.ToString().Trim()
+            $name    = $name.ToString().Trim()
+            $value   = $value.ToString().Trim()
             $setting = $null
 
 
@@ -1153,16 +1154,16 @@ function Import-Settings {
                 
                 # Parse the runtime per core (seconds, minutes, hours)
                 if ($name -eq 'runtimePerCore') {
-                    $valueString = $value.ToString().ToLower()
+                    $valueLower = $value.ToLower()
 
                     # It can be set to "auto"
-                    if ($valueString -eq 'auto') {
+                    if ($valueLower -eq 'auto') {
                         $thisSetting = 'auto'
                     }
 
                     # Parse the hours, minutes, seconds
-                    elseif ($valueString.indexOf('h') -ge 0 -or $valueString.indexOf('m') -ge 0 -or $valueString.indexOf('s') -ge 0) {
-                        $hasMatched = $valueString -match '(?-i)((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
+                    elseif ($valueLower.indexOf('h') -ge 0 -or $valueLower.indexOf('m') -ge 0 -or $valueLower.indexOf('s') -ge 0) {
+                        $hasMatched = $valueLower -match '(?-i)((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
                         $seconds = [Double] $matches.hours * 60 * 60 + [Double] $matches.minutes * 60 + [Double] $matches.seconds
                         $thisSetting = [Int] $seconds
                     }
