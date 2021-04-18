@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.1.0 RC4
+    0.8.1.0 RC5
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.1.0 RC4'
+$version                    = '0.8.1.0 RC5'
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
 $logFilePathAbsolute        = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -1222,29 +1222,40 @@ function Import-Settings {
 function Get-Settings {
     Write-Verbose('Parsing the user settings')
 
-    # Default config settings
-    $defaultSettings = Import-Settings 'config.default.ini'
+    # Get the absolute path of the config files
+    $configDefaultPath = $PSScriptRoot + '\config.default.ini'
+    $configUserPath    = $PSScriptRoot + '\config.ini'
+    $logFilePrefix     = 'CoreCycler'
 
     # Set the temporary name and path for the logfile
     # We need it because of the Exit-WithFatalError calls below
     # We don't have all the information yet though, so the name and path will be overwritten after all the user settings have been parsed
-    $Script:logFileName     = $defaultSettings.logfile + '_' + $startDateTime + '.log'
+    $Script:logFileName     = $logFilePrefix + '_' + $startDateTime + '.log'
+    $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
+
+
+    # Get the default config settings
+    $defaultSettings = Import-Settings $configDefaultPath
+
+    $logFilePrefix = $(if (![String]::IsNullOrEmpty($defaultSettings.Logging.name) -and ![String]::IsNullOrWhiteSpace($defaultSettings.Logging.name)) { $defaultSettings.Logging.name } else { $logFilePrefix })
+
+    $Script:logFileName     = $logFilePrefix + '_' + $startDateTime + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
 
 
     # If no config file exists, copy the config.default.ini to config.ini
-    if (!(Test-Path 'config.ini' -PathType leaf)) {
+    if (!(Test-Path $configUserPath -PathType leaf)) {
         
-        if (!(Test-Path 'config.default.ini' -PathType leaf)) {
+        if (!(Test-Path $configDefaultPath -PathType leaf)) {
             Exit-WithFatalError('Neither config.ini nor config.default.ini found!')
         }
 
-        Copy-Item -Path 'config.default.ini' -Destination 'config.ini'
+        Copy-Item -Path $configDefaultPath -Destination $configUserPath
     }
 
 
     # Read the config file and overwrite the default settings
-    $userSettings = Import-Settings 'config.ini'
+    $userSettings = Import-Settings $configUserPath
 
 
     # Check if the config.ini contained valid setting
@@ -1258,12 +1269,12 @@ function Get-Settings {
     catch {
         Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
 
-        if (!(Test-Path 'config.default.ini' -PathType leaf)) {
+        if (!(Test-Path $configDefaultPath -PathType leaf)) {
             Exit-WithFatalError('Neither config.ini nor config.default.ini found!')
         }
 
-        Copy-Item -Path 'config.default.ini' -Destination 'config.ini'
-        $userSettings = Import-Settings 'config.ini'
+        Copy-Item -Path $configDefaultPath -Destination $configUserPath
+        $userSettings = Import-Settings $configUserPath
     }
 
 
@@ -1280,8 +1291,8 @@ function Get-Settings {
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
             }
             else {
-                Write-Verbose('Setting is empty!')
-                Write-Verbose('[' + $sectionEntry.Name + '][' + $userSetting.Name + ']: ' + $userSetting.Value)
+                # Write-Verbose('Setting is empty!')
+                # Write-Verbose('[' + $sectionEntry.Name + '][' + $userSetting.Name + ']: ' + $userSetting.Value)
             }
         }
     }
@@ -1342,7 +1353,9 @@ function Get-Settings {
 
 
     # Set the final full path and name of the log file
-    $Script:logFileName     = $settings.Logging.name + '_' + $startDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $modeString + '.log'
+    $logFilePrefix = $(if (![String]::IsNullOrEmpty($settings.Logging.name) -and ![String]::IsNullOrWhiteSpace($settings.Logging.name)) { $settings.Logging.name } else { $logFilePrefix })
+    
+    $Script:logFileName     = $logFilePrefix + '_' + $startDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $modeString + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
 }
 
