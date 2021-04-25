@@ -165,13 +165,35 @@ $FFTMinMaxValues = @{
 }
 
 
-# The full path of the log file
-$folder   = (Resolve-Path $logFileDirectory).ToString()
-$folder  += $(if ($folder.SubString($folder.Length-1) -ne '\') { '\' })
-$filePath = (Resolve-Path $logFileDirectory).ToString() + $logFileName
+# If the log file name contains back slashes, ignore the $logFileDirectory variable
+if ( $logFileName -notcontains '\' ) {
+    $filePath = $logFileName
+}
+else {
+    # The full path of the log file
+    $folder   = (Resolve-Path $logFileDirectory).ToString()
+    $folder  += $(if ($folder.SubString($folder.Length-1) -ne '\') { '\' })
+    $filePath = (Resolve-Path $logFileDirectory).ToString() + $logFileName
+}
+
+
+if ( $logFileName.Length -eq 0 ) {
+    Write-Host('ERROR: No log file provided!') -ForegroundColor Red
+    Write-Host('       Please change the "$logFileName" variable in the script or just') -ForegroundColor Red
+    Write-Host('       add the name/path of the log file to the command line.') -ForegroundColor Red
+    Write-Host('');
+    Write-Host('Example: .\analyze_prime95_logfile.ps1 "Prime95_Log_File.txt"') -ForegroundColor Yellow
+    Write-Host($filePath) -ForegroundColor Yellow
+
+    Read-Host -Prompt 'Press Enter to exit'
+    exit    
+}
+
 
 if (!$filePath -or $filePath.Length -eq 0 -or !(Test-Path $filePath -PathType leaf)) {
     Write-Host('ERROR: Could not find the provided log file!') -ForegroundColor Red
+    Write-Host('');
+    Write-Host('The provided log file was:') -ForegroundColor Red
     Write-Host($filePath) -ForegroundColor Yellow
 
     Read-Host -Prompt 'Press Enter to exit'
