@@ -275,8 +275,11 @@ of finding a factor.  As a refresher, P-1 worktodo.txt entries for k*b^n+c are i
 this format:  Pminus1=k,b,n,c,B1,B2[,how_far_factored][,"factors"]
 Override this behavior, using the B2 from worktodo.txt, with this prime.txt entry:
 	Pminus1BestB2=0
+And P+1 can also override the B2 value in worktodo.txt.  Turn this feature off in
+prime.txt with:
+	Pplus1BestB2=0
 
-In P-1 and ECM stage 2 a bit array is allocated for finding prime pairs.  The default
+In P-1, P+1, and ECM stage 2 a bit array is allocated for finding prime pairs.  The default
 maximum size for this bit array is 250MB.  Only very large B2 values would need a
 bit array this large.  You can change the maximum bit array size with this prime.txt entry:
 	MaximumBitArraySize=n	(default is 250)
@@ -301,7 +304,7 @@ By default, ECM will stop when a new factor is found.  You can have ECM stop or
 continue searching for factors by using a value of zero or one in prime.txt:
 	ContinueECM=n
 
-You can skip the GCD in stage 1 of P-1 factoring with this prime.txt setting:
+You can skip the GCD in stage 1 of P-1 and P+1 factoring with this prime.txt setting:
 	Stage1GCD=0
 
 You can have the program generate save files every n iterations.  The files
@@ -323,6 +326,11 @@ By default P-1 work does not delete the save files when the work unit completes.
 This lets you run P-1 to a higher bound at a later date.  You can force
 the program to delete save files by adding this line to prime.txt:
 	KeepPminus1SaveFiles=0
+
+By default P+1 work does delete the save files when the work unit completes.
+Should you want to run P+1 to a higher bound at a later date.  You can force
+the program to keep save files by adding this line to prime.txt:
+	KeepPplus1SaveFiles=1
 
 You can force the program to skip the trial factoring step prior to
 running a Lucas-Lehmer or PRP primality test.  In prime.txt add this line:
@@ -574,7 +582,7 @@ program down to reduce heat, then you can add this line to prime.txt:
 where n is the percentage of time the program should run.  For example,
 Throttle=40 means the program will run 40% and be idle 60% of the time.
 
-Since P-1 stage 2 runs faster with more memory available you can have the
+Since P-1,P+1,ECM stage 2 runs faster with more memory available you can have the
 program only run stage 2 at night when more memory is available.  In
 prime.txt set:
 	OnlyRunStage2WithMaxMemory=1
@@ -659,7 +667,7 @@ a maximum amount of memory that one particular worker can use.
 
 You can set MaxHighMemWorkers=n in local.txt.  This tells the program how
 wany workers are allowed to use lots of memory.  This occurs doing stage 2
-of P-1 or ECM on medium-to-large numbers.  Default is available memory / 1GB.
+of P-1, P+1, or ECM on medium-to-large numbers.  Default is available memory / 1GB.
 
 You can set a threshold for what is considered lots of memory in MaxHighMemWorkers
 calculations.  In local.txt, set:
@@ -672,7 +680,7 @@ You can change the amount of information the program outputs while setting affin
 	AffinityVerbosityTime=0 or 1	(default is 0)
 	AffinityVerbosityBench=0 or 1	(default is 0)
 These settings are made in prime.txt.  Zero for less output, one for more output.
-The first setting is for all normal work (LL, TF, ECM, P-1, PRP).  The others
+The first setting is for all normal work (LL, TF, ECM, P-1, P+1, PRP).  The others
 are for torture testing, Advanced/Time, and benchmarking.
 
 One user reported problems with setting affinity on machines with more than 64 cores.

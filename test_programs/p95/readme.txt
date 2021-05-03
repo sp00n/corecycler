@@ -42,6 +42,7 @@ pNNNNNNN.proof		PRP proof file.
 eNNNNNNN,eNNNNNNN.buN	Intermediate files produced during ECM factoring.
 fNNNNNNN,fNNNNNNN.buN	Intermediate files produced during trial factoring.
 mNNNNNNN,mNNNNNNN.buN	Intermediate files produced during P-1 factoring.
+nNNNNNNN,nNNNNNNN.buN	Intermediate files produced during P+1 factoring.
 
 
 WHAT IS THIS PROGRAM?
@@ -69,6 +70,7 @@ the more common acronyms.
 	DC - Double-Checking (LL tests must be double-checked with a second LL test)
 	TF - Trial Factoring (can eliminate some candidates cheaply)
 	P-1 - P-1 factoring (also eliminates candidates cheaply)
+	P+1 - P+1 factoring (used in an effort to fully factor tiny Mersennes)
 	ECM - Elliptic Curve Method factoring (used in an effort to fully factor tiny Mersennes)
 	CERT - CERTification (certifies PRP proofs, better and cheaper than a DC) 
 	GEC - Gerbicz Error Checking (powerful error cheking and recovery for PRP tests)
@@ -255,15 +257,14 @@ The server deletes the uploaded proof files once the result has been certified. 
 like to archive your proof files for posterity, name the directory to store the proofs.  After
 uploading to the server, the proof files will be moved to this directory.
 
-Daytime and nighttime P-1/ECM stage 2 memory
---------------------------------------------
+Daytime and nighttime P-1/P+1/ECM stage 2 memory
+------------------------------------------------
 
 On occasion, you may be assigned an exponent that needs P-1 factoring prior to running a
-primality test.  Or you might have chosen to do P-1 or ECM work (possibly because you do
+primality test.  Or you might choose to do P-1, P+1, or ECM work (possibly because you do
 not want to devote disk space for large PRP files).  In these situations, the program can
-do stage 2 slightly more effectively if it is given more memory to work with.  However,
-if you let the program use too much memory then the performance of ALL programs will suffer
-due to thrashing.  
+run stage 2 more effectively if it is given more memory to work with.  However, if you let
+the program use too much memory then the performance of ALL programs will suffer due to thrashing.  
 
 That is, most of the time this setting is not used and even with minimal settings the program
 will work just fine.  Should you decide to change these settings, how do you choose intelligently?
@@ -669,6 +670,7 @@ PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS. IN NO EVENT SHALL THE AUTHORS
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
 ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 
 COPYRIGHTS (libgmp)
 -------------------

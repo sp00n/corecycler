@@ -1,3 +1,23 @@
+New features in Version 30.6 of prime95.exe
+-------------------------------------------
+
+1) P+1 factoring.  A worktodo.txt entry looks like this:
+	Pplus1=k,b,n,c,B1,B2,nth_run[,how_far_factored][,"known_factors"]
+   Unlike P-1, the fact that factors of Mersenne numbers is 1 mod 2p is of no value.
+   Thus, P-1 is vastly more effective at finding factors.  A P+1 run is about as
+   valuable as running one ECM curve.  P+1 stage 1 is 50% slower than P-1 stage 1
+   but several times faster than ECM stage 1.  P+1 stage 2 is a little faster than
+   P-1 stage 2 which in turn is a little faster than ECM stage 2.
+   Unlike P-1, P+1 has only a 50% chance of finding a factor if factor+1 is B1/B2 smooth.
+   Thus, it makes sense to do 1 or 2 (maybe 3) runs.  That is what the nth_run argument is for.
+   There are two special starting values for P+1 that have a slightly higher chance of
+   finding a factor.  These special starting values correspond to nth_run=1 and nth_run=2.
+   Like P-1, if how_far_factored is specified, prime95 will ignore B2 and calculate the
+   best B2 value for the given B1.
+2) Faster ECM stage 1 when factoring exponents near the limit of an FFT size.
+3) Gwnum library new functions give a programmer more tools to reduce normalized adds.
+   A tutorial.txt file is now available to help a programmer use the gwnum library.
+
 New features in Version 30.4/30.5 of prime95.exe
 ------------------------------------------------
 
