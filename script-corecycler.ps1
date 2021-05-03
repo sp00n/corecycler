@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.1.0
+    0.8.2.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.1.0'
+$version                    = '0.8.2.0'
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
 $logFilePathAbsolute        = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -259,6 +259,118 @@ Update-TypeData -TypeName System.Collections.HashTable `
 }
 
 
+# Prevent Sleep/Standby/Hibernation while the script is running
+# https://stackoverflow.com/a/65162017/973927
+$PowerUtilDefinition = @'
+    // Member variables.
+    static IntPtr _powerRequest;
+    static bool _mustResetDisplayRequestToo;
+
+    // P/Invoke function declarations.
+    [DllImport("kernel32.dll")]
+    static extern IntPtr PowerCreateRequest(ref POWER_REQUEST_CONTEXT Context);
+
+    [DllImport("kernel32.dll")]
+    static extern bool PowerSetRequest(IntPtr PowerRequestHandle, PowerRequestType RequestType);
+
+    [DllImport("kernel32.dll")]
+    static extern bool PowerClearRequest(IntPtr PowerRequestHandle, PowerRequestType RequestType);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true, ExactSpelling = true)]
+    static extern int CloseHandle(IntPtr hObject);
+
+    // Availablity Request Enumerations and Constants
+    enum PowerRequestType {
+            PowerRequestDisplayRequired = 0,
+            PowerRequestSystemRequired,
+            PowerRequestAwayModeRequired,
+            PowerRequestMaximum
+    }
+
+    const int POWER_REQUEST_CONTEXT_VERSION = 0;
+    const int POWER_REQUEST_CONTEXT_SIMPLE_STRING = 0x1;
+
+    // Availablity Request Structures
+    // Note:  Windows defines the POWER_REQUEST_CONTEXT structure with an
+    // internal union of SimpleReasonString and Detailed information.
+    // To avoid runtime interop issues, this version of 
+    // POWER_REQUEST_CONTEXT only supports SimpleReasonString.  
+    // To use the detailed information,
+    // define the PowerCreateRequest function with the first 
+    // parameter of type POWER_REQUEST_CONTEXT_DETAILED.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct POWER_REQUEST_CONTEXT {
+            public UInt32 Version;
+            public UInt32 Flags;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string SimpleReasonString;
+    }
+
+    /// <summary>
+    /// Prevents the system from going to sleep, by default not including the display.
+    /// </summary>
+    /// <param name="enable">
+    ///   True to turn on, False to turn off. Passing True must be paired with a later call passing False.
+    ///   If you pass True repeatedly, subsequent invocations take no actions and ignore the parameters.
+    ///   If you pass False, the remaining paramters are ignored.
+    //    If you pass False without having passed True earlier, no action is performed.
+    //// </param>
+    /// <param name="includeDisplay">True to also keep the display awake; defaults to False.</param>
+    /// <param name="reasonString">
+    ///   A string describing why the system is being kept awake; defaults to the current process' command line.
+    ///   This will show in the output from `powercfg -requests` (requires elevation).
+    /// </param>
+    public static void StayAwake(bool enable, bool includeDisplay = false, string reasonString = null) {
+        if (enable) {
+            // Already enabled: quietly do nothing.
+            if (_powerRequest != IntPtr.Zero) { return; }
+
+            // Configure the reason string.
+            POWER_REQUEST_CONTEXT powerRequestContext;
+            powerRequestContext.Version = POWER_REQUEST_CONTEXT_VERSION;
+            powerRequestContext.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
+            powerRequestContext.SimpleReasonString = reasonString ?? System.Environment.CommandLine; // The reason for making the power request
+
+            // Create the request (returns a handle).
+            _powerRequest = PowerCreateRequest(ref powerRequestContext);
+
+            // Set the request(s).
+            PowerSetRequest(_powerRequest, PowerRequestType.PowerRequestSystemRequired);
+            
+            if (includeDisplay) {
+                PowerSetRequest(_powerRequest, PowerRequestType.PowerRequestDisplayRequired);
+            }
+
+            _mustResetDisplayRequestToo = includeDisplay;
+
+        }
+        else {
+
+            // Not previously enabled: quietly do nothing.
+            if (_powerRequest == IntPtr.Zero) {
+                return;
+            }
+
+            // Clear the request
+            PowerClearRequest(_powerRequest, PowerRequestType.PowerRequestSystemRequired);
+
+            if (_mustResetDisplayRequestToo) {
+                PowerClearRequest(_powerRequest, PowerRequestType.PowerRequestDisplayRequired);
+            }
+
+            CloseHandle(_powerRequest);
+            _powerRequest = IntPtr.Zero;
+
+        }
+    }
+
+    // Overload that allows passing a reason string while defaulting to keeping the display awake too.
+    public static void StayAwake(bool enable, string reasonString) {
+        StayAwake(enable, false, reasonString);
+    }
+'@
+
+
 # Add code definitions so that we can close a window even if it's minimized to the tray
 # The regular PowerShell way unfortunetely doesn't work in this case
 
@@ -401,10 +513,12 @@ $SendMessageDefinition = @'
 
 
 # Make the external code definitions available to PowerShell
+Add-Type -ErrorAction Stop -Name PowerUtil -Namespace Windows -MemberDefinition $PowerUtilDefinition
 Add-Type -TypeDefinition $GetWindowsDefinition
 $SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
 
-# Also VisualBasic
+
+# Also make VisualBasic available
 Add-Type -Assembly Microsoft.VisualBasic
 
 
@@ -3693,6 +3807,10 @@ elseif ($settings.General.coreTestOrder -match '\d+') {
 
 # Wrap the main functionality in a try {} block, so that the finally {} block is executed even if CTRL+C is pressed
 try {
+    # Prevent sleep while the script is running (but allow the monitor to turn off)
+    [Windows.PowerUtil]::StayAwake($true, $false, "CoreCycler is currently running.")
+
+
     # Check if the stress test process is already running
     $stressTestProcess = Get-Process $processName -ErrorAction Ignore
 
@@ -4635,6 +4753,10 @@ try {
 # Although probably no output is generated for it anymore
 # Maybe the user wants to check the stress test program output after terminating the script
 finally {
+    # Re-enable sleep
+    [Windows.PowerUtil]::StayAwake($false)
+
+
     # Don't do anything after a fatal error
     if ($fatalError) {
         exit
