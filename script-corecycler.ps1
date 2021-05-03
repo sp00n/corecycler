@@ -18,6 +18,7 @@
 
 # Global variables
 $version                    = '0.8.2.0'
+$startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
 $logFilePathAbsolute        = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -677,7 +678,6 @@ function Exit-Script {
         Write-Text($text)
     }
 
-    Read-Host -Prompt 'Press Enter to exit'
     exit
 }
 
@@ -706,6 +706,57 @@ function Exit-WithFatalError {
     Read-Host -Prompt 'Press Enter to exit'
     exit
 }
+
+
+
+<#
+.DESCRIPTION
+    Final summary when exiting the script
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [String]
+#>
+function Show-FinalSummary {
+    # Get the total runtime
+    $endDate    = Get-Date
+    $difference = New-TimeSpan -Start $startDate -End $endDate
+    $runtimeArray = @()
+
+    if ( $difference.Days -gt 0 ) {
+        $runtimeArray += ($difference.Days.ToString() + ' days')
+    }
+    if ( $difference.Hours -gt 0 ) {
+        $runtimeArray += ($difference.Hours.ToString().PadLeft(2, '0') + ' hours')
+    }
+    if ( $difference.Minutes -gt 0 ) {
+        $runtimeArray += ($difference.Minutes.ToString().PadLeft(2, '0') + ' minutes')
+    }
+    if ( $difference.Seconds -gt 0 ) {
+        $runtimeArray += ($difference.Seconds.ToString().PadLeft(2, '0') + ' seconds')
+    }
+
+    $runTimeString = $runtimeArray -Join ", "
+
+
+    Write-ColorText('') Green
+    Write-ColorText('---------------------') Green
+    Write-ColorText('------ Summary ------') Green
+    Write-ColorText('---------------------') Green
+    Write-ColorText('The script ran for ' + $runTimeString) Cyan
+    
+
+    # Display the cores with  error
+    if ( $coresWithError.Length -gt 0 ) {
+        $coresWithErrorString = (($coresWithError | sort) -Join ', ')
+        Write-ColorText('The following cores have thrown an error: ') Cyan
+        Write-ColorText(' - ' + $coresWithErrorString) Cyan
+    }
+    else {
+        Write-ColorText('No core has thrown an error') Cyan
+    }
+}
+
 
 
 <#
@@ -4701,10 +4752,10 @@ try {
         # Print out the cores that have thrown an error so far
         if ($coresWithError.Length -gt 0) {
             if ($settings.General.skipCoreOnError) {
-                Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Blue
+                Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Cyan
             }
             else {
-                Write-ColorText('The following cores have thrown an error:') Blue
+                Write-ColorText('The following cores have thrown an error:') Cyan
 
                 $coreWithTwoDigitsHasError = $false
 
@@ -4731,7 +4782,7 @@ try {
                     $textErrors     += $(if ($entry.Value -gt 1) {'s'})
                     $textIterations += $(if ($iteration -gt 1) {'s'})
 
-                    Write-ColorText('    - Core ' + $coreText + ': ' + $entry.Value.ToString() + ' ' + $textErrors + ' in ' + $iteration + ' ' + $textIterations) Blue
+                    Write-ColorText('    - Core ' + $coreText + ': ' + $entry.Value.ToString() + ' ' + $textErrors + ' in ' + $iteration + ' ' + $textIterations) Cyan
                 }
             }
         }
@@ -4762,8 +4813,10 @@ finally {
         exit
     }
 
-    # Don't do anything when Exit-Script has been called
+    # Exit-Script has been called
     if ($scriptExit) {
+        # Show the final summary
+        Show-FinalSummary
         exit
     }
 
@@ -4780,7 +4833,8 @@ finally {
     if ($processCounterPathTime) {
         $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
     }
-    
+
+
     Write-Verbose('Checking CPU usage: ' + $processCPUPercentage + '%')
 
     # Close only if we're using still enough CPU power
@@ -4804,4 +4858,10 @@ finally {
     if ($stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) {
         Write-ColorText(' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) Cyan
     }
+
+
+    # Show the final summary
+    Show-FinalSummary
 }
+
+
