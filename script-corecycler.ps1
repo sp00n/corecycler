@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.2.0
+    0.8.2.1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.2.0'
+$version                    = '0.8.2.1'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -3604,6 +3604,12 @@ function Get-Prime95LogfileEntries {
     The main functionality
 #>
 Write-Host('Starting the CoreCycler...')
+
+
+# We need the logs directory to exist
+if ( !(Test-Path -Path $logFilePathAbsolute) ) {
+    $null = New-Item $logFilePathAbsolute -Itemtype Directory
+}
 
 
 
