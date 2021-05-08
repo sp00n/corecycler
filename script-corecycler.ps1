@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.2.1
+    0.8.2.2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.2.1'
+$version                    = '0.8.2.2'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -703,6 +703,12 @@ function Exit-WithFatalError {
         Write-ColorText('FATAL ERROR: ' + $text) Red
     }
 
+    Write-Host
+    Write-Host
+    Write-Host 'You can find more information in the log file:' -ForegroundColor Yellow
+    Write-Host $logFileFullPath -ForegroundColor Cyan
+    Write-Host 'When reporting this error, please provide this log file.' -ForegroundColor Yellow
+
     Read-Host -Prompt 'Press Enter to exit'
     exit
 }
@@ -779,15 +785,17 @@ function Get-PerformanceCounterLocalName {
         $ComputerName = $env:COMPUTERNAME
     )
 
-    $code = '[DllImport("pdh.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern UInt32 PdhLookupPerfNameByIndex(string szMachineName, uint dwNameIndex, System.Text.StringBuilder szNameBuffer, ref uint pcchNameBufferSize);'
-
+    $code  = '[DllImport("pdh.dll", SetLastError=true, CharSet=CharSet.Unicode)] '
+    $code += 'public static extern UInt32 PdhLookupPerfNameByIndex(string szMachineName, uint dwNameIndex, System.Text.StringBuilder szNameBuffer, ref uint pcchNameBufferSize);'
+    
     $Buffer = New-Object System.Text.StringBuilder(1024)
     [UInt32] $BufferSize = $Buffer.Capacity
 
-    $t = Add-Type -MemberDefinition $code -PassThru -Name PerfCounter -Namespace Utility
-    $rv = $t::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref] $BufferSize)
+    $type = Add-Type -MemberDefinition $code -PassThru -Name PerfCounter -Namespace Utility
+    $queryResult = $type::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref] $BufferSize)
 
-    if ($rv -eq 0) {
+    # 0 = ERROR_SUCCESS
+    if ( $queryResult -eq 0 ) {
         $Buffer.ToString().Substring(0, $BufferSize-1)
     }
     else {
@@ -826,7 +834,6 @@ function Get-PerformanceCounterIDs {
         if ($englishCounterNames -contains $counterName -and !$countersHash.ContainsKey($counterName)) {
             $countersHash[$counterName] = $counterId
         }
-
     }
 
     return $countersHash
@@ -3635,8 +3642,8 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
     Write-Host 'FATAL ERROR: .NET could not be found or the version is too old!' -ForegroundColor Red
     Write-Host 'At least version 3.5 of .NET is required!' -ForegroundColor Red
     Write-Host
-    Write-Host 'You can download .NET 3.5 here:' -ForegroundColor Yellow
-    Write-Host 'https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10' -ForegroundColor Cyan
+    Write-Host 'You can download the .NET Framework here:' -ForegroundColor Yellow
+    Write-Host 'https://dotnet.microsoft.com/download/dotnet-framework' -ForegroundColor Cyan
     
     Exit-WithFatalError
 }
@@ -3650,23 +3657,25 @@ try {
     Write-Verbose('Trying to get the localized performance counter names')
 
     $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
-    $counterNameIds.GetEnumerator().ForEach({ 
-        Write-Verbose(('ID of "' + $_.Name + '":').PadRight(43, ' ') + $_.Value)
+    
+    $englishCounterNames.GetEnumerator().ForEach({
+        Write-Verbose(('ID of "' + $_ + '":').PadRight(43, ' ') + $( if ( $counterNameIds[$_] ) { $counterNameIds[$_] } else { 'NOT FOUND!' } ))
     })
 
-    $counterNames['Process'] = Get-PerformanceCounterLocalName $counterNameIds['Process']
-    Write-Verbose('The localized name for "Process":          ' + $counterNames['Process'])
+    foreach ( $performanceCounterName in $englishCounterNames ) {
+        if ( !$counterNameIds[$performanceCounterName] -or $counterNameIds[$performanceCounterName] -eq 0 ) {
+            Throw 'Could not get the ID for the Performance Counter Name "' + $performanceCounterName + '" from the registry!'
+        }
 
-    $counterNames['ID Process'] = Get-PerformanceCounterLocalName $counterNameIds['ID Process']
-    Write-Verbose('The localized name for "ID Process":       ' + $counterNames['ID Process'])
+        Write-Debug('Getting the localized name for "' + $performanceCounterName + '" with ID "' + $counterNameIds[$performanceCounterName] + '"')
+        $counterNames[$performanceCounterName] = Get-PerformanceCounterLocalName $counterNameIds[$performanceCounterName]
+        Write-Verbose('The localized name for "' + $performanceCounterName + '":          ' + $counterNames[$performanceCounterName])
+    }
 
-    $counterNames['% Processor Time'] = Get-PerformanceCounterLocalName $counterNameIds['% Processor Time']
-    Write-Verbose('The localized name for "% Processor Time": ' + $counterNames['% Processor Time'])
 
-
-    $counterNames['FullName']      = '\' + $counterNames['Process'] + '(*)\' + $counterNames['ID Process']
+    $counterNames['FullName']      = '\'  + $counterNames['Process'] + '(*)\' + $counterNames['ID Process']
     $counterNames['SearchString']  = '\\' + $counterNames['ID Process'] + '$'
-    $counterNames['ReplaceString'] = '\' + $counterNames['% Processor Time']
+    $counterNames['ReplaceString'] = '\'  + $counterNames['% Processor Time']
 
     Write-Verbose('FullName:                                  ' + $counterNames['FullName'])
     Write-Verbose('SearchString:                              ' + $counterNames['SearchString'])
@@ -3691,10 +3700,35 @@ catch {
     Write-Host 'You may need to re-enable the Performance Process Counter (PerfProc).' -ForegroundColor Red
     Write-Host 'Please see the "Troubleshooting / FAQ" section in the readme.txt.' -ForegroundColor Red
     Write-Host
-
+    Write-Host 'The full thrown error message:' -ForegroundColor Yellow
+    
     $Error
 
-    Exit-Script
+
+    # Get the content of the registry entry for the performance counters, both the English and the localized one
+    $keyEnglish         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\009'
+    $allCountersEnglish = (Get-ItemProperty -Path $keyEnglish -Name Counter).Counter
+    $numCountersEnglish = $allCountersEnglish.Count
+
+    # The localized performance counters
+    $keyCurrent         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\CurrentLanguage'
+    $allCountersCurrent = (Get-ItemProperty -Path $keyCurrent -Name Counter).Counter
+    $numCountersCurrent = $allCountersCurrent.Count
+
+    Write-Debug('The number of counters for English:         ' + $numCountersEnglish)
+    Write-Debug('The number of counters for CurrentLanguage: ' + $numCountersCurrent)
+
+    Write-Debug('')
+    Write-Debug('English Counters:')
+    Write-Debug('-------------------------------------------------------------------------')
+    Write-Debug($allCountersEnglish)
+
+    Write-Debug('')
+    Write-Debug('CurrentLanguage Counters:')
+    Write-Debug('-------------------------------------------------------------------------')
+    Write-Debug($allCountersCurrent)
+
+    Exit-WithFatalError
 }
 
 
