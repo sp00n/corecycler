@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.2.3
+    0.8.2.4
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.2.3'
+$version                    = '0.8.2.4'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -1476,7 +1476,7 @@ function Get-Settings {
 
 
     # If the selected stress test program is not supported
-    if (!$settings.General.stressTestProgram -or !($stressTestPrograms -contains $settings.General.stressTestProgram)) {
+    if (!$settings.General.stressTestProgram -or !($stressTestPrograms.Contains($settings.General.stressTestProgram))) {
         Exit-WithFatalError('The selected stress test program "' + $settings.General.stressTestProgram + '" could not be found!')
     }
 
@@ -1514,7 +1514,7 @@ function Get-Settings {
     $modeString = ($modesArray -Join '-').ToUpper()
 
     foreach ($mode in $modesArray) {
-        if (!$stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $mode) {
+        if (!($stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $mode)) {
             Exit-WithFatalError('The selected test mode "' + $mode + '" is not available for ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + '!')
         }
     }
