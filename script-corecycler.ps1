@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.2.4
+    0.8.2.5
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.2.4'
+$version                    = '0.8.2.5'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -1326,7 +1326,7 @@ function Import-Settings {
                 
                 # Parse the runtime per core (seconds, minutes, hours)
                 if ($name -eq 'runtimePerCore') {
-                    $valueLower = $value.ToLower()
+                    $valueLower = $value.ToLowerInvariant()
 
                     # It can be set to "auto"
                     if ($valueLower -eq 'auto') {
@@ -1351,7 +1351,7 @@ function Import-Settings {
                 elseif ($settingsWithStrings -contains $name) {
                     # Convert some to lower case
                     if ($settingsToLowercase -contains $name) {
-                        $thisSetting = ([String] $value).ToLower()
+                        $thisSetting = ([String] $value).ToLowerInvariant()
                     }
                     else {
                         $thisSetting = [String] $value
@@ -1489,19 +1489,19 @@ function Get-Settings {
 
     # Set the general "mode" setting
     if ($isPrime95) {
-        $settings.mode = $settings.Prime95.mode.ToUpper()
+        $settings.mode = $settings.Prime95.mode.ToUpperInvariant()
     }
     elseif ($isAida64) {
-        $settings.mode = $settings.Aida64.mode.ToUpper()
+        $settings.mode = $settings.Aida64.mode.ToUpperInvariant()
     }
     elseif ($isYCruncher) {
-        $settings.mode = $settings.yCruncher.mode.ToUpper()
+        $settings.mode = $settings.yCruncher.mode.ToUpperInvariant()
     }
 
 
     # The selected mode for y-Cruncher = the binary to execute
     # Override the variables
-    $yCruncherBinary = $stressTestPrograms['ycruncher']['testModes'] | Where-Object -FilterScript {$_.ToLower() -eq $settings.yCruncher.mode.ToLower()}
+    $yCruncherBinary = $stressTestPrograms['ycruncher']['testModes'] | Where-Object -FilterScript {$_.ToLowerInvariant() -eq $settings.yCruncher.mode.ToLowerInvariant()}
     $Script:stressTestPrograms['ycruncher']['processName']        = $yCruncherBinary
     $Script:stressTestPrograms['ycruncher']['processNameForLoad'] = $yCruncherBinary
     $Script:stressTestPrograms['ycruncher']['fullPathToExe']      = $stressTestPrograms['ycruncher']['absolutePath'] + $yCruncherBinary
@@ -1511,7 +1511,7 @@ function Get-Settings {
     # Sanity check the selected test mode
     # For Aida64, you can set a comma separated list of multiple stress tests
     $modesArray = $settings.mode -Split ',\s*'
-    $modeString = ($modesArray -Join '-').ToUpper()
+    $modeString = ($modesArray -Join '-').ToUpperInvariant()
 
     foreach ($mode in $modesArray) {
         if (!($stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $mode)) {
@@ -1527,7 +1527,7 @@ function Get-Settings {
     # Set the final full path and name of the log file
     $logFilePrefix = $(if (![String]::IsNullOrEmpty($settings.Logging.name) -and ![String]::IsNullOrWhiteSpace($settings.Logging.name)) { $settings.Logging.name } else { $logFilePrefix })
     
-    $Script:logFileName     = $logFilePrefix + '_' + $startDateTime + '_' + $settings.General.stressTestProgram.ToUpper() + '_' + $modeString + '.log'
+    $Script:logFileName     = $logFilePrefix + '_' + $startDateTime + '_' + $settings.General.stressTestProgram.ToUpperInvariant() + '_' + $modeString + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
 }
 
@@ -1545,7 +1545,7 @@ function Get-FormattedRuntimePerCoreString {
         $seconds
     )
 
-    if ($seconds.ToString().ToLower() -eq 'auto') {
+    if ($seconds.ToString().ToLowerInvariant() -eq 'auto') {
         if ($isAida64 -or $isYCruncher) {
             $returnString = [Math]::Round($script:runtimePerCore/60, 2).ToString() + ' minutes (Auto-Mode)'
         }
@@ -1679,16 +1679,16 @@ function Send-CommandToAida64 {
 
     Write-Verbose('Trying to send the "' + $command + '" command to Aida64')
 
-    if ($command.ToLower() -eq 'start') {
+    if ($command.ToLowerInvariant() -eq 'start') {
         $KEY = $SendMessage::KEY_S
     }
-    elseif ($command.ToLower() -eq 'stop') {
+    elseif ($command.ToLowerInvariant() -eq 'stop') {
         $KEY = $SendMessage::KEY_T
     }
-    elseif ($command.ToLower() -eq 'dismiss') {
+    elseif ($command.ToLowerInvariant() -eq 'dismiss') {
         $KEY = $SendMessage::KEY_D
     }
-    elseif ($command.ToLower() -eq 'clear') {
+    elseif ($command.ToLowerInvariant() -eq 'clear') {
         $KEY = $SendMessage::KEY_E
     }
 
@@ -1983,13 +1983,13 @@ function Initialize-Prime95 {
             # Smallest FFT
             4, 5, 6, 8, 10, 12, 14, 16, 20,
             
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             24, 28, 32,
             
             # Small FFT
             40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240,
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             256, 288, 320, 336, 384, 400,
 
             # Large FFT
@@ -1997,7 +1997,7 @@ function Initialize-Prime95 {
             2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
             6400, 6720, 6912, 7168, 7680, 8000, 8192
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             # Now custom labeled "Huge"
             # 32768 seems to be the maximum FFT size possible for SSE
             # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
@@ -2009,13 +2009,13 @@ function Initialize-Prime95 {
             # Smallest FFT
             4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             24, 25, 28, 32, 35,
 
             # Small FFT
             36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240,
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             256, 288, 320, 336, 384, 400,
 
             # Large FFT
@@ -2023,7 +2023,7 @@ function Initialize-Prime95 {
             2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
             6400, 6720, 6912, 7168, 7680, 8000, 8192
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             # Now custom labeled "Huge"
             # 32768 seems to be the maximum FFT size possible for AVX
             # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
@@ -2036,13 +2036,13 @@ function Initialize-Prime95 {
             # Smallest FFT
             4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             24, 25, 28, 30, 32, 35,
 
             # Small FFT
             36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 144, 160, 168, 192, 200, 224, 240,
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             256, 280, 288, 320, 336, 384, 400,
 
             # Large FFT
@@ -2050,7 +2050,7 @@ function Initialize-Prime95 {
             2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
             6400, 6720, 7168, 7680, 8000, 8064, 8192
 
-            # Not used in Prime95 presets
+            # Not used in any default Prime95 presets
             # Now custom labeled "Huge"
             # 51200 seems to be the maximum FFT size possible for AVX2
             # Note: Unfortunately Prime95 seems to randomize the order for Huge and All FFT sizes
@@ -2117,9 +2117,9 @@ function Initialize-Prime95 {
     }
 
     # Regular preset
-    elseif ($FFTMinMaxValues[$settings.mode].Contains($settings.Prime95.FFTSize.ToUpper())) {   # This needs to be .Contains()
-        $Script:minFFTSize = $FFTMinMaxValues[$settings.mode.ToUpper()][$settings.Prime95.FFTSize.ToUpper()].Min
-        $Script:maxFFTSize = $FFTMinMaxValues[$settings.mode.ToUpper()][$settings.Prime95.FFTSize.ToUpper()].Max
+    elseif ($FFTMinMaxValues[$settings.mode].Contains($settings.Prime95.FFTSize.ToUpperInvariant())) {   # This needs to be .Contains()
+        $Script:minFFTSize = $FFTMinMaxValues[$settings.mode.ToUpperInvariant()][$settings.Prime95.FFTSize.ToUpperInvariant()].Min
+        $Script:maxFFTSize = $FFTMinMaxValues[$settings.mode.ToUpperInvariant()][$settings.Prime95.FFTSize.ToUpperInvariant()].Max
     }
 
     # Something failed
@@ -2182,7 +2182,7 @@ function Initialize-Prime95 {
     $configFile1 = $stressTestPrograms[$p95Version]['absolutePath'] + 'local.txt'
     $configFile2 = $stressTestPrograms[$p95Version]['absolutePath'] + 'prime.txt'
 
-    $FFTSizeString = $settings.Prime95.FFTSize.ToUpper() -Replace '\s',''
+    $FFTSizeString = $settings.Prime95.FFTSize.ToUpperInvariant() -Replace '\s',''
 
 
     # The Prime95 results.txt file name and path for this run
@@ -2410,7 +2410,7 @@ function Initialize-Aida64 {
 
 
     $modesArray = $settings.mode -Split ',\s*'
-    $modeString = ($modesArray -Join '-').ToUpper()
+    $modeString = ($modesArray -Join '-').ToUpperInvariant()
 
     # TODO: Do we want to offer a way to start Aida64 with admin rights?
     $hasAdminRights = $false
@@ -3778,7 +3778,7 @@ foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
     $stressTestPrograms[$testProgram.Name]['configFilePath'] = $testProgram.Value['absolutePath'] + $testProgram.Value['configName']
 
     # If we have a comma separated list, remove all spaces and transform to upper case
-    $commandMode = (($settings[$testProgram.Name].mode -Split ',\s*') -Join ',').ToUpper()
+    $commandMode = (($settings[$testProgram.Name].mode -Split ',\s*') -Join ',').ToUpperInvariant()
 
     # Generate the command line
     $data = @{
@@ -3844,7 +3844,7 @@ for ($i = 0; $i -lt $numPhysCores; $i++) {
 $runtimePerCore = $settings.General.runtimePerCore
 
 # It may be set to "auto"
-if ($settings.General.runtimePerCore.ToString().ToLower() -eq 'auto') {
+if ($settings.General.runtimePerCore.ToString().ToLowerInvariant() -eq 'auto') {
     # For Prime95, we're setting the runtimePerCore to 24 hours as a temporary value
     # For Aida64 and y-Cruncher, we're using 10 minutes
     if ($isPrime95) {
@@ -3962,15 +3962,15 @@ try {
     Write-ColorText('Log Level set to: ......... ' + $logLevel + ' [' + $logLevelText[$logLevel] + ']') Cyan
 
     # Display some initial information
-    Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpper()) Cyan
-    Write-ColorText('Selected test mode: ....... ' + $settings.mode.ToUpper()) Cyan
+    Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpperInvariant()) Cyan
+    Write-ColorText('Selected test mode: ....... ' + $settings.mode.ToUpperInvariant()) Cyan
     Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
     Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
     Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
-    Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpper()) Cyan
+    Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpperInvariant()) Cyan
     Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
     Write-ColorText('Restart for each core: .... ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ON' } else { 'OFF' }))) Cyan
-    Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpper() + $(if ($settings.General.coreTestOrder.ToLower() -eq 'default') {' (' + $coreTestOrderMode.ToUpper() + ')'})) Cyan
+    Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') {' (' + $coreTestOrderMode.ToUpperInvariant() + ')'})) Cyan
     Write-ColorText('Number of iterations: ..... ' + $settings.General.maxIterations) Cyan
 
     # Print a message if we're ignoring certain cores
@@ -3994,7 +3994,7 @@ try {
     }
     else {
         if ($isPrime95) {
-            Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize.ToUpper() + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
+            Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + $minFFTSize + 'K - ' + $maxFFTSize + 'K)') Cyan
         }
     }
 
@@ -4853,7 +4853,7 @@ finally {
         exit
     }
 
-    # Exit-Script has been called
+    # Exit-Script has been called (no CTRL+C)
     if ($scriptExit) {
         # Show the final summary
         Show-FinalSummary
@@ -4861,7 +4861,10 @@ finally {
     }
 
 
-    # Set the title
+    # Below this point should be a regular end of the script or CTRL+C was pressed
+
+
+    # Set the window title
     $host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' terminating')
 
     $timestamp = Get-Date -format HH:mm:ss
