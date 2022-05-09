@@ -74,7 +74,7 @@ There are also some options for controlling certification work.  In local.txt, a
 	CertWorker=n
 	CertMinExponent=x
 	CertMaxExponent=y
-This let's you do certifications only on the specified worker number n.  You can
+This lets you do certifications only on the specified worker number n.  You can
 also control the range of exponents you are willing to do certifications for.
 
 You can control whether the program does extra error checking on every
@@ -98,7 +98,7 @@ possibly on multiple lines.  Default value is 3.
 You can control how often Jacobi error checking is run.  Default is 12 hours.
 If a Jacobi test takes 30 seconds, then the default represents an overhead of
 30 / (12 * 60 * 60) or 0.07% overhead.  Each Jacobi test has a 50% chance of
-discovering if a hardware error has occured in the last time interval.  In prime.txt:
+discovering if a hardware error has occurred in the last time interval.  In prime.txt:
 	JacobiErrorCheckingInterval=N	(default is 12)
 where N is in hours.
 
@@ -199,7 +199,7 @@ fast as possible.  You can control how long this delay is by adding this
 line to prime.txt, where n is the number of seconds to sleep:
 	BootDelay=n
 
-Some machines report much better timings if the worker threads stagger
+Some machines report much better timings if the workers stagger
 their starts.  This was first noticed on Core i7 machines running Windows.
 Presumably staggering starts improves timings due to each worker allocating
 contiguous memory.  You can control how long the program waits between
@@ -207,7 +207,7 @@ starting each worker.  In prime.txt, enter:
 	StaggerStarts=n
 where n is the number of seconds to wait.  The default is 5 seconds.
 
-The program supports many different code paths for LL testing depending on
+The program supports many different code paths for PRP/LL testing depending on
 the CPU type.  It also has a few different factoring code paths.  You can
 force the program to choose a specific code path by setting the proper
 combination of these settings in local.txt:
@@ -233,16 +233,19 @@ instruction to determine the L2 cache size.  In local.txt enter:
 	CpuL2CacheLineSize=32 or 64 or 128
 	CpuL2SetAssociative=4 or 8
 
-The program automatically computes the number of CPUs, hyperthreading, and speed.
-This information is used to calculate how much work to get.
-If the program did not correctly figure out your CPU information,
-you can override the info in local.txt:
-	NumCPUs=n
-	CpuNumHyperthreads=1 or 2
+The program automatically computes the number of CPU cores, hyperthreading, and speed.
+This information is used to calculate how much work to get.  In the unlikely event
+the program did not correctly figure out your CPU information, you can override
+the info in local.txt:
+	NumCores=n
+	CoreXXXNumThreads=1 or 2
+	CoreXXXRanking=0 or 1
 	CpuSpeed=s
-Where n is the number of physical CPUs or cores, not logical CPUs created by
-hyperthreading. Choose 1 for non-hyperthreaded and 2 for hyperthreaded. Finally,
-s is the speed in MHz.
+Where n is the number of physical cores -- not logical cores created by hyperthreading.
+XXX is the zero-based physical core number (see hwloc output in results.bench,txt).
+Choose NumThreads of 1 for non-hyperthreaded or 2 (or more) for hyperthreaded.
+Choose Ranking of 0 for efficiency cores and 1 for performance cores.
+Finally, s is the speed in MHz.
 
 The program sometimes performs work from worktodo.txt out-of-order.
 (1) Certification work is done quickly as these assignments have a very short
@@ -279,9 +282,24 @@ And P+1 can also override the B2 value in worktodo.txt.  Turn this feature off i
 prime.txt with:
 	Pplus1BestB2=0
 
-In P-1, P+1, and ECM stage 2 a bit array is allocated for finding prime pairs.  The default
-maximum size for this bit array is 250MB.  Only very large B2 values would need a
-bit array this large.  You can change the maximum bit array size with this prime.txt entry:
+For P-1 stage 2 to accurately choose optimal B2 bounds as well as whether prime pairing
+stage 2 is more appropriate than polynomial multiplication stage 2, the program must
+accurately estimate stage 2 vs. stage 1 runtime.  The default formula will not work for
+all current and future CPUs, cache, and memory configurations.  Hopefully, the default
+formula is "good enough".  You can correct for errors in the program's default formula
+with two adjustments in prime.txt:
+	Pm1PairRatioAdjust=n	(default is 1.0)
+	Pm1PolyRatioAdjust=n	(default is 1.0)
+One adjustment is for stage 2 using prime pairing and the other is for stage 2 using
+polynomial multiplication.  When P-1 starts stage 2 the estimated stage 2 vs. stage 1
+runtime is output (example: "Estimated stage 2 vs. stage 1 runtime ratio: 1.034").
+Set Pm1____RatioAdjust to the actual ratio divided by the estimated ratio times the
+current RatioAdjust setting.  For example, if stage 1 took 5000 seconds and stage 2 took
+8000 seconds the actual ratio is 1.6, set the adjustment to 1.6 / 1.034 * 1.0 = 1.547.
+
+In P-1, P+1, and ECM stage 2 a pairing map is allocated for recording prime pairs.  The default
+maximum size for this map is 250MB.  Only very large B2 values need a map this large.
+You can change the maximum map size with this poorly named prime.txt entry:
 	MaximumBitArraySize=n	(default is 250)
 Values from 1 to 2000 are supported.
 
@@ -293,19 +311,18 @@ complete guess.  To change the search effort, add this to prime.txt:
 	PracSearch=n		(default is 7)
 Values from 1 to 50 are supported.
 
-The Brent-Suyama extension to P-1 stage 2 has been disabled by default.  Our studies
-indicate that you are much better off investing more effort in a larger B2 rather
-than investing more effort in the Brent-Suyama extension.  You can force P-1 to
-use the Brent-Suyama extension with this prime.txt entry:
-	BrentSuyama=n		(default is 2)
-Values from 2 to 24 are supported.
-
 By default, ECM will stop when a new factor is found.  You can have ECM stop or
 continue searching for factors by using a value of zero or one in prime.txt:
 	ContinueECM=n
 
 You can skip the GCD in stage 1 of P-1 and P+1 factoring with this prime.txt setting:
-	Stage1GCD=0
+	Stage1GCD=n		(default is 1)
+For P+1, set n to one to do a GCD after stage 1, set n to 0 or -1 to skip stage 1 GCD.
+For P-1, a stage 1 GCD is very, very cheap.  Set n to 1 or 0 to do the cheap stage 1 GCD,
+set n to -1 to skip the stage 1 GCD.   This all tranlates to:
+	n=1, always do stage 1 GCD
+	n=0, do stage 1 GCD if it is cheap
+	n=-1, never do stage 1 GCD
 
 You can have the program generate save files every n iterations.  The files
 will have a .XXX extension where XXX equals the current iteration divided
@@ -316,11 +333,11 @@ You can have the program output residues every n iterations.  The default
 value is the InterimFiles value.  In prime.txt enter:
 	InterimResidues=n
 
-If doing P-1 with a very large B1, the program uses about 8MB of memory to
-pre-calculate the product of all small primes below 40 million.  The primes above
-40 million are processed using a slightly slower method.  You can elect to use
-more memory to move the 40 million threshold higher.  In prime.txt enter:
-	MaxStage0Prime=n
+If doing P-1 with a very large B1, the program uses about 47MB of memory to
+pre-calculate the product of all small primes below 250 million.  The primes above
+250 million are processed using a somewhat slower method.  You can elect to use
+more memory to move the 250 million threshold higher.  In prime.txt enter:
+	MaxStage0Prime=n	(n is in millions, default is 250, max is 2000)
 
 By default P-1 work does not delete the save files when the work unit completes.
 This lets you run P-1 to a higher bound at a later date.  You can force
@@ -443,13 +460,25 @@ leaving just the ending summary.  Useful for machines with lots of cores.
 Put this line in prime.txt:
 	PrintTimedIterations=0
 
+You can output some informational message on ECM/P-1/P+1 estimated pairing percentages
+to compare with actual pairing percentages.  Add to prime.txt:
+	Stage2Estimates=1
+
+You can also output more detailed P-1 stage 2 information with this prime.txt entry:
+	PolyVerbose=1
+
+P-1 stage 2 can compress data to create bigger polynomials.  In prime.txt, set
+	Poly1Compress=0,1,2		(default 2)
+where 0 is no compression, 1 is quick compression gaining about 1.6%, 2 is serious
+compression gaining about 12%.
+
 LINUX/FREEBSD ONLY:  When mprime runs out of work to do, it normally loops waiting for the
 server to assign more work.  This prime.txt option can be used to have mprime exit
 when all workers runs out of work.  Note this probably only makes sense when UsePrimenet=0
 or when UsePrimenet=1 and NoMoreWork=1.
 	ExitWhenOutOfWork=n
-where n is the number of seconds to wait before exiting.  Waiting several seconds
-gives mprime some time to send the last results to the server.
+where n is the number of seconds to wait before exiting.  I recommend setting n to 86400 or
+higher to give mprime time to send the last results and upload proof files to the server.
 
 WINDOWS ONLY:  When Tray Icon or No Icon is selected the "X" at the right of
 the title bar will minimize rather than exit.  You can make the program exit
@@ -458,7 +487,7 @@ if you prefer.  In prime.txt set:
 
 Most FFT sizes have several implementations.  The program uses throughput benchmark
 data to select the fastest FFT implementation.  The program assumes all CPU cores
-will be used and all worker threads will be running FFTs.  This can be overridden
+will be used and all workers will be running FFTs.  This can be overridden
 in gwnum.txt:
 	BenchCores=x
 	BenchWorkers=y
@@ -513,15 +542,15 @@ performance of some programs such as disk defragmenters and some games.
 You can pause the program automatically when these programs are running by
 adding this line to prime.txt:
 	PauseWhileRunning=prog1[n1],prog2[n2],etc
-The [n1], [n2] values are optional and indicate the number of worker threads
+The [n1], [n2] values are optional and indicate the number of workers
 to pause when prog1 and prog2 are running.  The default value for n1 and n2
-is to pause all worker threads.  Note that the program will pause if the program
+is to pause all workers.  Note that the program will pause if the program
 name matches any part of the running program's file name.  That is "foobar"
 will match "c:\foobar.exe", "C:\FOOBAR\name.exe", and even "C:\myfoobarprog.exe".
 Also, if prog1 is "*" the program will pause no matter what.  Examples:
 	PauseWhileRunning=*[1] during 6-7/2:00-3:00
 	PauseWhileRunning=* during 23:00-24:00 else decomp[1],mygame[2]
-The first example pauses one worker thread on Saturday and Sunday between
+The first example pauses one worker on Saturday and Sunday between
 2AM and 3AM.  The second example pauses all workers between 11PM and 12AM and
 pauses 1 worker if decomp is running and 2 if mygame is running.
 
@@ -631,7 +660,7 @@ BenchOddWorkers can be used to disable throughput benchmarks when number of core
 a multiple of the number of workers (e.g. 3 cores on 2 workers).
 BenchDummyWorkers is used to enable starting dummy workers while benchmarking.
 The theory is that keeping the other CPU cores busy will prevent "turbo boost" from kicking in.
-This may lead to more consistent benchmarks that are more indicitive of what will happen running
+This may lead to more consistent benchmarks that are more indicative of what will happen running
 this program in a real-world, all-cores-busy environment.  Option not available in throughput
 benchmarks. 
 
@@ -666,12 +695,12 @@ program can use.  You can also put this in the [Worker #n] section to place
 a maximum amount of memory that one particular worker can use.
 
 You can set MaxHighMemWorkers=n in local.txt.  This tells the program how
-wany workers are allowed to use lots of memory.  This occurs doing stage 2
-of P-1, P+1, or ECM on medium-to-large numbers.  Default is available memory / 1GB.
+many workers are allowed to use lots of memory.  This occurs doing stage 2
+of P-1, P+1, or ECM.  Default is 1.
 
 You can set a threshold for what is considered lots of memory in MaxHighMemWorkers
 calculations.  In local.txt, set:
-	HighMemThreshold=n		(default is 50)
+	HighMemThreshold=n		(default is 250)
 The value n is in MB.
 
 You can change the amount of information the program outputs while setting affinities.
@@ -696,25 +725,28 @@ example lines you might add to the "[Worker #2]" section of local.txt (the logic
 the zero-based numbering scheme for PU# returned by hwloc which you can see in results.txt
 by doing a benchmark):
 	Affinity=3,6,9
-Run main worker thread on logical CPU #3, run two aux threads on logical CPUs #6 & #9
+Run main worker on logical CPU #3, run two aux threads on logical CPUs #6 & #9
 	Affinity=3-4,5-6
-Run main worker thread on logical CPUs #3 & #4, run aux thread on logical CPUs #5 & #6
+Run main worker on logical CPUs #3 & #4, run aux thread on logical CPUs #5 & #6
 	Affinity={3,5,7},{4,6}
-Run main worker thread on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6
+Run main worker on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6
 	Affinity=(3,5,7),(4,6)
-Run main worker thread on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6
+Run main worker on logical CPUs #3, #5, & #7, run aux thread on logical CPUs #4 & #6
 	Affinity=[3,5-7],(4,6)
-Run main worker thread on logical CPUs #3, #5, #6, & #7, run aux thread on logical CPUs #4 & #6
+Run main worker on logical CPUs #3, #5, #6, & #7, run aux thread on logical CPUs #4 & #6
 
 In the prime.txt file, the DaysBetweenCheckin value can be set to any value
 between 0.04 and 7.0.  Some SeventeenOrBust users want to send updates hourly.
 
-In local.txt, add the line
+To attempt using 2MB pages under Windows and Linux, add this line to local.txt:
 	UseLargePages=1
-to attempt using 2MB pages under Windows Vista and later.  Warning: these pages will
-never be swapped out.  Thus, using this option could negatively impact
-the performance of other applications.  Also, you'll need to have
-the "Lock Pages in Memory" privilege to use this option.
+My experience has been maybe a 0.5% speed improvement, but sometimes I get worse timings.
+It may well be that any benefit is within the margin of error in obtaining accurate timings.
+Warning: My understanding is that these pages will never be swapped out in Windows (and will
+be slower to swap in Linux).  Thus, using this option could negatively impact the performance
+of other applications.  Also, wasted space at the end of each page (1MB on average) can reduce
+the number of temporaries that can be allocated in stage 2 of P-1/P+1/ECM, negating any benefits.
+In Windows you'll need to have the "Lock Pages in Memory" privilege to use this option.
 
 JSON messages for all work types is new in version 29.6.  You can turn off JSON
 messages with this prime.txt option:
@@ -741,8 +773,8 @@ following setting in prime.txt:
 Set to zero to disable high-reliability error checking.  Set to 1 to perform Gerbicz
 high-reliability error checking whenever possible, otherwise no error checking.  Set
 to 2 to do Gerbicz high-reliability error checking whenever possible, otherwise do the
-much slower error check of doing each iteration twice and periodicly comparing residues.
-Set to 3 to force the much slower error check of doing each iteration twice and periodicly
+much slower error check of doing each iteration twice and periodically comparing residues.
+Set to 3 to force the much slower error check of doing each iteration twice and periodically
 comparing residues.
 
 When doing highly-reliable error checking, the interval between compares can be
@@ -778,6 +810,8 @@ When PRPing k*b^n+c and b=2, there are some optimizations possible that reduce t
 number of small constant multiplications.  Although there should be no reason to turn
 off these optimizations, it can be done with this setting in prime.txt:
 	PRPStraightForward=1		(default is 0)
+Change this setting only when no PRP tests are in progress.  Changing this setting
+will invalidate existing save files.
 NOTE: Selecting the straight forward (no optimization) code path disables the very
 efficient and powerful Gerbicz error checking.
 
@@ -788,13 +822,13 @@ to prime.txt, where n is a number from 0 to 100.  The default value is zero.
 
 LINUX/FREEBSD/APPLE ONLY: In prime.txt you can have set the nice level.  By
 default, on startup mprime automatically sets the program to nice priority.
-This isn't really necessary since worker threads are usually set to run at a much
+This isn't really necessary since workers are usually set to run at a much
 lower priority.  However, sysadmins might be alarmed to see a CPU intensive
 program not running at nice priority when they execute a ps command (it takes
 a more complicated ps command to see that the CPU intensive threads are running
 at a lower priority). You can change the nice level in prime.txt with the line:
 	Nice=n
-where n is the nice level. The default nice level is 10.  In linux you can select
+where n is the nice level. The default nice level is 10.  In Linux you can select
 a value from -20 to +19.  In FreeBSD and Mac OS X you can select a value
 between -20 and 20.  Higher numbers represent a "nicer" program (lower priority).
 In all OSes, a zero nice level means run at the normal priority.

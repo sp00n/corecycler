@@ -270,11 +270,12 @@ That is, most of the time this setting is not used and even with minimal setting
 will work just fine.  Should you decide to change these settings, how do you choose intelligently?
 Below are some steps you might take to figure this out:
 
-1)  Be conservative.  It is better to set the memory too low than too high.  Setting the value
-too high can cause thrashing which slows down all programs.
+1)  Be aggressive for P-1, conservative for P+1 and ECM.  The P-1 stage 2 algorithm LOVES memory.
+Double the memory, double the throughput.  For P+1 and ECM it is better to set the memory too low than
+too high.  For all work types setting the value too high can cause thrashing which slows down all programs.
 
 2)  Start with how much memory is installed in your machine.  Allow a reasonable amount of memory
-for the OS and whatever background tasks you run (say 0.5 to 2.0GB).  This represents the maximum
+for the OS and whatever background tasks you run (say 2GB to 6GB).  This represents the maximum
 value you should use.  The program won't let you enter more than 90% of installed memory.
 
 3)  Assuming you run your machine 24 hours a day, what hours of the day do you not use your computer?
@@ -285,16 +286,16 @@ reduce this value if you also run batch jobs at night.
 sample exponents.  If you choose a value below the minimum, that is OK.  The program will simply skip
 stage 2 of P-1 factoring.
 
-	Exponent	Minimum		Reasonable	Desirable
-	--------	-------		----------	---------
-	100000000	 0.2GB		  0.7GB		 1.1GB
-	333000000	 0.7GB		  2.1GB		 3.5GB
+	Exponent	Minimum		Workable	Desirable
+	--------	-------		--------	---------
+	100000000	 0.2GB		  0.7GB		 85-90% of RAM
+	333000000	 0.7GB		  2.1GB		 85-90% of RAM
 
-For example, my machine is a dual-processor with 8GB of memory.  I guess Windows and the programs I
-normally use can survive on 2GB of memory.  Thus, I set memory to 6.0GB.  This is my nighttime setting.
-During the day, I run more programs, so I set memory to 1.5GB.  I can always stop prime95 if it is
-doing stage 2 P-1 factoring and I suspect memory is thrashing.  More casual users might want to set the
-daytime memory to 0.5GB so they never have to worry about prime95 impacting system performance.
+For example, my machine is a quad-processor with 16GB of memory.  I guess Windows and the programs I
+normally use can survive on 4GB of memory.  Thus, I set memory to 12.0GB.  This is my nighttime setting.
+During the day, I run more programs, so I set memory to 4.0GB.  I can always stop prime95 if it is
+doing stage 2 work and I suspect memory is thrashing.  More casual users might want to set the
+daytime memory to 0.1GB so they never have to worry about prime95 impacting system performance.
 
 Max emergency memory
 --------------------
@@ -557,7 +558,7 @@ appears in the results.txt file, then prime95/mprime's error-checking has
 detected a problem.  After waiting 5 minutes, the program will continue
 testing from the last save file.
 
-The most common errors message is ROUND OFF > 0.40 caused by one of two things:
+The most common error message is ROUND OFF > 0.40 caused by one of two things:
 	1)  For reasons too complicated to go into here, the program's error
 	checking is not	perfect.  Some errors can be missed and some correct
 	results flagged as an error.  If you get the message "Disregard last
@@ -702,6 +703,30 @@ for more details.
 You should have received copies of the GNU General Public License and the
 GNU Lesser General Public License along with the GNU MP Library.  If not,
 see https://www.gnu.org/licenses/.
+
+
+COPYRIGHTS (cJSON)
+-------------------
+
+  Copyright (c) 2009-2017 Dave Gamble and cJSON contributors
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
 
 
 OUR DISCLAIMER

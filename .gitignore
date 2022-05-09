@@ -1,9 +1,10 @@
 config.ini
 *.git-credentials
-local.txt
-prime.txt
+_tests/**
 logs/**
 test_programs/aida64/*
 !test_programs/aida64/aida64.txt
 test_programs/y-cruncher/Binaries/*.cfg
 test_programs/p95_dev/*
+test_programs/p95/local.txt
+test_programs/p95/prime.txt

@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.8.2.5
+    0.9.0.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.8.2.5'
+$version                    = '0.9.0.0'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -95,6 +95,7 @@ $stressTestPrograms = @{
             'CUSTOM'
         )
         'windowNames'        = @(
+            '^Prime95 \- Torture Test$',    # New in 30.7
             '^Prime95 \- Self\-Test$',
             '^Prime95 \- Not running$',
             '^Prime95 \- Waiting for work$',
@@ -121,6 +122,7 @@ $stressTestPrograms = @{
             'CUSTOM'
         )
         'windowNames'        = @(
+            '^Prime95 \- Torture Test$',    # New in 30.7
             '^Prime95 \- Self\-Test$',
             '^Prime95 \- Not running$',
             '^Prime95 \- Waiting for work$',
@@ -838,6 +840,7 @@ function Get-PerformanceCounterIDs {
 
     return $countersHash
 }
+
 
 
 ############################################################################## 
@@ -1911,8 +1914,64 @@ function Get-StressTestProcessInformation {
 
 <#
 .DESCRIPTION
+    Check if Prime95 exists
+.PARAMETER 
+    [Void]
+.OUTPUTS
+    [Void]
+#>
+function Test-Prime95 {
+    # This may be prime95 or prime95_dev
+    $p95Type = $settings.General.stressTestProgram
+
+    # Check if the prime95.exe exists
+    Write-Verbose('Checking if prime95.exe exists at:')
+    Write-Verbose($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt'])
+
+    if (!(Test-Path ($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt']) -PathType leaf)) {
+        Write-ColorText('FATAL ERROR: Could not find Prime95!') Red
+        Write-ColorText('Make sure to download and extract Prime95 into the following directory:') Red
+        Write-ColorText($stressTestPrograms[$p95Type]['absolutePath']) Yellow
+        Write-Text ''
+        Write-ColorText('You can download Prime95 from:') Red
+        Write-ColorText('https://www.mersenne.org/download/') Cyan
+        Exit-WithFatalError
+    }
+}
+
+
+<#
+.DESCRIPTION
+    Get the version info for Prime95
+.PARAMETER 
+    [Void]
+.OUTPUTS
+    [Array] An array representing the version number (e.g. 30.8.0 -> [30, 8, 0])
+#>
+function Get-Prime95Version {
+    # This may be prime95 or prime95_dev
+    $p95Type = $settings.General.stressTestProgram
+    Write-Verbose('Checking the Prime95 version...')
+    $itemVersionInfo = (Get-Item ($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt'])).VersionInfo
+
+    $p95Version = $(
+        $itemVersionInfo.ProductMajorPart,
+        $itemVersionInfo.ProductMinorPart,
+        $itemVersionInfo.ProductBuildPart
+    )
+
+    Write-Verbose('Prime95 Version:')
+    Write-Verbose($p95Version)
+
+    return $p95Version
+}
+
+
+<#
+.DESCRIPTION
     Create the Prime95 config files (local.txt & prime.txt)
     This depends on the $settings.mode variable
+    And also on the Prime95 version
 .PARAMETER
     [Void]
 .OUTPUTS
@@ -1920,21 +1979,20 @@ function Get-StressTestProcessInformation {
 #>
 function Initialize-Prime95 {
     # This may be prime95 or prime95_dev
-    $p95Version = $settings.General.stressTestProgram
+    $p95Type = $settings.General.stressTestProgram
 
-    # Check if the prime95.exe exists
-    Write-Verbose('Checking if prime95.exe exists at:')
-    Write-Verbose($stressTestPrograms[$p95Version]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Version]['processNameExt'])
+    # Get the Prime95 version, behavior has changed after 30.6
+    $prime95Version = Get-Prime95Version
+    $isPrime95_30_6 = $false
+    $isPrime95_30_7 = $false
 
-    if (!(Test-Path ($stressTestPrograms[$p95Version]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Version]['processNameExt']) -PathType leaf)) {
-        Write-ColorText('FATAL ERROR: Could not find Prime95!') Red
-        Write-ColorText('Make sure to download and extract Prime95 into the following directory:') Red
-        Write-ColorText($stressTestPrograms[$p95Version]['absolutePath']) Yellow
-        Write-Text ''
-        Write-ColorText('You can download Prime95 from:') Red
-        Write-ColorText('https://www.mersenne.org/download/') Cyan
-        Exit-WithFatalError
+    if ($prime95Version[0] -le 30 -and $prime95Version[1] -le 6) {
+        $isPrime95_30_6 = $true
     }
+    elseif ($prime95Version[0] -ge 30 -and $prime95Version[1] -ge 7) {
+        $isPrime95_30_7 = $true
+    }
+
 
     # Set various global variables we need for Prime95
     $Script:prime95CPUSettings = @{
@@ -2179,8 +2237,8 @@ function Initialize-Prime95 {
 
 
     $modeString  = $settings.mode
-    $configFile1 = $stressTestPrograms[$p95Version]['absolutePath'] + 'local.txt'
-    $configFile2 = $stressTestPrograms[$p95Version]['absolutePath'] + 'prime.txt'
+    $configFile1 = $stressTestPrograms[$p95Type]['absolutePath'] + 'local.txt'
+    $configFile2 = $stressTestPrograms[$p95Type]['absolutePath'] + 'prime.txt'
 
     $FFTSizeString = $settings.Prime95.FFTSize.ToUpperInvariant() -Replace '\s',''
 
@@ -2201,16 +2259,33 @@ function Initialize-Prime95 {
     Set-Content $configFile1 'RollingAverageIsFromV27=1'
     
     # Limit the load to the selected number of threads
-    Add-Content $configFile1 ('NumCPUs=1')
+    Add-Content $configFile1 ('NumCPUs=1')                                                      # If this is not set, Prime95 will create 1 worker thread for each Core/Thread, seriously slowing down the computer!
+                                                                                                # In Prime95 30.7+, there's a new setting "NumCores", which seems to do the same as NumCPUs. The old setting may deprecate at some point
     Add-Content $configFile1 ('CoresPerTest=1')
-    Add-Content $configFile1 ('CpuNumHyperthreads=' + $settings.General.numberOfThreads)
-    Add-Content $configFile1 ('WorkerThreads='      + $settings.General.numberOfThreads)
-    Add-Content $configFile1 ('CpuSupportsSSE='     + $prime95CPUSettings[$modeString].CpuSupportsSSE)
-    Add-Content $configFile1 ('CpuSupportsSSE2='    + $prime95CPUSettings[$modeString].CpuSupportsSSE2)
-    Add-Content $configFile1 ('CpuSupportsAVX='     + $prime95CPUSettings[$modeString].CpuSupportsAVX)
-    Add-Content $configFile1 ('CpuSupportsAVX2='    + $prime95CPUSettings[$modeString].CpuSupportsAVX2)
-    Add-Content $configFile1 ('CpuSupportsFMA3='    + $prime95CPUSettings[$modeString].CpuSupportsFMA3)
     
+    Add-Content $configFile1 ('CpuSupportsSSE='  + $prime95CPUSettings[$modeString].CpuSupportsSSE)
+    Add-Content $configFile1 ('CpuSupportsSSE2=' + $prime95CPUSettings[$modeString].CpuSupportsSSE2)
+    Add-Content $configFile1 ('CpuSupportsAVX='  + $prime95CPUSettings[$modeString].CpuSupportsAVX)
+    Add-Content $configFile1 ('CpuSupportsAVX2=' + $prime95CPUSettings[$modeString].CpuSupportsAVX2)
+    Add-Content $configFile1 ('CpuSupportsFMA3=' + $prime95CPUSettings[$modeString].CpuSupportsFMA3)
+    
+
+    # Prime 30.6 and before:
+    if ($isPrime95_30_6) {
+        Add-Content $configFile1 ('CpuNumHyperthreads=' + $settings.General.numberOfThreads)       # If this is not set, Prime95 will create two worker threads in 30.6
+        Add-Content $configFile1 ('WorkerThreads='      + $settings.General.numberOfThreads)
+    }
+
+    # Prime 30.7 and above:
+    if ($isPrime95_30_7) {
+        # If this is not set, Prime95 will create #numCores worker threads in 30.7+
+        # Add-Content $configFile1 ('NumThreads='    + $settings.General.numberOfThreads)
+        # Add-Content $configFile1 ('WorkerThreads=' + $settings.General.numberOfThreads)
+        
+        # If we're using TortureHyperthreading in prime.txt, this needs to stay at 1, even if we're using 2 threads
+        Add-Content $configFile1 ('NumThreads=1')
+        Add-Content $configFile1 ('WorkerThreads=1')
+    }
 
     
     # Create the prime.txt and overwrite if necessary
@@ -2229,14 +2304,24 @@ function Initialize-Prime95 {
     Set-Content $configFile2 ('WorkingDir='  + $PSScriptRoot)
     
     # Set the custom results.txt file name
-    Add-Content $configFile2 ('prime.ini='   + $stressTestPrograms[$p95Version]['processPath'] + '\prime.txt')
-    Add-Content $configFile2 ('local.ini='   + $stressTestPrograms[$p95Version]['processPath'] + '\local.txt')
+    Add-Content $configFile2 ('prime.ini='   + $stressTestPrograms[$p95Type]['processPath'] + '\prime.txt')
+    Add-Content $configFile2 ('local.ini='   + $stressTestPrograms[$p95Type]['processPath'] + '\local.txt')
     Add-Content $configFile2 ('results.txt=' + $logFilePath + '\' + $stressTestLogFileName)
+
+
+    # New in Prime95 30.7
+    # TortureHyperthreading=0/1
+    # Goes into the prime.txt ($configFile2)
+    # If we set this here, we need to use NumThreads=1 in local.txt
+    if ($isPrime95_30_7) {
+        Add-Content $configFile2 ('TortureHyperthreading=' + ($settings.General.numberOfThreads - 1))   # Number of Threads = 2 -> Setting = 1 / Number of Threads = 1 -> Setting = 0
+    }
+
     
     # Custom settings
     if ($modeString -eq 'CUSTOM') {
-        Add-Content $configFile2 ('TortureMem='    + $settings.Custom.TortureMem)
-        Add-Content $configFile2 ('TortureTime='   + $settings.Custom.TortureTime)
+        Add-Content $configFile2 ('TortureMem='  + $settings.Custom.TortureMem)
+        Add-Content $configFile2 ('TortureTime=' + $settings.Custom.TortureTime)
     }
     
     # Default settings
@@ -3100,10 +3185,11 @@ function Close-yCruncher {
     [Void]
 #>
 function Initialize-StressTestProgram {
-    Write-Verbose('Initalizing the stress test program')
+    Write-Verbose('Initializing the stress test program')
 
     if ($isPrime95) {
-        Initialize-Prime95 $settings.mode
+        Test-Prime95
+        Initialize-Prime95
     }
     elseif ($isAida64) {
         Initialize-Aida64
@@ -3377,115 +3463,145 @@ function Test-ProcessUsage {
         # Prime95
         if ($isPrime95) {
             # Try to determine the last run FFT size
-            # If the results.txt doesn't exist, assume that it was on the very first iteration
-            # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Large FFT sizes
-            #       So we cannot make an educated guess for these settings
-            #if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['LARGE'].Max) {
-            
-            # This check is taken from the Prime95 source code:
-            # if (fftlen > max_small_fftlen * 2) num_large_lengths++;
-            # The max smallest FFT size is 240, so starting with 480 the order should get randomized
-            # Large FFTs are not randomized, Huge FFTs and All FFTs are
 
-            # Temporary(?) solution
-            if ($maxFFTSize -le $FFTMinMaxValues['SSE']['LARGE']['Max']) {
-                Write-Verbose('The maximum FFT size is within the range where we can still make an educated guess about the failed FFT size')
+            # In newer Prime95 versions, the FFT size is provided in the results.txt
+            # In older versions, we have to make an eduacted guess
 
-                # No results file exists yet
-                if (!$resultFileHandle) {
-                    Write-Verbose('No results.txt exists yet, assuming the error happened on the first FFT size')
-                    $lastRunFFT = $minFFTSize
-                }
-                
-                # Get the last couple of rows and find the last passed FFT size
-                else {
-                    Write-Verbose('Trying to find the last passed FFT sizes')
+            # Check in the error message
+            # "Hardware failure detected running 10752K FFT size, consult stress.txt file."
+            $lastFFTErrorEntry = $newLogEntries | Where-Object {$_.Line -match 'Hardware failure detected running \d+K FFT size*'} | Select -Last 1
 
-                    $lastFiveRows     = $allLogEntries | Select -Last 5
-                    $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})  # This needs to be an array
-                    $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
-                    $lastPassedFFT    = if ($hasMatched) { [Int] $Matches[1] }   # $Matches is a fixed(?) variable name for -match
+            if ($lastFFTErrorEntry) {
+                Write-Verbose('There was an FFT size provided in the error message, use it.')
 
-                    # No passed FFT was found, assume it's the first FFT size
-                    if (!$lastPassedFFT) {
-                        $lastRunFFT = $minFFTSize
-                        Write-Verbose('No passed FFT was found, assume it was the first FFT size: ' + $lastRunFFT)
-                    }
+                #$lastFiveRows     = $allLogEntries | Select -Last 5
+                #$lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*Hardware failure detected running*'})  # This needs to be an array
+                #$hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Hardware failure detected running (\d+)K FFT size'
+                #$lastPassedFFT    = if ($hasMatched) { [Int] $Matches[1] }   # $Matches is a fixed(?) variable name for -match
 
-                    # If the last passed FFT size is the max selected FFT size, start at the beginning
-                    elseif ($lastPassedFFT -eq $maxFFTSize) {
-                        $lastRunFFT = $minFFTSize
-                        Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
-                        Write-Verbose('The last passed FFT size is the max selected FFT size, use the min FFT size: ' + $lastRunFFT)
-                    }
+                $hasMatched = $lastFFTErrorEntry -match 'Hardware failure detected running (\d+)K FFT size'
+                $lastRunFFT = if ($hasMatched) { [Int] $Matches[1] }   # $Matches is a fixed(?) variable name for -match
 
-                    # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
-                    # In this case, we also assume that it successfully completed the max value and errored at the min FFT size
-                    # Example: Smallest FFT max = 21, but the actual last size tested is 20K
-                    elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
-                        $lastRunFFT = $minFFTSize
-                        Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
-                        Write-Verbose('The last passed FFT size does not show up in the FFTSizes array, assume it''s the first FFT size: ' + $lastRunFFT)
-                    }
-
-                    # If it's not the max value and it does show up in the FFT array, select the next value
-                    else {
-                        $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
-                        Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
-                        Write-Verbose('Last run FFT size assumed:  ' + $lastRunFFT)
-                    }
-                }
-
-                # Educated guess
-                if ($lastRunFFT) {
-                    Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
-                }
-                else {
-                    Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
-                }
-
-                Write-Verbose('The last 5 entries in the results.txt:')
-                $lastFiveRows | ForEach-Object -Begin {
-                    $index = $allLogEntries.Count - 5
-                } `
-                -Process {
-                    Write-Verbose('- [Line ' + $index + '] ' + $_)
-                    $index++
-                }
-
-                Write-Text('')
+                Write-ColorText('ERROR: The error happened at FFT size ' + $lastRunFFT + 'K') Magenta
             }
 
-            # Only Smallest, Small and Large FFT presets follow the order, so no real FFT size fail detection is possible due to randomization of the order by Prime95
+
+
+            # If nothing was found, try to guess
             else {
-                $lastFiveRows     = $allLogEntries | Select -Last 5
-                $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
-                $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
-                $lastPassedFFT    = if ($hasMatched) { [Int] $matches[1] }   # $matches is a fixed(?) variable name for -match
+                # If the results.txt doesn't exist, assume that it was on the very first iteration
+                # Note: Unfortunately Prime95 randomizes the FFT sizes for anything above Large FFT sizes
+                #       So we cannot make an educated guess for these settings
+                #if ($maxFFTSize -le $FFTMinMaxValues[$settings.mode]['LARGE'].Max) {
                 
-                if ($lastPassedFFT) {
-                    Write-ColorText('ERROR: The last *passed* FFT size before the error was: ' + $lastPassedFFT + 'K') Magenta 
-                    Write-ColorText('ERROR: Unfortunately FFT size fail detection only works for Smallest, Small or Large FFT sizes.') Magenta 
+                # This check is taken from the Prime95 source code:
+                # if (fftlen > max_small_fftlen * 2) num_large_lengths++;
+                # The max smallest FFT size is 240, so starting with 480 the order should get randomized
+                # Large FFTs are not randomized, Huge FFTs and All FFTs are
+
+                Write-Verbose('No FFT size provided in the error message, make an educated guess.')
+
+
+                # Temporary(?) solution
+                if ($maxFFTSize -le $FFTMinMaxValues['SSE']['LARGE']['Max']) {
+                    Write-Verbose('The maximum FFT size is within the range where we can still make an educated guess about the failed FFT size')
+
+                    # No results file exists yet
+                    if (!$resultFileHandle) {
+                        Write-Verbose('No results.txt exists yet, assuming the error happened on the first FFT size')
+                        $lastRunFFT = $minFFTSize
+                    }
+                    
+                    # Get the last couple of rows and find the last passed FFT size
+                    else {
+                        Write-Verbose('Trying to find the last passed FFT sizes')
+
+                        $lastFiveRows     = $allLogEntries | Select -Last 5
+                        $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})  # This needs to be an array
+                        $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
+                        $lastPassedFFT    = if ($hasMatched) { [Int] $Matches[1] }   # $Matches is a fixed(?) variable name for -match
+
+                        # No passed FFT was found, assume it's the first FFT size
+                        if (!$lastPassedFFT) {
+                            $lastRunFFT = $minFFTSize
+                            Write-Verbose('No passed FFT was found, assume it was the first FFT size: ' + $lastRunFFT)
+                        }
+
+                        # If the last passed FFT size is the max selected FFT size, start at the beginning
+                        elseif ($lastPassedFFT -eq $maxFFTSize) {
+                            $lastRunFFT = $minFFTSize
+                            Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
+                            Write-Verbose('The last passed FFT size is the max selected FFT size, use the min FFT size: ' + $lastRunFFT)
+                        }
+
+                        # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
+                        # In this case, we also assume that it successfully completed the max value and errored at the min FFT size
+                        # Example: Smallest FFT max = 21, but the actual last size tested is 20K
+                        elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
+                            $lastRunFFT = $minFFTSize
+                            Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
+                            Write-Verbose('The last passed FFT size does not show up in the FFTSizes array, assume it''s the first FFT size: ' + $lastRunFFT)
+                        }
+
+                        # If it's not the max value and it does show up in the FFT array, select the next value
+                        else {
+                            $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
+                            Write-Verbose('Last passed FFT size found: ' + $lastPassedFFT)
+                            Write-Verbose('Last run FFT size assumed:  ' + $lastRunFFT)
+                        }
+                    }
+
+                    # Educated guess
+                    if ($lastRunFFT) {
+                        Write-ColorText('ERROR: The error likely happened at FFT size ' + $lastRunFFT + 'K') Magenta
+                    }
+                    else {
+                        Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
+                    }
+
+                    Write-Verbose('The last 5 entries in the results.txt:')
+                    $lastFiveRows | ForEach-Object -Begin {
+                        $index = $allLogEntries.Count - 5
+                    } `
+                    -Process {
+                        Write-Verbose('- [Line ' + $index + '] ' + $_)
+                        $index++
+                    }
+
+                    Write-Text('')
                 }
+
+                # Only Smallest, Small and Large FFT presets follow the order, so no real FFT size fail detection is possible due to randomization of the order by Prime95
                 else {
-                    Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
+                    $lastFiveRows     = $allLogEntries | Select -Last 5
+                    $lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*passed*'})
+                    $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)K passed'
+                    $lastPassedFFT    = if ($hasMatched) { [Int] $matches[1] }   # $matches is a fixed(?) variable name for -match
+                    
+                    if ($lastPassedFFT) {
+                        Write-ColorText('ERROR: The last *passed* FFT size before the error was: ' + $lastPassedFFT + 'K') Magenta 
+                        Write-ColorText('ERROR: Unfortunately FFT size fail detection only works for Smallest, Small or Large FFT sizes.') Magenta 
+                    }
+                    else {
+                        Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
+                    }
+
+                    Write-Verbose('The max FFT size was outside of the range where it still follows a numerical order')
+                    Write-Verbose('The selected max FFT size:         ' + $maxFFTSize)
+                    Write-Verbose('The limit for the numerical order: ' + $FFTMinMaxValues['SSE']['LARGE']['Max'])
+
+
+                    Write-Verbose('The last 5 entries in the results.txt:')
+                    $lastFiveRows | ForEach-Object -Begin {
+                        $index = $allLogEntries.Count - 5
+                    } `
+                    -Process {
+                        Write-Verbose('- [Line ' + $index + '] ' + $_)
+                        $index++
+                    }
+
+                    Write-Text('')
                 }
-
-                Write-Verbose('The max FFT size was outside of the range where it still follows a numerical order')
-                Write-Verbose('The selected max FFT size:         ' + $maxFFTSize)
-                Write-Verbose('The limit for the numerical order: ' + $FFTMinMaxValues['SSE']['LARGE']['Max'])
-
-
-                Write-Verbose('The last 5 entries in the results.txt:')
-                $lastFiveRows | ForEach-Object -Begin {
-                    $index = $allLogEntries.Count - 5
-                } `
-                -Process {
-                    Write-Verbose('- [Line ' + $index + '] ' + $_)
-                    $index++
-                }
-
-                Write-Text('')
             }
         }
 
@@ -4339,6 +4455,7 @@ try {
                 # High
                 # RealTime
                 $stressTestProcess.PriorityClass = 'High'
+                # $stressTestProcess.PriorityClass = 'Idle'
 
                 # There's also a "SetPriority" property, which seems to be a WMI only property
                 # Possible values:

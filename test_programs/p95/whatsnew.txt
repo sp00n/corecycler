@@ -1,3 +1,30 @@
+New features in Version 30.8 of prime95.exe
+-------------------------------------------
+
+1) P-1 stage 2 using fast polynomial multiplication similar to the GMP-ECM program.  If lots
+   of memory is available for stage 2 this implementation will be substantially faster.
+
+New features in Version 30.7 of prime95.exe
+-------------------------------------------
+
+1) Better prime pairing in stage 2 of ECM/P-1/P+1.  This usually results in slightly better
+   stage 2 timings or less memory used.  Save file formats changed - upgrading to 30.7 while
+   ECM/P-1/P+1 work is in stage 2 will result in stage 2 being restarted from scratch.
+2) P-1 converted to use P+1 style stage 2.  From the users perspective there is no difference.
+   Internally a modular inverse is required at stage 2 init, but there is one multiplication
+   saved for every D-block processed.  For all common P-1 cases, this is a little faster.
+3) ECM/P-1/P+1 no longer use a bit map for prime pairs.  Instead a compressed pairing map is
+   created to save memory.  For large B2 values this also results in fewer calls to generate
+   pairing maps.  It also makes stage 2 save files smaller.
+4) Some minor changes in AVX-512 FFT crossovers.  ECM/P-1/P+1 all changed to rollback to the
+   last save file and switch to a larger FFT size should an excessive roundoff error be
+   encountered.
+5) Support for asymmetric processor architectures such as Intel's Alder Lake.
+6) Torture test dialog now asks for number of cores to test along with a "Use hyperthreading"
+   checkbox.  Previously, the dialog box asked for total number of torture threads to execute.
+7) Versions 30.4/30.5/30.6 were underestimating the cost of P-1 stage 2 relative to P-1 stage 1.
+   Expect this version to use lower stage 2 bounds in P-1.
+
 New features in Version 30.6 of prime95.exe
 -------------------------------------------
 
@@ -16,7 +43,8 @@ New features in Version 30.6 of prime95.exe
    best B2 value for the given B1.
 2) Faster ECM stage 1 when factoring exponents near the limit of an FFT size.
 3) Gwnum library new functions give a programmer more tools to reduce normalized adds.
-   A tutorial.txt file is now available to help a programmer use the gwnum library.
+   A tutorial.txt file (download the prime95 sources) is now available to help a programmer
+   use the gwnum library.
 
 New features in Version 30.4/30.5 of prime95.exe
 ------------------------------------------------
@@ -372,7 +400,7 @@ New features in Version 25.7 of prime95.exe
 -------------------------------------------
 
 1)  Time= in ini files no longer supported.  A during/else syntax can be
-    unsed instead for some ini file options.
+    used instead for some ini file options.
 2)  PauseWhileRunning enhanced to pause any number of workers.
 3)  LowMemWhileRunning added.
 4)  Ability to stop and start individual workers added.
@@ -764,7 +792,7 @@ New features in Version 22.2 of prime95.exe
 1)  Factoring assignments go to machines slower than a 233 MHz Pentium.
     Double-checks are assigned machines slower than a 500 MHz P-III.
 2)  The speed of the GCD has been improved.
-3)  Some of the P4 FFT ranges have changed.  Version 21 was too aggresive
+3)  Some of the P4 FFT ranges have changed.  Version 21 was too aggressive
     in choosing FFT sizes for the P4.
 4)  Roundoff error checking is now done on every iteration for exponents
     within 2% of the maximum that can be tested by the current FFT length.
@@ -793,7 +821,7 @@ New features in Version 22.1 of prime95.exe
     information.  Instead, the Options/CPU dialog displays the detected
     CPU type and speed.  This new feature helps prevent incorrect settings
     when users upgrade or try several overclocking speeds.  If the new
-    algorithm fails, you can overide the settings as described in undoc.txt.
+    algorithm fails, you can override the settings as described in undoc.txt.
 5)  Benchmark now writes the program version, timing methodology, cpu type
     and speed, L1 and L2 cache information to results.txt.  It will refuse to
     benchmark if rdtsctiming is 10.
@@ -843,7 +871,7 @@ New features in Version 21.2 of prime95.exe
     See undoc.txt on how to restore the old behavior.
 8)  Error messages such as ILLEGAL SUMOUT, SUMINP != SUMOUT, etc. are no
     longer sent to the server since the final result contains a count of how
-    many errors occured during the LL test.
+    many errors occurred during the LL test.
 9)  Some of the FFT crossover points have changed slightly.
 10) Test/Status now outputs the day of the week each work item will complete.
 11) Interim output lines have changed - hopefully, so they are more useful
