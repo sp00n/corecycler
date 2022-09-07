@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.0.0
+    0.9.1.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.0.0'
+$version                    = '0.9.1.0'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -231,7 +231,7 @@ $counterNames = @{
 # We currently only test the first core for each hyperthreaded "package",
 # so e.g. only 12 cores for a 24 threaded Ryzen 5900x
 # If you disable hyperthreading / SMT, both values should be the same
-$processor       = Get-WMIObject Win32_Processor
+$processor       = Get-CimInstance -ClassName Win32_Processor
 $numLogicalCores = $($processor | Measure-Object -Property NumberOfLogicalProcessors -sum).Sum
 $numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).Sum
 
@@ -259,7 +259,8 @@ Update-TypeData -TypeName System.Collections.HashTable `
     } `
     $hashstr += "}"; `
     return $hashstr; `
-}
+} `
+-Force
 
 
 # Prevent Sleep/Standby/Hibernation while the script is running
@@ -1215,8 +1216,8 @@ function Get-CpuFrequency {
 
     # We need two snapshots to be able to calculate an average over the time passed
     # We could also use a Start-Sleep function call to increase the timespan, without one it seems to be around 10ms
-    $snapshot1 = Get-WmiObject -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
-    $snapshot2 = Get-WmiObject -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
+    $snapshot1 = Get-CimInstance -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
+    $snapshot2 = Get-CimInstance -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
 
     $ProcessorFrequency                   = $snapshot1.ProcessorFrequency
 
@@ -1233,7 +1234,7 @@ function Get-CpuFrequency {
     for ($i = 0; $i -lt 10; $i++) {
         if ($PercentProcessorPerformanceDiff -lt 1000 -or $PercentProcessorPerformance_BaseDiff -lt 1000) {
             Start-Sleep 50
-            $snapshot2 = Get-WmiObject -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
+            $snapshot2 = Get-CimInstance -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
 
             $PercentProcessorPerformance2         = $snapshot2.PercentProcessorPerformance
             $PercentProcessorPerformance_Base2    = $snapshot2.PercentProcessorPerformance_Base
@@ -3747,6 +3748,18 @@ Get-Settings
 # This is a neat flag
 #requires -version 3.0
 
+# The script doesn't work for Powershell version 6 and 7
+# There are some missing cmdlets
+if ($PSVersionTable.PSVersion.Major -gt 5) {
+    Write-Host
+    Write-Host 'FATAL ERROR: The PowerShell version is too _new_!' -ForegroundColor Red
+    Write-Host 'PowerShell version 6 and above do not support the required functions inside this script!' -ForegroundColor Red
+    Write-Host
+    Write-Host 'Please run this script with PowerShell 5.1, which is included with Windows' -ForegroundColor Yellow
+    
+    Exit-WithFatalError    
+}
+
 
 # Check if .NET is installed
 $hasDotNet3_5 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v3.5' -ErrorAction Ignore).Install
@@ -4298,9 +4311,9 @@ try {
             if ($settings.General.numberOfThreads -gt 1) {
                 for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
                     # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
-                    $thisCPUNumber    = ($actualCoreNumber * 2) + $currentThread
-                    $cpuNumbersArray += $thisCPUNumber
-                    $affinity        += [Int64] [Math]::Pow(2, $thisCPUNumber)
+                    $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
+                    $cpuNumbersArray += $cpuNumber
+                    $affinity        += [Int64] [Math]::Pow(2, $cpuNumber)
                 }
             }
 
@@ -4475,8 +4488,8 @@ try {
                 # 21  - Invalid parameter 
                 # 22+ - Other
 
-                # Get-WmiObject win32_process -Filter 'Name="prime95.exe"'
-                # $wmiStressTestProcess = Get-WmiObject win32_process -Filter ('Handle="' + $stressTestProcess.Id + '"')
+                # Get-CimInstance -ClassName win32_process -Filter 'Name="prime95.exe"'
+                # $wmiStressTestProcess = Get-CimInstance -ClassName win32_process -Filter ('Handle="' + $stressTestProcess.Id + '"')
                 # $setPriority = $wmiStressTestProcess.SetPriority(128)
                 # $setPriority.ReturnValue
             }
@@ -4598,6 +4611,12 @@ try {
 
                         for ($currentLineIndex = 0; $currentLineIndex -lt $foundFFTSizeLines.Length; $currentLineIndex++) {
                             $currentResultLineEntry = $foundFFTSizeLines[$currentLineIndex]
+                            
+                            # More recent Prime95 version add a "(thread x of y)" to the log output, which breaks the recognition
+                            # Theoretically this would offer a new way to determine the failures, but it would require a larger rewrite
+                            # So removing this is the lazy approach
+                            $currentResultLineEntry.Line = $currentResultLineEntry.Line -replace ' \(thread \d+ of \d+\)', ''
+                            
                             $insert = $false
 
                             Write-Debug('')
@@ -4615,7 +4634,23 @@ try {
                                 # Does this line also appear in the last line?
                                 $curCheckIndex = $allFFTLogEntries.Count - 1
 
+                                # For newer Prime95 versions, the lines do not match anymore
+                                # Example:
+                                # Self-test 4K (thread 2 of 2) passed!
+                                # Self-test 4K (thread 1 of 2) passed!
+
                                 while ($curCheckIndex -ge 0 -and $allFFTLogEntries[$curCheckIndex] -and $currentResultLineEntry.Line -eq $allFFTLogEntries[$curCheckIndex].Line) {
+                                #while ($curCheckIndex -ge 0 -and $allFFTLogEntries[$curCheckIndex]) {
+                                    #$curLineHasMatched       = $currentResultLineEntry.Line -match 'Self\-test (\d+)K passed'
+                                    #$curLineFFTSize          = if ($curLineHasMatched) { [Int] $Matches[1] }   # $Matches is a fixed variable name for -match
+                                    
+                                    #$previousLineHasMatched  = $allFFTLogEntries[$curCheckIndex].Line -match 'Self\-test (\d+)K passed'
+                                    #$previousLineFFTSize     = if ($previousLineHasMatched) { [Int] $Matches[1] }   # $Matches is a fixed variable name for -match
+
+                                    #if ($curLineFFTSize -ne $previousLineFFTSize) {
+                                    #    break
+                                    #}
+
                                     Write-Debug('           curCheckIndex:      ' + $curCheckIndex)
                                     Write-Debug('           This line:          ' + $currentResultLineEntry.Line)
                                     Write-Debug('           curCheckIndex line: ' + $allFFTLogEntries[$curCheckIndex].Line)
