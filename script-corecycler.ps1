@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.1.0
+    0.9.1.1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.1.0'
+$version                    = '0.9.1.1'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -2280,12 +2280,13 @@ function Initialize-Prime95 {
     # Prime 30.7 and above:
     if ($isPrime95_30_7) {
         # If this is not set, Prime95 will create #numCores worker threads in 30.7+
-        # Add-Content $configFile1 ('NumThreads='    + $settings.General.numberOfThreads)
-        # Add-Content $configFile1 ('WorkerThreads=' + $settings.General.numberOfThreads)
+        Add-Content $configFile1 ('NumThreads='    + $settings.General.numberOfThreads)
+        Add-Content $configFile1 ('WorkerThreads=' + $settings.General.numberOfThreads)
         
         # If we're using TortureHyperthreading in prime.txt, this needs to stay at 1, even if we're using 2 threads
-        Add-Content $configFile1 ('NumThreads=1')
-        Add-Content $configFile1 ('WorkerThreads=1')
+        # TortureHyperthreading introduces inconsistencies with the log format for two threads though, so we won't use it
+        # Add-Content $configFile1 ('NumThreads=1')
+        # Add-Content $configFile1 ('WorkerThreads=1')
     }
 
     
@@ -2314,8 +2315,10 @@ function Initialize-Prime95 {
     # TortureHyperthreading=0/1
     # Goes into the prime.txt ($configFile2)
     # If we set this here, we need to use NumThreads=1 in local.txt
+    # TortureHyperthreading introduces inconsistencies with the log format for two threads though, so we won't activate it
     if ($isPrime95_30_7) {
-        Add-Content $configFile2 ('TortureHyperthreading=' + ($settings.General.numberOfThreads - 1))   # Number of Threads = 2 -> Setting = 1 / Number of Threads = 1 -> Setting = 0
+        # Add-Content $configFile2 ('TortureHyperthreading=' + ($settings.General.numberOfThreads - 1))   # Number of Threads = 2 -> Setting = 1 / Number of Threads = 1 -> Setting = 0
+        Add-Content $configFile2 ('TortureHyperthreading=0')
     }
 
     
