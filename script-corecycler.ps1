@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.1.1
+    0.9.1.2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.1.1'
+$version                    = '0.9.1.2'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -811,7 +811,7 @@ function Get-PerformanceCounterLocalName {
 .DESCRIPTION
     This is used to get the Performance Counter IDs, which will be used to get the localized names
 .PARAMETER englishCounterNames
-    [Array] An arraay with the english names of the counters
+    [Array] An array with the english names of the counters
 .OUTPUTS
     [HashTable] A hashtable with Name:ID pairs of the counters
 #>
@@ -1632,7 +1632,9 @@ function Get-TortureWeakValue {
     
     - Only CPU_AVX512F, CPU_FMA3, CPU_AVX & CPU_SSE2 is used for the calculation
     - If one of these is set to disabled, add the number to the total value
-    - AVX512 is never available on Ryzen
+    - AVX512 is never available on Ryzen <= 5000
+    - AVX512 seems to be available beginning with Ryzen 7000
+    - TODO: Need a way to detect if AVX512 is available or not
 
     All enabled (except AVX512):
     1048576 --> CPU_AVX512F
@@ -2280,11 +2282,11 @@ function Initialize-Prime95 {
     # Prime 30.7 and above:
     if ($isPrime95_30_7) {
         # If this is not set, Prime95 will create #numCores worker threads in 30.7+
-        Add-Content $configFile1 ('NumThreads='    + $settings.General.numberOfThreads)
+        Add-Content $configFile1 ('NumThreads='    + $settings.General.numberOfThreads)             # This has been renamed from CpuNumHyperthreads
         Add-Content $configFile1 ('WorkerThreads=' + $settings.General.numberOfThreads)
         
         # If we're using TortureHyperthreading in prime.txt, this needs to stay at 1, even if we're using 2 threads
-        # TortureHyperthreading introduces inconsistencies with the log format for two threads though, so we won't use it
+        # TortureHyperthreading introduces inconsistencies with the log format for two threads, so we won't use it
         # Add-Content $configFile1 ('NumThreads=1')
         # Add-Content $configFile1 ('WorkerThreads=1')
     }
@@ -2315,7 +2317,8 @@ function Initialize-Prime95 {
     # TortureHyperthreading=0/1
     # Goes into the prime.txt ($configFile2)
     # If we set this here, we need to use NumThreads=1 in local.txt
-    # TortureHyperthreading introduces inconsistencies with the log format for two threads though, so we won't activate it
+    # However, TortureHyperthreading introduces inconsistencies with the log format for two threads, so we won't use it
+    # Instead, we're using the "old" mechanic of running two worker threads (as in 30.6 and before)
     if ($isPrime95_30_7) {
         # Add-Content $configFile2 ('TortureHyperthreading=' + ($settings.General.numberOfThreads - 1))   # Number of Threads = 2 -> Setting = 1 / Number of Threads = 1 -> Setting = 0
         Add-Content $configFile2 ('TortureHyperthreading=0')
@@ -2356,7 +2359,7 @@ function Initialize-Prime95 {
     #Add-Content $configFile2 ('WGUID_version=2')                   # The algorithm used to generate the Windows GUID. Not important
     #Add-Content $configFile2 ('WorkPreference=0')                  # This seems to be a PrimeNet only setting
 
-    #Add-Content $configFile2 ('[PrimeNet]')
+    #Add-Content $configFile2 ('[PrimeNet]')                        # Settings for uploading Prime results, not required
     #Add-Content $configFile2 ('Debug=0')
 }
 
