@@ -185,7 +185,7 @@ algorithm disables the rest. Multiple algorithms can be specified.
 
 -D and -TL are measured in seconds.
 
-The valid values for [algorithm] are: BKT, FFT, N32, N64, HNT, VST, and C17
+The valid values for [algorithm] are: BKT, BBP, SFT, FFT, N32, N64, HNT, VST, and C17
 The "C17" algorithm is not available on all processors.
 
 

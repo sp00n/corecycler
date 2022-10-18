@@ -5,6 +5,67 @@ http://www.numberworld.org/y-cruncher/internals/arch-optimizations.html
 
 --------------------------------------------------------------------------------
 
+Binary: "22-ZN4 ~ Kizuna" (AMD Zen 4)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+    AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI/VBMI2/GFNI)
+
+
+Target Systems:
+    - AMD Zen 4 Raphael
+
+Recommended For:
+    - AMD Zen 4 Raphael
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Ryzen 9 7950X
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   64 GB DDR5 @ 4400 MHz (36-36-36-71)
+
+    Cores           :   16
+    Threads         :   32
+    Cache           :   (undisclosed)
+    Cache / Thread  :   (undisclosed)
+
+
+--------------------------------------------------------------------------------
+
+Binary: "20-ZN3 ~ Yuzuki" (AMD Zen 3)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+
+
+Target Systems:
+    - AMD Zen 3 Vermeer
+
+Recommended For:
+    - AMD Zen 3 Vermeer
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Ryzen 6 5600X
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   128 GB DDR4 @ 2666 MHz (20-19-19-43)
+
+    Cores           :   6
+    Threads         :   12
+    Cache           :   32 MB
+    Cache / Thread  :   4 MB / thread
+
+
+--------------------------------------------------------------------------------
+
 Binary: "19-ZN2 ~ Kagari" (AMD Zen 2)
 
 
@@ -24,13 +85,13 @@ Recommended For:
 This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 9 3950X
-    Frequency       :   variable (stock)
+    CPU Frequency   :   stock (variable frequency)
     Memory          :   128 GB DDR4 @ 3200 MHz (16-18-18-38)
 
     Cores           :   16
     Threads         :   32
     Cache           :   64 MB
-    Cache / Threads :   2 MB / thread
+    Cache / Thread  :   2 MB / thread
 
 
 --------------------------------------------------------------------------------
@@ -46,23 +107,32 @@ Required Instructions:
 
 
 Target Systems:
-    - Intel Cannon Lake and Ice Lake
+    - Intel Cannon Lake
+    - Intel Ice Lake
+    - Intel Tiger Lake
 
 Recommended For:
-    - All Cannon Lake and Ice Lake systems with AVX512.
+    - Intel Cannon Lake
+    - Intel Ice Lake
+    - Intel Tiger Lake
+    - Intel Alder Lake (only with AVX512)
+    - Intel Sapphire Rapids
 
 
 This binary was tuned on:
 
-    Processor(s)    :   Intel Core i3 8121U
-    CPU Frequency   :   2.3 - 3.2 GHz
-    Cache Frequency :   2.2 GHz
-    Memory          :   8 GB LPDDR4 @ 2666 MHz
+    Processor(s)    :   Intel Core i7 11800H
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   64 GB DDR4 @ 3200 MHz
 
-    Cores           :   2
-    Threads         :   4
-    Cache           :   4 MB
-    Cache / Threads :   1 MB / thread
+    Cores           :   8
+    Threads         :   16
+    Cache           :   24 MB
+    Cache / Thread  :   1.5 MB / thread
+
+
+This binary was formerly turned for Cannon Lake 8121U, but has since been
+re-tuned for a higher volume processor.
 
 
 --------------------------------------------------------------------------------
@@ -94,7 +164,7 @@ This binary was tuned on:
     Cores           :   14
     Threads         :   28
     Cache           :   14 MB
-    Cache / Threads :   512 KB / thread
+    Cache / Thread  :   512 KB / thread
 
 
 --------------------------------------------------------------------------------
@@ -151,7 +221,7 @@ This binary was tuned on:
     Cores           :   8
     Threads         :   16
     Cache           :   16 MB
-    Cache / Threads :   1 MB / thread
+    Cache / Thread  :   1 MB / thread
 
 
 --------------------------------------------------------------------------------
@@ -181,7 +251,7 @@ This binary was tuned on:
     Cores           :   4
     Threads         :   8
     Cache           :   8 MB
-    Cache / Threads :   1 MB / thread
+    Cache / Thread  :   1 MB / thread
 
 
 --------------------------------------------------------------------------------
@@ -212,7 +282,7 @@ This binary was tuned on:
     Cores           :   8
     Threads         :   16
     Cache           :   20 MB
-    Cache / Threads :   1 MB / thread
+    Cache / Thread  :   1 MB / thread
 
 
 --------------------------------------------------------------------------------
@@ -240,7 +310,7 @@ This binary was tuned on:
     Cores           :   8 (4 modules)
     Threads         :   8
     Cache           :   8 MB
-    Cache / Threads :   1 MB / thread
+    Cache / Thread  :   1 MB / thread
 
 
 --------------------------------------------------------------------------------
@@ -268,7 +338,7 @@ This binary was tuned on:
     Cores           :   4
     Threads         :   8
     Cache           :   8 MB
-    Cache / Threads :   1 MB / thread
+    Cache / Thread  :   1 MB / thread
 
 
 This build will run on any processor supporting AVX instructions. But it is not
@@ -302,7 +372,7 @@ This binary was tuned on:
     Cores           :   4
     Threads         :   8
     Cache           :   8 MB
-    Cache / Threads :   1 MB / thread
+    Cache / Thread  :   1 MB / thread
 
 
 This build will also run on Intel Penryn processors. (Intel Core 2 with SSE4.1.)
@@ -334,7 +404,7 @@ This binary was tuned on:
     Cores           :   8
     Threads         :   8
     Cache           :   24 MB
-    Cache / Threads :   3 MB / thread
+    Cache / Thread  :   3 MB / thread
 
 
 This build is no longer supported as of version 0.6.1.
@@ -365,7 +435,7 @@ This binary was tuned on:
     Cores           :   4
     Threads         :   4
     Cache           :   6 MB
-    Cache / Threads :   1.5 MB / thread
+    Cache / Thread  :   1.5 MB / thread
 
 
 --------------------------------------------------------------------------------
@@ -390,7 +460,7 @@ This binary was tuned on:
     Cores           :   4
     Threads         :   4
     Cache           :   6 MB
-    Cache / Threads :   1.5 MB / thread
+    Cache / Thread  :   1.5 MB / thread
 
 
 --------------------------------------------------------------------------------
@@ -415,7 +485,7 @@ This binary was tuned on:
     Cores           :   4
     Threads         :   4
     Cache           :   6 MB
-    Cache / Threads :   1.5 MB / thread
+    Cache / Thread  :   1.5 MB / thread
 
 
 --------------------------------------------------------------------------------
