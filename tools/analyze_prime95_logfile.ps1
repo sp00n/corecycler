@@ -40,89 +40,110 @@ if ($args[0]) {
 $allFFTSizes = @{
     SSE = @(
         # Smallest FFT
-        4, 5, 6, 8, 10, 12, 14, 16, 20,
-        
-        # Not used in Prime95 presets
-        24, 28, 32,
-        
-        # Small FFT
-        40, 48, 56, 64, 72, 80, 84, 96, 112, 128, 144, 160, 192, 224, 240,
+        4096, 5120, 6144, 8192, 10240, 12288, 14336, 16384, 20480,
 
         # Not used in Prime95 presets
-        256, 288, 320, 336, 384, 400,
+        24576, 28672, 32768,
+
+        # Small FFT
+        40960, 49152, 57344, 65536, 73728, 81920, 86016, 98304, 114688, 131072, 147456, 163840, 196608, 229376, 245760,
+
+        # Not used in Prime95 presets
+        262144, 294912, 327680, 344064, 393216, 409600,
 
         # Large FFT
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
-        2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
-        6400, 6720, 6912, 7168, 7680, 8000, 8192
+        458752, 491520, 524288, 573440, 589824, 655360, 688128, 737280, 786432, 819200, 917504, 983040, 1048576, 1146880, 1179648, 1228800, 1310720,
+        1376256, 1474560, 1572864, 1638400, 1720320, 1769472, 1835008, 1966080, 2097152, 2293760, 2359296, 2457600, 2621440, 2752512, 2867200, 2949120,
+        3145728, 3276800, 3440640, 3538944, 3670016, 3932160, 4194304, 4587520, 4718592, 4915200, 5242880, 5505024, 5734400, 5898240, 6291456, 6553600,
+        6881280, 7077888, 7340032, 7864320, 8192000, 8388608,
 
         # Not used in Prime95 presets
         # Now custom labeled "Huge"
-        # 32768 seems to be the maximum FFT size possible for SSE
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16384, 17920, 18432, 19200, 20480, 21504,
-        22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
+        # 32768K = 33554432 seems to be the maximum FFT size possible for SSE
+        9175040, 9437184, 9830400, 10485760, 11010048, 11468800, 11796480, 12582912, 13107200, 13762560, 14155776, 14680064, 15728640, 16384000, 16777216,
+        18350080, 18874368, 19660800, 20971520, 22020096, 22937600, 23592960, 25165824, 26214400, 27525120, 28311552, 29360128, 31457280, 32768000, 33554432
     )
 
     AVX = @(
         # Smallest FFT
-        4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+        4096, 5120, 6144, 8192, 10240, 12288, 15360, 16384, 18432, 20480, 21504,
 
         # Not used in Prime95 presets
-        24, 25, 28, 32, 35,
+        24576, 25600, 28672, 32768, 35840,
 
         # Small FFT
-        36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240,
+        36864, 40960, 49152, 51200, 61440, 65536, 73728, 81920, 86016, 98304, 102400, 114688, 122880, 131072, 143360, 147456, 163840, 172032, 196608, 204800, 229376, 245760,
 
         # Not used in Prime95 presets
-        256, 288, 320, 336, 384, 400,
+        262144, 294912, 327680, 344064, 393216, 409600,
 
         # Large FFT
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920,
-        2048, 2304, 2400, 2560, 2688, 2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376, 5760, 6144,
-        6400, 6720, 6912, 7168, 7680, 8000, 8192
+        458752, 491520, 524288, 573440, 589824, 655360, 688128, 737280, 786432, 819200, 884736, 917504, 983040, 1048576, 1179648, 1310720, 1376256, 1474560, 1572864, 1638400,
+        1720320, 1769472, 1835008, 1966080, 2097152, 2359296, 2457600, 2621440, 2752512, 2949120, 3145728, 3276800, 3440640, 3538944, 3670016, 3932160, 4128768, 4194304,
+        4587520, 4718592, 4915200, 5242880, 5505024, 5898240, 6291456, 6553600, 6881280, 7077888, 7340032, 7864320, 8192000, 8388608,
 
         # Not used in Prime95 presets
         # Now custom labeled "Huge"
-        # 32768 seems to be the maximum FFT size possible for AVX
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        8960, 9216, 9600, 10240, 10752, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504,
-        22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768
+        # 32768K = 33554432 seems to be the maximum FFT size possible for AVX
+        9175040, 9437184, 9830400, 10485760, 11010048, 11796480, 12582912, 13107200, 13762560, 14155776, 14680064, 15728640, 16384000, 16515072, 16777216, 18350080,
+        18874368, 19660800, 20971520, 22020096, 22937600, 23592960, 25165824, 26214400, 27525120, 29360128, 31457280, 32768000, 33554432
     )
-
 
     AVX2 = @(
         # Smallest FFT
-        4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21,
+        4096, 5120, 6144, 8192, 10240, 12288, 15360, 16384, 18432, 20480, 21504,
 
         # Not used in Prime95 presets
-        24, 25, 28, 30, 32, 35,
+        24576, 25600, 28672, 30720, 32768, 35840,
 
         # Small FFT
-        36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 144, 160, 168, 192, 200, 224, 240,
+        36864, 40960, 49152, 51200, 61440, 65536, 73728, 81920, 86016, 98304, 102400, 114688, 122880, 131072, 147456, 163840, 172032, 196608, 204800, 229376, 245760,
 
         # Not used in Prime95 presets
-        256, 280, 288, 320, 336, 384, 400,
+        262144, 286720, 294912, 327680, 344064, 393216, 409600,
 
         # Large FFT
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        448, 480, 512, 560, 640, 672, 768, 800, 896, 960, 1024, 1120, 1152, 1280, 1344, 1440, 1536, 1600, 1680, 1792, 1920,
-        2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3584, 3840, 4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144,
-        6400, 6720, 7168, 7680, 8000, 8064, 8192
+        458752, 491520, 524288, 573440, 655360, 688128, 786432, 819200, 917504, 983040, 1048576, 1146880, 1179648, 1310720, 1376256, 1474560, 1572864, 1638400,
+        1720320, 1835008, 1966080, 2097152, 2293760, 2359296, 2457600, 2621440, 2752512, 2867200, 2949120, 3145728, 3276800, 3440640, 3670016, 3932160, 4194304,
+        4587520, 4718592, 4915200, 5242880, 5505024, 5734400, 5898240, 6291456, 6553600, 6881280, 7340032, 7864320, 8192000, 8257536, 8388608,
 
         # Not used in Prime95 presets
         # Now custom labeled "Huge"
-        # 51200 seems to be the maximum FFT size possible for AVX2
-        # Note: Unfortunately Prime95 seems to randomize the order for larger FFT sizes
-        8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480,
-        21504, 22400, 23040, 24576, 25600, 26880, 28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
+        # 51200K = 52428800 seems to be the maximum FFT size possible for AVX2
+        9175040, 9437184, 9830400, 10485760, 11010048, 11468800, 11796480, 12582912, 13107200, 13762560, 14155776, 14680064, 15728640, 16384000, 16515072, 16777216,
+        18350080, 18874368, 19660800, 20971520, 22020096, 22937600, 23592960, 25165824, 26214400, 27525120, 29360128, 31457280, 32768000, 33554432, 36700160, 39321600,
+        41943040, 45875200, 52428800
+    )
 
-        # An example of the randomization:
-        # 11200, 8960, 9216, 9600, 10240, 10752, 11520, 11200, 11520, 12288, 11200, 8192, 11520, 12288, 12800, 13440, 13824, 8960, 14336, 15360,
-        # 16000, 16128, 16384, 9216, 17920, 18432, 19200, 20480, 21504, 9600, 22400, 23040, 24576, 25600, 26880, 10240, 28672, 30720, 32000, 32768,
-        # 35840, 10752, 38400, 40960, 44800, 51200
+    AVX512 = @(
+        # Smallest FFT
+        4608, 5120, 6144, 7168, 7680, 8192, 9216, 10240, 10752, 12288, 12800, 16384, 18432, 20480,
+
+        # Not used in Prime95 presets
+        24576, 25600, 32768,
+
+        # Small FFT
+        40960, 49152, 57344, 61440, 65536, 73728, 81920, 86016, 98304, 122880, 131072, 147456, 196608, 204800, 245760,
+
+        # Not used in Prime95 presets
+        286720, 294912, 307200, 327680, 344064, 368640, 393216, 401408, 409600,
+
+        # Large FFT
+        430080, 442368, 458752, 491520, 516096, 524288, 573440, 589824, 602112, 614400, 655360, 688128, 737280, 786432, 819200, 860160, 884736,
+        917504, 983040, 1024000, 1032192, 1048576, 1179648, 1228800, 1310720, 1376256, 1433600, 1474560, 1536000, 1572864, 1638400, 1720320,
+        1769472, 1843200, 1966080, 2007040, 2097152, 2150400, 2211840, 2293760, 2359296, 2457600, 2580480, 2621440, 2654208, 2752512, 2949120,
+        3010560, 3072000, 3145728, 3211264, 3276800, 3440640, 3538944, 3686400, 3932160, 4014080, 4128768, 4300800, 4423680, 4587520, 4718592,
+        4816896, 4915200, 5160960, 5242880, 5308416, 5505024, 5898240, 6193152, 6291456, 6422528, 6553600, 6881280, 7225344, 7340032, 7372800,
+        7864320, 8257536,
+
+        # Not used in Prime95 presets
+        # Now custom labeled "Huge"
+        # 65536K = 67108864 seems to be the maximum FFT size possible for AVX2
+        8601600, 8847360, 9175040, 9830400, 10485760, 10616832, 11468800, 11796480, 12582912, 13107200, 13762560, 14745600, 15728640, 16056320,
+        16515072, 16777216, 17203200, 17694720, 18350080, 18874368, 19267584, 19660800, 20643840, 20971520, 21233664, 22020096, 22478848, 22937600,
+        24084480, 24772608, 25165824, 25690112, 26214400, 27525120, 28311552, 28901376, 29491200, 31457280, 32112640, 33030144, 33718272, 35389440,
+        37748736, 38535168, 39321600, 41287680, 41943040, 42467328, 44040192, 47185920, 48168960, 49545216, 50331648, 51380224, 55050240, 56623104,
+        57802752, 58720256, 62914560, 67108864
     )
 }
 
@@ -131,37 +152,62 @@ $allFFTSizes = @{
 # depending on the selected test mode (SSE, AVX, AVX2)
 $FFTMinMaxValues = @{
     SSE = @{
-        Smallest   = @{ Min =    4; Max =    20; }  # Originally   4 ...   21
-        Small      = @{ Min =   40; Max =   240; }  # Originally  36 ...  248
-        Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Huge       = @{ Min = 8960; Max = 32768; }  # New addition
-        All        = @{ Min =    4; Max = 32768; }
-        Moderate   = @{ Min = 1344; Max =  4096; }
-        Heavy      = @{ Min =    4; Max =  1344; }
-        HeavyShort = @{ Min =    4; Max =   160; }
+        Smallest   = @{ Min =    4096; Max =    21504; }  # Originally   4 ...   21
+        Small      = @{ Min =   36864; Max =   245760; }  # Originally  36 ...  248
+        Large      = @{ Min =  458752; Max =  8388608; }  # Originally 426 ... 8192
+        Huge       = @{ Min = 9175040; Max = 33554432; }  # New addition
+        All        = @{ Min =    4096; Max = 33554432; }
+        Moderate   = @{ Min = 1376256; Max =  4194304; }
+        Heavy      = @{ Min =    4096; Max =  1376256; }
+        HeavyShort = @{ Min =    4096; Max =   163840; }
     }
 
     AVX = @{
-        Smallest   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-        Small      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-        Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Huge       = @{ Min = 8960; Max = 32768; }  # New addition
-        All        = @{ Min =    4; Max = 32768; }
-        Moderate   = @{ Min = 1344; Max =  4096; }
-        Heavy      = @{ Min =    4; Max =  1344; }
-        HeavyShort = @{ Min =    4; Max =   160; }
+        Smallest   = @{ Min =    4096; Max =    21504; }  # Originally   4 ...   21
+        Small      = @{ Min =   36864; Max =   245760; }  # Originally  36 ...  248
+        Large      = @{ Min =  458752; Max =  8388608; }  # Originally 426 ... 8192
+        Huge       = @{ Min = 9175040; Max = 33554432; }  # New addition
+        All        = @{ Min =    4096; Max = 33554432; }
+        Moderate   = @{ Min = 1376256; Max =  4194304; }
+        Heavy      = @{ Min =    4096; Max =  1376256; }
+        HeavyShort = @{ Min =    4096; Max =   163840; }
     }
 
     AVX2 = @{
-        Smallest   = @{ Min =    4; Max =    21; }  # Originally   4 ...   21
-        Small      = @{ Min =   36; Max =   240; }  # Originally  36 ...  248
-        Large      = @{ Min =  448; Max =  8192; }  # Originally 426 ... 8192
-        Huge       = @{ Min = 8960; Max = 51200; }  # New addition
-        All        = @{ Min =    4; Max = 51200; }
+        Smallest   = @{ Min =    4096; Max =    21504; }  # Originally   4 ...   21
+        Small      = @{ Min =   36864; Max =   245760; }  # Originally  36 ...  248
+        Large      = @{ Min =  458752; Max =  8388608; }  # Originally 426 ... 8192
+        Huge       = @{ Min = 9175040; Max = 52428800; }  # New addition
+        All        = @{ Min =    4096; Max = 52428800; }
+        Moderate   = @{ Min = 1376256; Max =  4194304; }
+        Heavy      = @{ Min =    4096; Max =  1376256; }
+        HeavyShort = @{ Min =    4096; Max =   163840; }
+    }
+
+    AVX512 = @{
+        Smallest   = @{ Min =    4608; Max =    21504; }  # Originally   4 ...   21
+        Small      = @{ Min =   36864; Max =   245760; }  # Originally  36 ...  248
+        Large      = @{ Min =  458752; Max =  8388608; }  # Originally 426 ... 8192
+        Huge       = @{ Min = 9175040; Max = 67108864; }  # New addition
+        All        = @{ Min =    4608; Max = 67108864; }
+        Moderate   = @{ Min = 1376256; Max =  4194304; }
+        Heavy      = @{ Min =    4608; Max =  1376256; }
+        HeavyShort = @{ Min =    4608; Max =   163840; }
+    }
+
+    # The limits apprently have changed for Prime95 30.8
+    <#
+    AVX512 = @{
+        Smallest   = @{ Min =    4; Max =    42; }  # Originally   4 ...   42
+        Small      = @{ Min =   73; Max =   455; }  # Originally  73 ...  455
+        Large      = @{ Min =  780; Max =  8192; }  # Originally 780 ... 8192
+        Huge       = @{ Min = 8400; Max = 65536; }  # New addition
+        All        = @{ Min =    4; Max = 65536; }
         Moderate   = @{ Min = 1344; Max =  4096; }
         Heavy      = @{ Min =    4; Max =  1344; }
         HeavyShort = @{ Min =    4; Max =   160; }
     }
+    #>
 }
 
 
@@ -218,7 +264,7 @@ $foundTestModesMinMax        = @()
 $detectedTestModesFFT        = @()
 $testModesToCheck            = @()
 $logfile                     = Get-Content $filePath
-$regexFFT                    = '^Self\-test (\d+)K passed!$'
+$regexFFT                    = '^Self\-test (\d+)(K?) passed!$'
 $regexTime                   = '^\[(.*)]$'
 $curLineNumber               = 0
 $startLineNumber             = 1
@@ -248,7 +294,14 @@ if ($testMode -eq 'auto' -or $fftPreset -eq 'auto') {
     # If no preset was provided 
     foreach ($line in $logfile) {
         if ($line -Match $regexFFT) {
-            $allFFTSizesInLogfile += [Int]$matches[1]
+            if ($matches[2] -eq "K") {
+                $curFFTSize = [Int64]$matches[1] * 1024
+            }
+            else {
+                $curFFTSize = [Int64]$matches[1]
+            }
+
+            $allFFTSizesInLogfile += $curFFTSize
         }
     }
 
@@ -281,19 +334,21 @@ if ($testMode -eq 'auto' -or $fftPreset -eq 'auto') {
 
     $minFoundFFTSize = ($allFFTSizesInLogfile | Measure -Min).Minimum
     $maxFoundFFTSize = ($allFFTSizesInLogfile | Measure -Max).Maximum
+    $minFoundFFTSizeDisplay = if ($minFoundFFTSize % 1024 -eq 0) { ($minFoundFFTSize/1024).toString() + 'K' } else { $minFoundFFTSize }
+    $maxFoundFFTSizeDisplay = if ($maxFoundFFTSize % 1024 -eq 0) { ($maxFoundFFTSize/1024).toString() + 'K' } else { $maxFoundFFTSize }
 
     Write-Host -NoNewline ('Minimum FFT Size found: ........... ') -ForegroundColor Cyan
-    Write-Host ($minFoundFFTSize) -ForegroundColor Yellow
+    Write-Host ($minFoundFFTSizeDisplay) -ForegroundColor Yellow
     Write-Host -NoNewline ('Maximum FFT Size found: ........... ') -ForegroundColor Cyan
-    Write-Host ($maxFoundFFTSize) -ForegroundColor Yellow
+    Write-Host ($maxFoundFFTSizeDisplay) -ForegroundColor Yellow
 
     # If there was a test mode provided
     if ($testMode -ne 'auto') {
         $testModesToCheck += $testMode
     }
     else {
-        # First check SSE, then AVX, then AVX2
-        $testModesToCheck = @('SSE', 'AVX', 'AVX2')
+        # First check SSE, then AVX, then AVX2, then AVX512
+        $testModesToCheck = @('SSE', 'AVX', 'AVX2', 'AVX512')
     }
 
     # No FFT preset was provided
@@ -358,6 +413,10 @@ if ($testMode -eq 'auto' -or $fftPreset -eq 'auto') {
         'fftSubarray:'
         $fftSubarray -Join ', '
 
+        ''
+        'allUniqueFFTSizesInLogfile:'
+        ($allUniqueFFTSizesInLogfile | Sort-Object) -Join ', '
+
         'Do the arrays match?'
 
         
@@ -371,6 +430,7 @@ if ($testMode -eq 'auto' -or $fftPreset -eq 'auto') {
         $missing2 -Join ', '
         '-------------------------------------'
         #>
+
         
         # Found a matching hit
         if ($missing1.Length -eq 0 -and $missing2.Length -eq 0) {
@@ -488,10 +548,16 @@ foreach ($line in $logfile) {
     $curLineNumber++
     
     if ($line -Match $regexFFT) {
-        $fftSize = [Int]$matches[1]
+        if ($matches[2] -eq "K") {
+            $fftSize = [Int64]$matches[1] * 1024
+        }
+        else {
+            $fftSize = [Int64]$matches[1]
+        }
+        
         $matches.Clear()
 
-        #'Current FFT Size:  ' + $fftSize
+        #'Current FFT Size:  ' + ($fftSize/1024) + '  (Length of unique FFT array: ' + $foundFFTSizesUnique.Length + ')'
         #'Previous FFT Size: ' + $previousFFTSize
 
         # Compare the FFT size to the previous one
@@ -511,8 +577,11 @@ foreach ($line in $logfile) {
 
             else {
                 $previousFFTSize = $fftSize
-                
             }
+        }
+
+        else {
+            $previousFFTSize = $fftSize
         }
 
         # Store the found FFT size
@@ -527,8 +596,17 @@ foreach ($line in $logfile) {
             #$fftSize
         }
 
+
+        #'Current FFT Size:  ' + ($fftSize/1024) + '  (Length of unique FFT array: ' + $foundFFTSizesUnique.Length + ')'
+
+
         # If all FFT sizes have been found for this iteration
         if ($foundFFTSizesUnique.Length -eq $selectedFFTSizesArray.Length) {
+            ''
+            'Found a full iteration'
+            'Length of unique FFT array: ' + $foundFFTSizesUnique.Length
+            ''
+
             # Look for the start and end time
             $startDate    = $null
             $endDate      = $null
@@ -638,8 +716,8 @@ foreach ($line in $logfile) {
                 'endLineNumber'           = $curLineNumber
                 'numberOfFFTSizes'        = $foundFFTSizesIteration.Length
                 'numberOfFFTSizesUnique'  = $foundFFTSizesUnique.Length
-                'allTestedFFTSizes'       = $foundFFTSizesIteration -Join ', '
-                'allTestedFFTSizesUnique' = ($foundFFTSizesUnique | sort) -Join ', '
+                'allTestedFFTSizes'       = ($foundFFTSizesIteration | ForEach-Object -Process { if ($_ % 1024 -eq 0) { (($_/1024).ToString()+"K") } else { $_ } }) -Join ', '
+                'allTestedFFTSizesUnique' = ($foundFFTSizesUnique | sort | ForEach-Object -Process { if ($_ % 1024 -eq 0) { (($_/1024).ToString()+"K") } else { $_ } }) -Join ', '
                 'isFFTSizeOrderIsEqual'   = $isOrderEqual
             }
 

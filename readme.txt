@@ -29,13 +29,13 @@ Also, PBO technically voids the warranty of your CPU, so use it at your own risk
 
 INCLUDED SOFTWARE
 -----------------
-The script itself is a PowerShell script, but it uses the included Prime95 version 30.5b2 to actually do the stress 
+The script itself is a PowerShell script, but it uses the included Prime95 version 30.8b17 to actually do the stress 
 testing. You can also move your own copy of Prime95 into the /test_programs/p95 directory if you want to be on the 
 safe side (good choice!).
 To download Prime95, go to the official site at https://www.mersenne.org/download/ (however, the 30.5 version used 
 here is at the time of writing only available through their forum).
 
-Beginning with version 0.8 it also supports Aida64 and Y-Cruncher, however it does NOT include Aida64 by default.
+Beginning with version 0.8 it also supports Aida64 and y-Cruncher, however it does NOT include Aida64 by default.
 You need to download the >>>Portable Engineer<<< version yourself and extract into the /test_programs/aida64 folder. It 
 has to be the Portable Engineer version, because the regular "Extreme" edition doesn't support starting the stress test 
 from the command line.
@@ -121,8 +121,8 @@ in the config.ini to enable two threads as well.
 TROUBLESHOOTING & FAQ
 ---------------------
 Q: My computer crashes when running this program!
-A: Very likely your Curve Optimizer setting is unstable. Change the settings to a higher value (e.g. from -15 to -12) 
-   and try again.
+A: Very likely your Curve Optimizer setting is unstable. Change the settings to a higher resp. less negative value
+   (e.g. from -15 to -12) and try again.
 
 Q: How long should I run this for?
 A: Basically as long as you can. If you aim for a "12h prime-stable setup", you'd need to run every single core for 
@@ -134,7 +134,7 @@ A: Short answer: all of them.
    Long answer: I've defaulted this to Prime95 without AVX and AVX2 and "Huge" FFTs. The reason behind this is that 
    this *should* produce the least amount of heat and therefore the highest boost clock. But you should eventually run 
    all of the tests to make sure that you're really error free.
-   Also switchting from Prime95 to Y-Cruncher or Aida64 produces different load scenarios, which can prove useful in 
+   Also switchting from Prime95 to y-Cruncher or Aida64 produces different load scenarios, which can prove useful in 
    detecting instabilities.
 
 Q: Why are you using SSE? AVX stresses the CPU much more!
