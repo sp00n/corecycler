@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.2.0
+    0.9.3.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.2.0'
+$version                    = '0.9.3.0'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -1277,10 +1277,10 @@ function Import-Settings {
     )
 
     # Certain setting values are strings
-    $settingsWithStrings = @('stressTestProgram', 'name', 'mode', 'FFTSize', 'coreTestOrder')
+    $settingsWithStrings = @('stressTestProgram', 'name', 'mode', 'FFTSize', 'coreTestOrder', 'tests', 'memory')
 
     # Lowercase for certain settings
-    $settingsToLowercase = @('stressTestProgram', 'coreTestOrder')
+    $settingsToLowercase = @('stressTestProgram', 'coreTestOrder', 'memory')
 
     # Check if the file exists
     if (!(Test-Path $filePath -PathType leaf)) {
@@ -1329,6 +1329,27 @@ function Import-Settings {
 
                 $setting = $thisSetting
             }
+
+
+            # Special handling for y-Cruncher tests
+            elseif ($section -eq 'yCruncher' -and $name -eq 'tests') {
+                $thisSetting = @()
+
+                # Empty value, use the default
+                if ($value -eq $null -or [String]::IsNullOrEmpty($value) -or [String]::IsNullOrWhiteSpace($value)) {
+                    $value = 'BKT, BBP, SFT, FFT, N32, N64, HNT, VST'
+                }
+
+                # Split the string by comma
+                $value -split ',\s*' | ForEach-Object {
+                    if ($_.Length -gt 0) {
+                        $thisSetting += $_.ToString().Trim()
+                    }
+                }
+
+                $setting = $thisSetting
+            }
+
 
             # Regular settings cannot be empty
             elseif ($value -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
@@ -1601,7 +1622,7 @@ function Get-FormattedRuntimePerCoreString {
         $runtimePerCoreStringArray += $thisString
     }
 
-    return ($runtimePerCoreStringArray -join ', ')
+    return ($runtimePerCoreStringArray -Join ', ')
 }
 
 
@@ -3109,6 +3130,16 @@ function Initialize-yCruncher {
     #$Script:stressTestLogFileName = 'y-Cruncher_' + $startDateTime + '.txt'
     #$Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
 
+    # The "C17" test only works with "13-HSW ~ Airi" and above
+    # Let's use the first two digits to determine this
+    if ($settings.yCruncher.tests.Contains("C17")) {
+        $modeNum = [Int] $modeString.Substring(0, 2)
+
+        if ($modeNum -lt 13) {
+            Exit-WithFatalError('Test "C17" is present in the "tests" setting, but the selected y-Cruncher mode "' + $modeString + '" does not support it! Aborting!')
+        }
+    }
+
 
     # Create the config file and overwrite if necessary
     $null = New-Item $configFile -ItemType File -Force
@@ -3124,8 +3155,16 @@ function Initialize-yCruncher {
 
     if ($settings.General.numberOfThreads -gt 1) {
         $coresLine  = '        LogicalCores : [2 3]'
-        $memoryLine = '        TotalMemory : 26567600'        
+        $memoryLine = '        TotalMemory : 26567600'
     }
+
+    # The allocated memory
+    if ($settings.yCruncher.memory -ne 'default') {
+        $memoryLine = '        TotalMemory : ' + $settings.yCruncher.memory
+    }
+
+    # The tests to run
+    $testsToRun = $settings.yCruncher.tests | % { -Join('            "', $_, '"') }
 
 
     $configEntries = @(
@@ -3139,14 +3178,7 @@ function Initialize-yCruncher {
         '        SecondsTotal : 0'
         '        StopOnError : "true"'
         '        Tests : ['
-        '            "BKT"'
-        '            "BBP"'
-        '            "SFT"'
-        '            "FFT"'
-        '            "N32"'
-        '            "N64"'
-        '            "HNT"'
-        '            "VST"'
+        $testsToRun
         '        ]'
         '    }'
         '}'
@@ -3435,79 +3467,86 @@ function Test-ProcessUsage {
 
     # 3. Check if the process is still using enough CPU process power
     if (!$stressTestError) {
-        # Get the CPU percentage
-        $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
-        
-        Write-Verbose($timestamp + ' - checking CPU usage: ' + $processCPUPercentage + '%')
+        # If the CPU utilization check is disabled in the settings
+        if ($settings.General.disableCpuUtilizationCheck -gt 0) {
+            Write-Verbose('Checking CPU usage is disabled, skipping the check');
+        }
 
-        # It doesn't use enough CPU power
-        if ($processCPUPercentage -le $minProcessUsage) {
+        else {
+            # Get the CPU percentage
+            $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
+            
+            Write-Verbose($timestamp + ' - checking CPU usage: ' + $processCPUPercentage + '%')
 
-            # For Prime95
-            if ($isPrime95) {
-                # Look for a line with an "error" string in the new log entries
-                $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
-                
-                # Found the "error" string
-                if ($primeErrorResults.Length -gt 0) {
-                    # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-                    $stressTestError = $primeErrorResults.Line
-                    $errorType = 'FATALERROR'
-                }
-            }
+            # It doesn't use enough CPU power
+            if ($processCPUPercentage -le $minProcessUsage) {
 
-
-
-            # Error string still not found
-            # This might have been a false alarm, wait a bit and try again
-            if (!$stressTestError) {
-                $waitTime  = 2000
-                $maxChecks = 3
-
-                # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
-                for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
-                    Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
-
-                    Start-Sleep -Milliseconds $waitTime
-
-                    # The additional check
-                    # Do the whole process path procedure again
-                    $thisProcessId = $checkProcess.Id[0]
-
-                    Write-Verbose('Process Id: ' + $thisProcessId)
-
-                    # Start a background job to get around the cached Get-Counter value
-                    $thisProcessCounterPathId = Start-Job -ScriptBlock { 
-                        $counterPathName = $args[0].'FullName'
-                        $processId = $args[1]
-                        ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
-                    } -ArgumentList $counterNames, $thisProcessId | Wait-Job | Receive-Job
-
-                    $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
-                    $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
-
-                    Write-Verbose($timestamp + ' - checking CPU usage again (#' + $curCheck + '): ' + $thisProcessCPUPercentage + '%')
-
-                    # If we have recovered, break and continue with stresss testing
-                    if ($thisProcessCPUPercentage -ge $minProcessUsage) {
-                        Write-Verbose('           the process seems to have recovered, continuing with stress testing')
-                        break;
+                # For Prime95
+                if ($isPrime95) {
+                    # Look for a line with an "error" string in the new log entries
+                    $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
+                    
+                    # Found the "error" string
+                    if ($primeErrorResults.Length -gt 0) {
+                        # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                        $stressTestError = $primeErrorResults.Line
+                        $errorType = 'FATALERROR'
                     }
+                }
 
-                    else {
-                        if ($curCheck -lt $maxChecks) {
-                            Write-Verbose('           still not enough usage (#' + $curCheck + ')')
+
+
+                # Error string still not found
+                # This might have been a false alarm, wait a bit and try again
+                if (!$stressTestError) {
+                    $waitTime  = 2000
+                    $maxChecks = 3
+
+                    # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
+                    for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
+                        Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
+
+                        Start-Sleep -Milliseconds $waitTime
+
+                        # The additional check
+                        # Do the whole process path procedure again
+                        $thisProcessId = $checkProcess.Id[0]
+
+                        Write-Verbose('Process Id: ' + $thisProcessId)
+
+                        # Start a background job to get around the cached Get-Counter value
+                        $thisProcessCounterPathId = Start-Job -ScriptBlock { 
+                            $counterPathName = $args[0].'FullName'
+                            $processId = $args[1]
+                            ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | ? {$_.RawValue -eq $processId}).Path
+                        } -ArgumentList $counterNames, $thisProcessId | Wait-Job | Receive-Job
+
+                        $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
+                        $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
+
+                        Write-Verbose($timestamp + ' - checking CPU usage again (#' + $curCheck + '): ' + $thisProcessCPUPercentage + '%')
+
+                        # If we have recovered, break and continue with stresss testing
+                        if ($thisProcessCPUPercentage -ge $minProcessUsage) {
+                            Write-Verbose('           the process seems to have recovered, continuing with stress testing')
+                            break;
                         }
-                        
-                        # Reached the maximum amount of checks for the CPU usage
+
                         else {
-                            Write-Verbose('           still not enough usage, throw an error')
+                            if ($curCheck -lt $maxChecks) {
+                                Write-Verbose('           still not enough usage (#' + $curCheck + ')')
+                            }
+                            
+                            # Reached the maximum amount of checks for the CPU usage
+                            else {
+                                Write-Verbose('           still not enough usage, throw an error')
 
-                            # We don't care about an error string here anymore
-                            $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'
-                            $errorType = 'CPULOAD'
+                                # We don't care about an error string here anymore
+                                $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'
+                                $errorType = 'CPULOAD'
+                            }
+
                         }
-
                     }
                 }
             }
@@ -3529,7 +3568,7 @@ function Test-ProcessUsage {
         # If Hyperthreading / SMT is enabled and the number of threads larger than 1
         if ($isHyperthreadingEnabled -and ($settings.General.numberOfThreads -gt 1)) {
             $cpuNumbersArray = @($coreNumber, ($coreNumber + 1))
-            $cpuNumberString = (($cpuNumbersArray | sort) -join ' or ')
+            $cpuNumberString = (($cpuNumbersArray | sort) -Join ' or ')
         }
 
         # Only one core is being tested
@@ -4214,24 +4253,24 @@ try {
 
     $logLevel = [Math]::Min([Math]::Max(0, $settings.Logging.logLevel), 4)
 
-    Write-ColorText('Log Level set to: ......... ' + $logLevel + ' [' + $logLevelText[$logLevel] + ']') Cyan
+    Write-ColorText('Log Level set to: ................ ' + $logLevel + ' [' + $logLevelText[$logLevel] + ']') Cyan
 
     # Display some initial information
-    Write-ColorText('Stress test program: ...... ' + $selectedStressTestProgram.ToUpperInvariant()) Cyan
-    Write-ColorText('Selected test mode: ....... ' + $settings.mode.ToUpperInvariant()) Cyan
-    Write-ColorText('Logical/Physical cores: ... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
-    Write-ColorText('Hyperthreading / SMT is: .. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
-    Write-ColorText('Selected number of threads: ' + $settings.General.numberOfThreads) Cyan
-    Write-ColorText('Runtime per core: ......... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpperInvariant()) Cyan
-    Write-ColorText('Suspend periodically: ..... ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-    Write-ColorText('Restart for each core: .... ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ON' } else { 'OFF' }))) Cyan
-    Write-ColorText('Test order of cores: ...... ' + $settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') {' (' + $coreTestOrderMode.ToUpperInvariant() + ')'})) Cyan
-    Write-ColorText('Number of iterations: ..... ' + $settings.General.maxIterations) Cyan
+    Write-ColorText('Stress test program: ............. ' + $selectedStressTestProgram.ToUpperInvariant()) Cyan
+    Write-ColorText('Selected test mode: .............. ' + $settings.mode.ToUpperInvariant()) Cyan
+    Write-ColorText('Logical/Physical cores: .......... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
+    Write-ColorText('Hyperthreading / SMT is: ......... ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
+    Write-ColorText('Selected number of threads: ...... ' + $settings.General.numberOfThreads) Cyan
+    Write-ColorText('Runtime per core: ................ ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpperInvariant()) Cyan
+    Write-ColorText('Suspend periodically: ............ ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
+    Write-ColorText('Restart for each core: ........... ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ON' } else { 'OFF' }))) Cyan
+    Write-ColorText('Test order of cores: ............. ' + $settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') {' (' + $coreTestOrderMode.ToUpperInvariant() + ')'})) Cyan
+    Write-ColorText('Number of iterations: ............ ' + $settings.General.maxIterations) Cyan
 
     # Print a message if we're ignoring certain cores
     if ($settings.General.coresToIgnore.Length -gt 0) {
-        $coresToIgnoreString = (($settings.General.coresToIgnore | sort) -join ', ')
-        Write-ColorText('Ignored cores: ............ ' + $coresToIgnoreString) Cyan
+        $coresToIgnoreString = (($settings.General.coresToIgnore | sort) -Join ', ')
+        Write-ColorText('Ignored cores: ................... ' + $coresToIgnoreString) Cyan
         Write-ColorText('--------------------------------------------------------------------------------') Cyan
     }
 
@@ -4250,8 +4289,16 @@ try {
     }
     else {
         if ($isPrime95) {
-            Write-ColorText('Selected FFT size: ........ ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
+            Write-ColorText('Selected FFT size: ............... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
         }
+        if ($isYCruncher) {
+            Write-ColorText('Selected y-Cruncher Tests: ....... ' + ($settings.yCruncher.tests -Join ', ')) Cyan
+        }
+    }
+
+    # Print a message if we have disabled the CPU utilization check
+    if ($settings.General.disableCpuUtilizationCheck -gt 0) {
+        Write-ColorText('Disabled CPU utilization check: .. TRUE') Magenta
     }
 
     Write-ColorText('') Cyan
@@ -4455,7 +4502,7 @@ try {
 
             Write-Verbose('The selected core to test: ' + $actualCoreNumber)
 
-            $cpuNumberString = (($cpuNumbersArray | sort) -join ' and ')
+            $cpuNumberString = (($cpuNumbersArray | sort) -Join ' and ')
 
 
             # Skip if this core is in the ignored cores array
@@ -5080,7 +5127,7 @@ try {
         # Print out the cores that have thrown an error so far
         if ($coresWithError.Length -gt 0) {
             if ($settings.General.skipCoreOnError) {
-                Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -join ', ')) Cyan
+                Write-ColorText('The following cores have thrown an error: ' + (($coresWithError | sort) -Join ', ')) Cyan
             }
             else {
                 Write-ColorText('The following cores have thrown an error:') Cyan

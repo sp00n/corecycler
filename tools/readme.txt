@@ -23,6 +23,14 @@ should boost as high as they can. Unfortunately there is no error checking for t
 
 
 
+BoostTesterMannix.exe
+---------------
+https://github.com/mann1x/BoostTesterMannix
+
+Slightly modified version of the original BoostTester tool, which apparently generates an even higher core clock.
+
+
+
 CoreTunerX.exe
 --------------
 https://github.com/CXWorld/CoreTunerX
