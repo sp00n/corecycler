@@ -89,8 +89,8 @@ This little script will run Prime95 with only one worker thread and sets the aff
 alternating to each physical core, cycling through all of them. This way you can test the stability of your Curve 
 Optimizer setting for each core individually, much more thoroughly than e.g. with Cinebench or the Windows Repair, and 
 much easier than manually setting the affinity of the process via the Task Manager.
-It will still need a lot of time though. If for example you're after a 12h "prime-stable" setup which is common for 
-regular overvlocks, you'd need to run this script for 12x12 = 144 hours on a 5900X with 12 physical cores, because 
+It will still need a lot of time though. If, for example, you're after a 12h "prime-stable" setup which is common for 
+regular overclocks, you'd need to run this script for 12x12 = 144 hours on a 5900X with 12 physical cores, because 
 each core is tested individually, and so each core also needs to complete this 12 hour test individually. Respectively, 
 on a 5600X with its 6 physical cores this would be "only" 6x12 = 72 hours.
 Unfortunately such an all-core stress test with Prime95 is not effective for testing Curve Optimizer settings, because 
@@ -127,20 +127,20 @@ A: Very likely your Curve Optimizer setting is unstable. Change the settings to 
 Q: How long should I run this for?
 A: Basically as long as you can. If you aim for a "12h prime-stable setup", you'd need to run every single core for 
    12 hours, which for a processor with 12 cores like the 5900X would sum up to a total of 144 hours of stress testing.
-   Of course you can also settle for less, that's totally up to you.
+   Of course, you can also settle for less—that's totally up to you.
 
 Q: Which setting should I use?
 A: Short answer: all of them.
    Long answer: I've defaulted this to Prime95 without AVX and AVX2 and "Huge" FFTs. The reason behind this is that 
    this *should* produce the least amount of heat and therefore the highest boost clock. But you should eventually run 
    all of the tests to make sure that you're really error free.
-   Also switchting from Prime95 to y-Cruncher or Aida64 produces different load scenarios, which can prove useful in 
+   Also switching from Prime95 to y-Cruncher or Aida64 produces different load scenarios, which can prove useful in 
    detecting instabilities.
 
 Q: Why are you using SSE? AVX stresses the CPU much more!
-A: Yes, AVX/AVX2 does stress the CPU more than the SSE mode. However it is exactly this additional load on the core 
-   wich prevents the boost clock from reaching its maximum (because it is temperature and load dependant), and so you 
-   can't really detect these edge cases which eventuall can cause an error sooner or later. So while being somewhat 
+A: Yes, AVX/AVX2 does stress the CPU more than the SSE mode. However, it is exactly this additional load on the core 
+   wich prevents the boost clock from reaching its maximum (because it is temperature and load dependent), and so you 
+   can't really detect these edge cases which eventually can cause an error sooner or later. So, while being somewhat 
    counterintuitive, the SSE mode with its lighter load is actually the one that finds the most stability problems.
    However, you can change the mode to AVX or AVX2 in the config.ini if you're happy with only AVX/AVX2 stability.
 
