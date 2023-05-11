@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.3.0
+    0.9.4.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.3.0'
+$version                    = '0.9.4.0'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -61,6 +61,26 @@ $previousPassedFFTEntry     = $null
 $isPrime95                  = $false
 $isAida64                   = $false
 $isYCruncher                = $false
+$cpuCheckIterations         = 0
+
+# Parameters that are controllable by debug settings
+$debugSettingsActive                        = $false
+$disableCpuUtilizationCheckDefault          = 0
+$enableCpuFrequencyCheckDefault             = 0
+$tickIntervalDefault                        = 10
+$delayFirstErrorCheckDefault                      = 0
+$stressTestProgramPriorityDefault           = 'High'
+$stressTestProgramWindowToForegroundDefault = 0
+$suspensionTimeDefault                      = 1000
+
+
+$disableCpuUtilizationCheck                 = $disableCpuUtilizationCheckDefault
+$enableCpuFrequencyCheck                    = $enableCpuFrequencyCheckDefault
+$tickInterval                               = $tickIntervalDefault
+$delayFirstErrorCheck                       = $delayFirstErrorCheckDefault
+$stressTestProgramPriority                  = $stressTestProgramPriorityDefault
+$stressTestProgramWindowToForeground        = $stressTestProgramWindowToForegroundDefault
+$suspensionTime                             = $suspensionTimeDefault
 
 
 # Set the title
@@ -751,7 +771,7 @@ function Show-FinalSummary {
         $runtimeArray += ($difference.Seconds.ToString().PadLeft(2, '0') + ' seconds')
     }
 
-    $runTimeString = $runtimeArray -Join ", "
+    $runTimeString = $runtimeArray -Join ', '
 
 
     Write-ColorText('') Green
@@ -894,7 +914,7 @@ function Invoke-WindowsApi {
     $assembly = $domain.DefineDynamicAssembly($name, 'Run')
     
     $module   = $assembly.DefineDynamicModule('PInvokeModule')
-    $type     = $module.DefineType('PInvokeType', "Public,BeforeFieldInit")
+    $type     = $module.DefineType('PInvokeType', 'Public,BeforeFieldInit')
 
     ## Go through all of the parameters passed to us.  As we do this,
     ## we clone the user's inputs into another array that we will use for
@@ -928,7 +948,7 @@ function Invoke-WindowsApi {
     $method = $type.DefineMethod($methodName, 'Public,HideBySig,Static,PinvokeImpl', $returnType, $parameterTypes)
     
     foreach ($refParameter in $refParameters) {
-       [Void] $method.DefineParameter($refParameter, "Out", $null)
+       [Void] $method.DefineParameter($refParameter, 'Out', $null)
     }
 
     ## Apply the P/Invoke constructor
@@ -1023,7 +1043,7 @@ function Suspend-Process {
 
     $process.Threads | ForEach-Object {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
-        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([Int], [Bool], [Int]) @(0x0002, $false, $_.Id)
+        $currentThreadId = Invoke-WindowsApi 'kernel32' ([IntPtr]) 'OpenThread' @([Int], [Bool], [Int]) @(0x0002, $false, $_.Id)
         
         if ($currentThreadId -eq [IntPtr]::Zero) {
             continue
@@ -1038,7 +1058,7 @@ function Suspend-Process {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread
         # Do we also need Wow64SuspendThread?
         # https://docs.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-wow64suspendthread
-        $previousSuspendCount = Invoke-WindowsApi "kernel32" ([Int]) "SuspendThread" @([IntPtr]) @($currentThreadId)
+        $previousSuspendCount = Invoke-WindowsApi 'kernel32' ([Int]) 'SuspendThread' @([IntPtr]) @($currentThreadId)
 
         #Write-Verbose('    Suspended thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 0)')
         
@@ -1105,7 +1125,7 @@ function Resume-Process {
 
     $process.Threads | ForEach-Object {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
-        $currentThreadId = Invoke-WindowsApi "kernel32" ([IntPtr]) "OpenThread" @([Int], [Bool], [Int]) @(0x0002, $false, $_.Id)
+        $currentThreadId = Invoke-WindowsApi 'kernel32' ([IntPtr]) 'OpenThread' @([Int], [Bool], [Int]) @(0x0002, $false, $_.Id)
         
         if ($currentThreadId -eq [IntPtr]::Zero) {
             continue
@@ -1122,7 +1142,7 @@ function Resume-Process {
         # If it is -1, the operation has failed
         do {
             # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread
-            $previousSuspendCount = Invoke-WindowsApi "kernel32" ([Int]) "ResumeThread" @([IntPtr]) @($currentThreadId)
+            $previousSuspendCount = Invoke-WindowsApi 'kernel32' ([Int]) 'ResumeThread' @([IntPtr]) @($currentThreadId)
             
             #Write-Verbose('    Resumed thread ' + $currentThreadId + '. The previous suspend count is now: ' + $previousSuspendCount + ' (it should be 1 or 0)')
             
@@ -1175,7 +1195,7 @@ function Suspend-ProcessWithDebugMethod {
         return $false
     }
 
-    Invoke-WindowsApi "kernel32" ([Bool]) "DebugActiveProcess" @([Int]) @($process.Id)
+    Invoke-WindowsApi 'kernel32' ([Bool]) 'DebugActiveProcess' @([Int]) @($process.Id)
 }
 
 
@@ -1197,7 +1217,7 @@ function Resume-ProcessWithDebugMethod {
         return $false
     }
 
-    Invoke-WindowsApi "kernel32" ([Bool]) "DebugActiveProcessStop" @([Int]) @($process.Id)
+    Invoke-WindowsApi 'kernel32' ([Bool]) 'DebugActiveProcessStop' @([Int]) @($process.Id)
 }
 
 
@@ -1277,7 +1297,7 @@ function Import-Settings {
     )
 
     # Certain setting values are strings
-    $settingsWithStrings = @('stressTestProgram', 'name', 'mode', 'FFTSize', 'coreTestOrder', 'tests', 'memory')
+    $settingsWithStrings = @('stressTestProgram', 'stressTestProgramPriority', 'name', 'mode', 'FFTSize', 'coreTestOrder', 'tests', 'memory')
 
     # Lowercase for certain settings
     $settingsToLowercase = @('stressTestProgram', 'coreTestOrder', 'memory')
@@ -1313,9 +1333,8 @@ function Import-Settings {
             # Special handling for coresToIgnore, which can be empty
             if ($name -eq 'coresToIgnore') {
                 $thisSetting = @()
-                #$thisSetting = [System.Collections.ArrayList]::new()
 
-                if ($value -ne $null -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+                if ($value -ne $null -and ![String]::IsNullOrWhiteSpace($value)) {
                     # Split the string by comma and add to the coresToIgnore entry
                     $value -split ',\s*' | ForEach-Object {
                         if ($_.Length -gt 0) {
@@ -1336,7 +1355,7 @@ function Import-Settings {
                 $thisSetting = @()
 
                 # Empty value, use the default
-                if ($value -eq $null -or [String]::IsNullOrEmpty($value) -or [String]::IsNullOrWhiteSpace($value)) {
+                if ($value -eq $null -or [String]::IsNullOrWhiteSpace($value)) {
                     $value = 'BKT, BBP, SFT, FFT, N32, N64, HNT, VST'
                 }
 
@@ -1352,7 +1371,7 @@ function Import-Settings {
 
 
             # Regular settings cannot be empty
-            elseif ($value -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+            elseif ($value -and ![String]::IsNullOrWhiteSpace($value)) {
                 $thisSetting = $null
                 
                 # Parse the runtime per core (seconds, minutes, hours)
@@ -1391,7 +1410,7 @@ function Import-Settings {
 
 
                 # Integer values
-                elseif ($value -and ![String]::IsNullOrEmpty($value) -and ![String]::IsNullOrWhiteSpace($value)) {
+                elseif ($value -and ![String]::IsNullOrWhiteSpace($value)) {
                     $thisSetting = [Int] $value
                 }
 
@@ -1399,7 +1418,7 @@ function Import-Settings {
             }
 
             # No [section] found, error
-            if (!$section -or [String]::IsNullOrEmpty($section) -or [String]::IsNullOrWhiteSpace($section)) {
+            if (!$section -or [String]::IsNullOrWhiteSpace($section)) {
                 Write-ColorText('FATAL ERROR: Invalid config file "' + $filePath + '" detected!') Red
                 Write-ColorText('Maybe your config file is still from an older version.') Red
                 Write-ColorText('Please delete your config.ini file and try again.') Red
@@ -1440,7 +1459,7 @@ function Get-Settings {
     # Get the default config settings
     $defaultSettings = Import-Settings $configDefaultPath
 
-    $logFilePrefix = $(if (![String]::IsNullOrEmpty($defaultSettings.Logging.name) -and ![String]::IsNullOrWhiteSpace($defaultSettings.Logging.name)) { $defaultSettings.Logging.name } else { $logFilePrefix })
+    $logFilePrefix = $(if (![String]::IsNullOrWhiteSpace($defaultSettings.Logging.name)) { $defaultSettings.Logging.name } else { $logFilePrefix })
 
     $Script:logFileName     = $logFilePrefix + '_' + $startDateTime + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
@@ -1488,7 +1507,7 @@ function Get-Settings {
         foreach ($userSetting in $sectionEntry.Value.GetEnumerator()) {
             # No empty values (except empty arrays)
             if ( `
-                    ($userSetting.Value -ne $null -and ![String]::IsNullOrEmpty($userSetting.Value) -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) `
+                    ($userSetting.Value -ne $null -and ![String]::IsNullOrWhiteSpace($userSetting.Value)) `
                 -or ($userSetting.Value -is [Array] -or $userSetting.Value -is [Hashtable]) `
             ) {
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
@@ -1556,10 +1575,20 @@ function Get-Settings {
 
 
     # Set the final full path and name of the log file
-    $logFilePrefix = $(if (![String]::IsNullOrEmpty($settings.Logging.name) -and ![String]::IsNullOrWhiteSpace($settings.Logging.name)) { $settings.Logging.name } else { $logFilePrefix })
+    $logFilePrefix = $(if (![String]::IsNullOrWhiteSpace($settings.Logging.name)) { $settings.Logging.name } else { $logFilePrefix })
     
     $Script:logFileName     = $logFilePrefix + '_' + $startDateTime + '_' + $settings.General.stressTestProgram.ToUpperInvariant() + '_' + $modeString + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
+
+
+    # Debug settings may override default settings
+    $Script:disableCpuUtilizationCheck          = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.disableCpuUtilizationCheck))           { $settings.Debug.disableCpuUtilizationCheck }           else { $disableCpuUtilizationCheckDefault })
+    $Script:enableCpuFrequencyCheck             = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.enableCpuFrequencyCheck))              { $settings.Debug.enableCpuFrequencyCheck }              else { $enableCpuFrequencyCheckDefault })
+    $Script:tickInterval                        = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.tickInterval))                         { $settings.Debug.tickInterval }                         else { $tickIntervalDefault })
+    $Script:delayFirstErrorCheck                = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.delayFirstErrorCheck))                 { $settings.Debug.delayFirstErrorCheck }                 else { $delayFirstErrorCheckDefault })
+    $Script:stressTestProgramPriority           = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.stressTestProgramPriority))            { $settings.Debug.stressTestProgramPriority }            else { $stressTestProgramPriorityDefault })
+    $Script:stressTestProgramWindowToForeground = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.stressTestProgramWindowToForeground))  { $settings.Debug.stressTestProgramWindowToForeground }  else { $stressTestProgramWindowToForegroundDefault })
+    $Script:suspensionTime                      = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.suspensionTime))                       { $settings.Debug.suspensionTime }                       else { $suspensionTimeDefault })
 }
 
 
@@ -1711,7 +1740,7 @@ function Send-CommandToAida64 {
     )
 
     # No windowProcessMainWindowHandler? No good!
-    if (!$windowProcessMainWindowHandler -or [String]::IsNullOrEmpty($windowProcessMainWindowHandler) -or [String]::IsNullOrWhiteSpace($windowProcessMainWindowHandler)) {
+    if (!$windowProcessMainWindowHandler -or [String]::IsNullOrWhiteSpace($windowProcessMainWindowHandler)) {
         Write-Verbose('Could not get the windowProcessMainWindowHandler!')
         return
     }
@@ -1775,7 +1804,7 @@ function Get-StressTestProcessInformation {
     $windowProcessId                = $null    # Assigned to global variable
     $windowProcessMainWindowHandler = $null    # Assigned to global variable
     
-    Write-Verbose('Trying to get the stress test program window handler');
+    Write-Verbose('Trying to get the stress test program window handler')
     Write-Verbose('Looking for these window names:')
     Write-Verbose(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', '))
 
@@ -2211,7 +2240,7 @@ function Initialize-Prime95 {
     # depending on the selected test mode (SSE, AVX, AVX2, AVX512)
     $Script:FFTMinMaxValues = @{
         SSE = @{
-            SMALLEST   = @{ Min =    4096; Max =    21504; }  # Originally   4 ...   21
+            SMALLEST   = @{ Min =    4096; Max =    20480; }  # Originally   4 ...   21
             SMALL      = @{ Min =   36864; Max =   245760; }  # Originally  36 ...  248
             LARGE      = @{ Min =  458752; Max =  8388608; }  # Originally 426 ... 8192
             HUGE       = @{ Min = 9175040; Max = 33554432; }  # New addition
@@ -2513,6 +2542,7 @@ function Start-Prime95 {
     # This doesn't steal the focus
     $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
     $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
+    $windowBehaviour = $(if ($stressTestProgramWindowToForeground) {1} else {$windowBehaviour})
     $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
     # This might be necessary to correctly read the process. Or not
@@ -2823,6 +2853,7 @@ function Start-Aida64 {
         # This doesn't steal the focus
         $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
         $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
+        $windowBehaviour = $(if ($stressTestProgramWindowToForeground) {1} else {$windowBehaviour})
         $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
         
         $checkWindowProcess = Get-Process -Id $processId -ErrorAction Ignore
@@ -3225,7 +3256,9 @@ function Start-yCruncher {
     # Apparently on some computers (not mine) the windows title is not set to the binary path, so the Get-StressTestProcessInformation function doesn't work
     # Therefore we're now using "cmd /C start" to be able to set a window title...
     $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
+    $command         = $(if ($stressTestProgramWindowToForeground) {$command.replace('/MIN ', '')} else {$command})   # Remove the /MIN so that the window isn't placed in the background
     $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
+    $windowBehaviour = $(if ($stressTestProgramWindowToForeground) {1} else {$windowBehaviour})
     $processId       = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
     Write-Verbose('The executed command:')
@@ -3413,14 +3446,15 @@ function Close-StressTestProgram {
 
 <#
 .DESCRIPTION
-    Check the CPU power usage and restart Prime95 if necessary
-    Throws an error if the CPU usage is too low
+    Check if there has been an error while running the stress test program and restart it if necessary
+    Checks the existance of the process, the log file (if available), and the CPU utilization (if the setting is enabled)
+    Throws an error if something is wrong (PROCESSMISSING, FATALERROR, CPULOAD)
 .PARAMETER coreNumber
     [Int] The current core being tested
 .OUTPUTS
-    [Void] But throws a string if there was an error with the CPU usage
+    [Void] But throws a string if there was an error with the CPU usage (PROCESSMISSING, FATALERROR, CPULOAD)
 #>
-function Test-ProcessUsage {
+function Test-StressTestProgrammIsRunning {
     param (
         $coreNumber
     )
@@ -3448,6 +3482,7 @@ function Test-ProcessUsage {
 
     
     # 2. If using Prime95, parse the results.txt file and look for an error message
+    # y-Cruncher produces no log file
     if (!$stressTestError -and $isPrime95) {
 
         # Look for a line with an "error" string in the new log entries
@@ -3468,15 +3503,15 @@ function Test-ProcessUsage {
     # 3. Check if the process is still using enough CPU process power
     if (!$stressTestError) {
         # If the CPU utilization check is disabled in the settings
-        if ($settings.General.disableCpuUtilizationCheck -gt 0) {
-            Write-Verbose('Checking CPU usage is disabled, skipping the check');
+        if ($disableCpuUtilizationCheck -gt 0) {
+            Write-Verbose('Checking CPU usage is disabled, skipping the check')
         }
 
         else {
             # Get the CPU percentage
             $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
             
-            Write-Verbose($timestamp + ' - checking CPU usage: ' + $processCPUPercentage + '%')
+            Write-Verbose($timestamp + ' - Checking CPU usage: ' + $processCPUPercentage + '%')
 
             # It doesn't use enough CPU power
             if ($processCPUPercentage -le $minProcessUsage) {
@@ -3504,6 +3539,7 @@ function Test-ProcessUsage {
 
                     # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
                     for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
+                        $timestamp = Get-Date -format HH:mm:ss
                         Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
 
                         Start-Sleep -Milliseconds $waitTime
@@ -3524,22 +3560,23 @@ function Test-ProcessUsage {
                         $thisProcessCounterPathTime = $thisProcessCounterPathId -replace $counterNames['SearchString'], $counterNames['ReplaceString']
                         $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
 
-                        Write-Verbose($timestamp + ' - checking CPU usage again (#' + $curCheck + '): ' + $thisProcessCPUPercentage + '%')
+                        $timestamp = Get-Date -format HH:mm:ss
+                        Write-Verbose($timestamp + ' - Checking CPU usage again (#' + $curCheck + '): ' + $thisProcessCPUPercentage + '%')
 
                         # If we have recovered, break and continue with stresss testing
                         if ($thisProcessCPUPercentage -ge $minProcessUsage) {
-                            Write-Verbose('           the process seems to have recovered, continuing with stress testing')
-                            break;
+                            Write-Verbose('           The process seems to have recovered, continuing with stress testing')
+                            break
                         }
 
                         else {
                             if ($curCheck -lt $maxChecks) {
-                                Write-Verbose('           still not enough usage (#' + $curCheck + ')')
+                                Write-Verbose('           Still not enough usage (#' + $curCheck + ')')
                             }
                             
                             # Reached the maximum amount of checks for the CPU usage
                             else {
-                                Write-Verbose('           still not enough usage, throw an error')
+                                Write-Verbose('           Still not enough usage, throw an error')
 
                                 # We don't care about an error string here anymore
                                 $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'
@@ -3580,7 +3617,7 @@ function Test-ProcessUsage {
 
 
         # If running Prime95, make one additional check if the result.txt now has an error entry
-        if ($isPrime95 -and $errorType -ne "FATALERROR") {
+        if ($isPrime95 -and $errorType -ne 'FATALERROR') {
             $timestamp = Get-Date -format HH:mm:ss
 
             Write-Verbose($timestamp + ' - The stress test program is Prime95, trying to look for an error message in the results.txt')
@@ -3671,7 +3708,7 @@ function Test-ProcessUsage {
                         $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)(K?) passed'
                         
                         if ($hasMatched) {
-                            if ($matches[2] -eq "K") {
+                            if ($matches[2] -eq 'K') {
                                 $lastPassedFFT = [Int64] $matches[1] * 1024
                             }
                             else {
@@ -3736,7 +3773,7 @@ function Test-ProcessUsage {
                     $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)(K?) passed'
 
                     if ($hasMatched) {
-                        if ($matches[2] -eq "K") {
+                        if ($matches[2] -eq 'K') {
                             $lastPassedFFT = [Int64] $matches[1] * 1024
                         }
                         else {
@@ -3820,7 +3857,6 @@ function Get-Prime95LogfileEntries {
     # No file, no check
     if (!$resultFileHandle) {
         Write-Debug('           The stress test log file doesn''t exist yet')
-        Write-Debug('')
         return
     }
 
@@ -3829,7 +3865,6 @@ function Get-Prime95LogfileEntries {
     # It's either a new passed FFT entry, a [Timestamp], or an error
     if ($resultFileHandle.Length -le $previousFileSize) {
         Write-Debug('           No file size change for the log file')
-        Write-Debug('')
         return
     }
 
@@ -3882,7 +3917,6 @@ function Get-Prime95LogfileEntries {
     }
 
     Write-Debug('           New file position: ' + $lastFilePosition + ' / Line ' + $lineCounter)
-    Write-Debug('')
 }
 
 
@@ -4154,15 +4188,26 @@ if ($settings.General.runtimePerCore.ToString().ToLowerInvariant() -eq 'auto') {
 }
 
 
-# Check the CPU usage each x seconds
-# This currently also controls the interval of the suspendPeriodically functionality
-$cpuUsageCheckInterval = 10
-
-
 # Calculate the amount of interval checks for the CPU power check
 # Note: we cannot calculate this when the runtimePerCore is set to "auto"
-$cpuCheckIterations = [Math]::Floor($runtimePerCore / $cpuUsageCheckInterval)
-$runtimeRemaining   = $runtimePerCore - ($cpuCheckIterations * $cpuUsageCheckInterval)
+if ($tickInterval -ge 1) {
+
+    # We need a special treatment for a custom delayFirstErrorCheck value
+    if ($delayFirstErrorCheck) {
+        $cpuCheckIterations = [Math]::Floor(($runtimePerCore - $delayFirstErrorCheck) / $tickInterval)
+    }
+    else {
+        $cpuCheckIterations = [Math]::Floor($runtimePerCore / $tickInterval)
+    }
+}
+
+
+if ($delayFirstErrorCheck) {
+    $runtimeRemaining = $runtimePerCore - $delayFirstErrorCheck - ($cpuCheckIterations * $tickInterval)
+}
+else {
+    $runtimeRemaining = $runtimePerCore - ($cpuCheckIterations * $tickInterval)
+}
 
 
 # Get the actual core test mode
@@ -4193,7 +4238,7 @@ elseif ($settings.General.coreTestOrder -match '\d+') {
 # Wrap the main functionality in a try {} block, so that the finally {} block is executed even if CTRL+C is pressed
 try {
     # Prevent sleep while the script is running (but allow the monitor to turn off)
-    [Windows.PowerUtil]::StayAwake($true, $false, "CoreCycler is currently running.")
+    [Windows.PowerUtil]::StayAwake($true, $false, 'CoreCycler is currently running.')
 
 
     # Check if the stress test process is already running
@@ -4296,10 +4341,6 @@ try {
         }
     }
 
-    # Print a message if we have disabled the CPU utilization check
-    if ($settings.General.disableCpuUtilizationCheck -gt 0) {
-        Write-ColorText('Disabled CPU utilization check: .. TRUE') Magenta
-    }
 
     Write-ColorText('') Cyan
     Write-ColorText('--------------------------------------------------------------------------------') Cyan
@@ -4316,6 +4357,50 @@ try {
 
     Write-ColorText('--------------------------------------------------------------------------------') Cyan
     Write-Text('')
+
+
+    # Print a message if we have set some debug settings
+    if (
+            ($stressTestProgramPriority.ToLowerInvariant() -ne $stressTestProgramPriorityDefault.ToLowerInvariant()) `
+        -or ($stressTestProgramWindowToForeground -ne $stressTestProgramWindowToForegroundDefault) `
+        -or ($disableCpuUtilizationCheck -ne $disableCpuUtilizationCheckDefault) `
+        -or ($enableCpuFrequencyCheck -ne $enableCpuFrequencyCheckDefault) `
+        -or ($tickInterval -ne $tickIntervalDefault) `
+        -or ($delayFirstErrorCheck -ne $delayFirstErrorCheckDefault) `
+        -or ($suspensionTime -ne $suspensionTimeDefault) `
+    ) {
+        $debugSettingsActive = $true
+        Write-ColorText('--------------------------------------------------------------------------------') Magenta
+        Write-ColorText('Enabled debug settings:') Magenta
+    }
+
+    if ($stressTestProgramPriority.ToLowerInvariant() -ne $stressTestProgramPriorityDefault.ToLowerInvariant()) {
+        Write-ColorText('Stress test program priority: .... ' + $stressTestProgramPriority) Magenta
+    }
+    if ($stressTestProgramWindowToForeground -ne $stressTestProgramWindowToForegroundDefault) {
+        Write-ColorText('Stress test program to foreground: ' + ($(if ($stressTestProgramWindowToForeground) { 'TRUE' } else { 'FALSE' }))) Magenta
+    }
+    if ($disableCpuUtilizationCheck -ne $disableCpuUtilizationCheckDefault) {
+        Write-ColorText('Disabled CPU utilization check: .. ' + ($(if ($disableCpuUtilizationCheck) { 'TRUE' } else { 'FALSE' }))) Magenta
+    }
+    if ($enableCpuFrequencyCheck -ne $enableCpuFrequencyCheckDefault) {
+        Write-ColorText('Enabled CPU frequency check: ..... ' + ($(if ($enableCpuFrequencyCheck) { 'TRUE' } else { 'FALSE' }))) Magenta
+    }
+    if ($tickInterval -ne $tickIntervalDefault) {
+        Write-ColorText('Tick interval: ................... ' + $tickInterval) Magenta
+    }
+    if ($delayFirstErrorCheck -ne $delayFirstErrorCheckDefault) {
+        Write-ColorText('Delay first error check: ......... ' + $delayFirstErrorCheck) Magenta
+    }
+    if ($suspensionTime -ne $suspensionTimeDefault) {
+        Write-ColorText('Suspension time: ................. ' + $suspensionTime) Magenta
+    }
+
+    if ($debugSettingsActive) {
+        Write-ColorText('--------------------------------------------------------------------------------') Magenta
+        Write-Text('')
+    }
+
 
 
     # Start the stress test program
@@ -4469,7 +4554,7 @@ try {
         :LoopCoreRunner for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++) {
             $startDateThisCore  = (Get-Date)
             $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
-            $timestamp          = $startDateThisCore.ToString("HH:mm:ss")
+            $timestamp          = $startDateThisCore.ToString('HH:mm:ss')
             $affinity           = [Int64] 0
             $actualCoreNumber   = [Int] $coreTestOrderArray[0]
             $cpuNumbersArray    = @()
@@ -4576,7 +4661,7 @@ try {
 
                 # If the delayBetweenCores setting is set, wait for the defined amount
                 if ($settings.General.delayBetweenCores -gt 0) {
-                    Write-Text('           Idling for ' + $settings.General.delayBetweenCores + ' seconds before continuing to the next core...')
+                    Write-Text('           Idling for ' + $settings.General.delayBetweenCores + ' seconds before proceeding to the next core...')
 
                     # Also adjust the expected end time for this delay
                     $endDateThisCore += New-TimeSpan -Seconds $settings.General.delayBetweenCores
@@ -4594,7 +4679,7 @@ try {
             
            
             # This core has not thrown an error yet, run the test
-            $timestamp = (Get-Date).ToString("HH:mm:ss")
+            $timestamp = (Get-Date).ToString('HH:mm:ss')
             Write-Text($timestamp + ' - Set to Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
             
             # Set the affinity to a specific core
@@ -4641,8 +4726,9 @@ try {
                 # AboveNormal
                 # High
                 # RealTime
-                $stressTestProcess.PriorityClass = 'High'
+                # $stressTestProcess.PriorityClass = 'High'
                 # $stressTestProcess.PriorityClass = 'Idle'
+                $stressTestProcess.PriorityClass = $stressTestProgramPriority
 
                 # There's also a "SetPriority" property, which seems to be a WMI only property
                 # Possible values:
@@ -4692,8 +4778,64 @@ try {
             # - to check the CPU power usage
             # - to check if all FFT sizes have passed
             # - to suspend and resume the stress test process
-            for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++) {
+            for ($checkNumber = 1; $checkNumber -le $cpuCheckIterations; $checkNumber++) {
+                $timestamp = Get-Date -format HH:mm:ss
                 Write-Debug('')
+                Write-Debug($timestamp + ' - Tick ' + $checkNumber + ' of max ' + $cpuCheckIterations)
+
+                $nowDateTime = (Get-Date)
+                $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
+
+                Write-Debug('           Remaining max runtime: ' + [Math]::Round($difference.TotalSeconds) + 's')
+
+                # Make this the last iteration if the remaining time is close enough
+                # Also reduce the sleep time here by 1 second, we add this back after suspending the stress test program
+                if ($difference.TotalSeconds -le $tickInterval) {
+                    $checkNumber = $cpuCheckIterations
+                    $waitTime    = [Math]::Max(0, $difference.TotalSeconds - 2) # -2 instead of -1 due to the additional wait time after the suspension
+                    Write-Debug('           The remaining run time (' + $waitTime + ') is less than the tick interval (' + $tickInterval + '), this will be the last interval')
+                    Start-Sleep -Seconds $waitTime
+                }
+                else {
+                    Start-Sleep -Seconds ($tickInterval - 1)
+                }
+
+
+                # Get the current CPU frequency if the setting to do so is enabled
+                # According to some reports, this may interfere with Test-StressTestProgrammIsRunning, so it's disabled by default now
+                if ($enableCpuFrequencyCheck) {
+                    $currentCpuInfo = Get-CpuFrequency $cpuNumber
+                    Write-Verbose('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
+                }
+
+
+                # Suspend and resume the stress test
+                if ($settings.General.suspendPeriodically) {
+                    $timestamp = Get-Date -format HH:mm:ss
+                    Write-Verbose($timestamp + ' - Suspending the stress test process for ' + $suspensionTime + ' milliseconds')
+                    $suspended = Suspend-ProcessWithDebugMethod $stressTestProcess
+                    Write-Debug('           Suspended: ' + $suspended)
+
+                    Start-Sleep -Milliseconds $suspensionTime
+
+                    Write-Verbose('           Resuming the stress test process')
+                    $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
+                    Write-Debug('           Resumed: ' + $resumed)
+                }
+
+                # This is the additional sleep time after having suspended/resumed the stress test program
+                # It's a failsafe for the CPU utilization check
+                # We don't care if we're actually suspending or not
+                Start-Sleep -Seconds 1
+
+
+                if ($delayFirstErrorCheck -and $checkNumber -eq 1) {
+                    $timestamp = Get-Date -format HH:mm:ss
+                    Write-Debug('')
+                    Write-Debug($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + ', delaying...')
+                    Start-Sleep -Seconds $delayFirstErrorCheck
+                }
+
 
                 # For Prime95, try to get the new log file entries from the results.txt
                 if ($isPrime95) {
@@ -4715,7 +4857,6 @@ try {
                         # It's either a new passed FFT entry, a [Timestamp], or an error
                         if ($newLogEntries.Length -le 0) {
                             Write-Debug('           No new log file entries found')
-                            Write-Debug('')
                             break LoopCheckForAutomaticRuntime
                         }
 
@@ -4726,7 +4867,6 @@ try {
 
                         if ($primeErrorResults) {
                             Write-Debug('           Found an error entry in the new log entries, proceed to the error check')
-                            Write-Debug('')
                             break LoopCheckForAutomaticRuntime
                         }
 
@@ -4738,7 +4878,6 @@ try {
                         # No passed FFT sizes found
                         if (!$lastPassedFFTSizeResults) {
                             Write-Debug('           No passed FFT sizes found yet, assuming we''re at the very beginning of the test')
-                            Write-Debug('')
                             break LoopCheckForAutomaticRuntime
                         }
 
@@ -4872,7 +5011,7 @@ try {
                                 $hasMatched = $currentResultLineEntry.Line -match 'Self\-test (\d+)(K?) passed'
 
                                 if ($hasMatched) {
-                                    if ($matches[2] -eq "K") {
+                                    if ($matches[2] -eq 'K') {
                                         $currentPassedFFTSize = [Int64] $matches[1] * 1024
                                     }
                                     else {
@@ -4929,7 +5068,7 @@ try {
                         if ($proceedToNextCore) {
                             Write-Verbose('')
                             Write-Verbose('           The number of unique FFT sizes matches the number of FFT sizes for the preset!')
-                            Write-Text('           All FFT sizes have been tested for this core, continuing to the next one')
+                            Write-Text('           All FFT sizes have been tested for this core, proceeding to the next one')
 
                             continue LoopCoreRunner
                         }
@@ -4944,29 +5083,14 @@ try {
                 }   # End if ($useAutomaticRuntimePerCore -and $isPrime95)
 
 
-                $nowDateTime = (Get-Date)
-                $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
-
-
-                # Make this the last iteration if the remaining time is close enough
-                if ($difference.TotalSeconds -le $cpuUsageCheckInterval) {
-                    $checkNumber = $cpuCheckIterations
-                    $waitTime    = [Math]::Max(0, $difference.TotalSeconds - 1)
-                    Start-Sleep -Seconds $waitTime
-                }
-                else {
-                    Start-Sleep -Seconds $cpuUsageCheckInterval
-                }
-                
-
                 # Check if the process is still using enough CPU process power
                 try {
-                    Test-ProcessUsage $actualCoreNumber
+                    Test-StressTestProgrammIsRunning $actualCoreNumber
                 }
                 
                 # On error, the Prime95 process is not running anymore, so skip this core
                 catch {
-                    Write-Verbose('There has been some error in Test-ProcessUsage, checking (#1)')
+                    Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (#1)')
 
                     # There is an error message
                     if ($Error -and $Error[0].ToString() -eq '999') {
@@ -5025,28 +5149,7 @@ try {
                     # Continue to the next core
                     continue LoopCoreRunner
                 }   # End: catch
-
-
-                # Get the current CPU frequency
-                $currentCpuInfo = Get-CpuFrequency $cpuNumber
-                Write-Verbose('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
-
-
-                # Suspend and resume the stress test
-                if ($settings.General.suspendPeriodically) {
-                    Write-Verbose('Suspending the stress test process')
-                    $suspended = Suspend-ProcessWithDebugMethod $stressTestProcess
-                    Write-Debug('Suspended: ' + $suspended)
-
-                    Start-Sleep -Milliseconds 1000
-
-                    Write-Verbose('Resuming the stress test process')
-                    $resumed = Resume-ProcessWithDebugMethod $stressTestProcess
-                    Write-Debug('Resumed: ' + $resumed)
-                }
-
-
-            }   # End: for ($checkNumber = 0; $checkNumber -lt $cpuCheckIterations; $checkNumber++)
+            }   # End: for ($checkNumber = 1; $checkNumber -le $cpuCheckIterations; $checkNumber++)
             
 
 
@@ -5056,13 +5159,16 @@ try {
             
             # One last check
             try {
-                Write-Verbose('One last CPU usage check before finishing this core')
-                Test-ProcessUsage $actualCoreNumber
+                Write-Verbose('One last error check before finishing this core')
+
+                # Give it half a second
+                Start-Sleep -Milliseconds 500
+                Test-StressTestProgrammIsRunning $actualCoreNumber
             }
             
             # On error, the Prime95 process is not running anymore, so skip this core
             catch {
-                Write-Verbose('There has been some error in Test-ProcessUsage, checking (#2)')
+                Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (#2)')
 
 
                 # There is an error message
@@ -5119,7 +5225,7 @@ try {
                 }
             }   # End: catch
 
-            $timestamp = (Get-Date).ToString("HH:mm:ss")
+            $timestamp = (Get-Date).ToString('HH:mm:ss')
             Write-Text($timestamp + ' - Completed the test on Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ')')
         }   # End: :LoopCoreRunner for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++)
         

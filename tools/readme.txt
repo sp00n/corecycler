@@ -51,16 +51,18 @@ It requires Administator priviliges and will try to get them / complain otherwis
 
 
 
-PBO2Tuner
----------
+PBO2Tuner v1.1-beta
+-------------------
 by PJVol from overclock.net
-https://www.overclock.net/threads/5800x3d-owners.1798046/page-85#post-29009118
-https://drive.google.com/file/d/1YHB68AGz0TVBDlN8Mj-UBOmB4XBVmkfe/view
+https://www.overclock.net/threads/official-amd-5700g-5600g-5300g-apu-apu.1792840/page-27#post-29121806
+https://drive.google.com/file/d/17UZ7pXpc85GXfJiqDlYLoEuYw38vIsuk/view
 
 This tool can set the Curve Optimizer, PPT, TDC, EDC, Max Boost and FIT Scalar values from within Windows.
 It can be run either with a GUI or using the command line (e.g. on startup), as seen below.
 
 It also works for Ryzen 5800X3D processors, where CO values are normally not available in the BIOS.
+
+Note: It does not yet seem to work for Ryzen 7000 processors.
 
 
 Command Line Usage:
