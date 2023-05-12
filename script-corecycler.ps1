@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.4.0
+    0.9.4.1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.4.0'
+$version                    = '0.9.4.1'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -2112,6 +2112,7 @@ function Initialize-Prime95 {
     # The various FFT sizes for Prime95
     # Used to determine where an error likely happened
     # Note: These are different depending on the selected mode (SSE, AVX, AVX2)!
+    # Note: These are Int/Int32 numbers, you will not find a number cast to Int64 in this array (with e.g. [Array]::indexOf)!
     # SSE:    4, 5, 6, 8, 10, 12, 14, 16,     20,     24,     28,     32,         40, 48, 56,     64, 72, 80, 84, 96,      112,      128,      144, 160,      192,      224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800,      896, 960, 1024, 1120, 1152, 1200, 1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360, 3456, 3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000,        16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880, 27648, 28672, 30720, 32000, 32768
     # AVX:    4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28,     32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128, 140, 144, 160, 168, 192, 200, 224, 240, 256,      288, 320, 336, 384, 400, 448, 480, 512, 560, 576, 640, 672, 720, 768, 800, 864, 896, 960, 1024,       1152,       1280, 1344, 1440, 1536, 1600, 1680, 1728, 1792, 1920, 2048,       2304, 2400, 2560, 2688,       2880, 3072, 3200, 3360, 3456, 3584, 3840, 4032, 4096, 4480, 4608, 4800, 5120, 5376,       5760, 6144, 6400, 6720, 6912, 7168, 7680, 8000,       8192, 8960, 9216, 9600, 10240, 10752,        11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768
     # AVX2:   4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 35, 36, 40, 48, 50, 60, 64, 72, 80, 84, 96, 100, 112, 120, 128,      144, 160, 168, 192, 200, 224, 240, 256, 280, 288, 320, 336, 384, 400, 448, 480, 512, 560,      640, 672,      768, 800,      896, 960, 1024, 1120, 1152,       1280, 1344, 1440, 1536, 1600, 1680,       1792, 1920, 2048, 2240, 2304, 2400, 2560, 2688, 2800, 2880, 3072, 3200, 3360,       3584, 3840,       4096, 4480, 4608, 4800, 5120, 5376, 5600, 5760, 6144, 6400, 6720,       7168, 7680, 8000, 8064, 8192, 8960, 9216, 9600, 10240, 10752, 11200, 11520, 12288, 12800, 13440, 13824, 14336, 15360, 16000, 16128, 16384, 17920, 18432, 19200, 20480, 21504, 22400, 23040, 24576, 25600, 26880,        28672, 30720, 32000, 32768, 35840, 38400, 40960, 44800, 51200
@@ -2241,7 +2242,7 @@ function Initialize-Prime95 {
     $Script:FFTMinMaxValues = @{
         SSE = @{
             SMALLEST   = @{ Min =    4096; Max =    20480; }  # Originally   4 ...   21
-            SMALL      = @{ Min =   36864; Max =   245760; }  # Originally  36 ...  248
+            SMALL      = @{ Min =   40960; Max =   245760; }  # Originally  36 ...  248
             LARGE      = @{ Min =  458752; Max =  8388608; }  # Originally 426 ... 8192
             HUGE       = @{ Min = 9175040; Max = 33554432; }  # New addition
             ALL        = @{ Min =    4096; Max = 33554432; }
@@ -2274,9 +2275,9 @@ function Initialize-Prime95 {
 
         AVX512 = @{
             SMALLEST   = @{ Min =    4608; Max =    21504; }  # Originally   4 ...   21
-            SMALL      = @{ Min =   36864; Max =   245760; }  # Originally  36 ...  248
-            LARGE      = @{ Min =  458752; Max =  8388608; }  # Originally 426 ... 8192
-            HUGE       = @{ Min = 9175040; Max = 67108864; }  # New addition
+            SMALL      = @{ Min =   40960; Max =   245760; }  # Originally  36 ...  248
+            LARGE      = @{ Min =  430080; Max =  8388608; }  # Originally 426 ... 8192
+            HUGE       = @{ Min = 8601600; Max = 67108864; }  # New addition
             ALL        = @{ Min =    4608; Max = 67108864; }
             MODERATE   = @{ Min = 1376256; Max =  4194304; }
             HEAVY      = @{ Min =    4608; Max =  1376256; }
@@ -2301,20 +2302,20 @@ function Initialize-Prime95 {
 
     # Get the correct min and max values for the selected FFT settings
     if ($settings.mode -eq 'CUSTOM') {
-        $Script:minFFTSize = [Int64] $settings.Custom.MinTortureFFT * 1024
-        $Script:maxFFTSize = [Int64] $settings.Custom.MaxTortureFFT * 1024
+        $Script:minFFTSize = [Int] $settings.Custom.MinTortureFFT * 1024
+        $Script:maxFFTSize = [Int] $settings.Custom.MaxTortureFFT * 1024
     }
 
     # Custom preset (xxx-yyy)
     elseif ($settings.Prime95.FFTSize -match '(\d+)\s*\-\s*(\d+)') {
-        $Script:minFFTSize = [Int64] [Math]::Min($Matches[1], $Matches[2]) * 1024
-        $Script:maxFFTSize = [Int64] [Math]::Max($Matches[1], $Matches[2]) * 1024
+        $Script:minFFTSize = [Int] [Math]::Min($Matches[1], $Matches[2]) * 1024
+        $Script:maxFFTSize = [Int] [Math]::Max($Matches[1], $Matches[2]) * 1024
     }
 
     # Regular preset
     elseif ($FFTMinMaxValues[$settings.mode].Contains($settings.Prime95.FFTSize.ToUpperInvariant())) {   # This needs to be .Contains()
-        $Script:minFFTSize = $FFTMinMaxValues[$settings.mode.ToUpperInvariant()][$settings.Prime95.FFTSize.ToUpperInvariant()].Min
-        $Script:maxFFTSize = $FFTMinMaxValues[$settings.mode.ToUpperInvariant()][$settings.Prime95.FFTSize.ToUpperInvariant()].Max
+        $Script:minFFTSize = [Int] $FFTMinMaxValues[$settings.mode.ToUpperInvariant()][$settings.Prime95.FFTSize.ToUpperInvariant()].Min
+        $Script:maxFFTSize = [Int] $FFTMinMaxValues[$settings.mode.ToUpperInvariant()][$settings.Prime95.FFTSize.ToUpperInvariant()].Max
     }
 
     # Something failed
@@ -2392,12 +2393,23 @@ function Initialize-Prime95 {
     $endKey   = [Array]::indexOf($FFTSizes[$cpuTestMode], $maxFFTSize)
     $Script:fftSubarray = $FFTSizes[$cpuTestMode][$startKey..$endKey]
 
-
     $modeString  = $settings.mode
     $configFile1 = $stressTestPrograms[$p95Type]['absolutePath'] + 'local.txt'
     $configFile2 = $stressTestPrograms[$p95Type]['absolutePath'] + 'prime.txt'
 
     $FFTSizeString = $settings.Prime95.FFTSize.ToUpperInvariant() -Replace '\s',''
+
+    Write-Debug('')
+    Write-Debug('Checking the FFT Sizes to test:')
+    Write-Debug('FFTSizeString: ' + $FFTSizeString)
+    Write-Debug('cpuTestMode:   ' + $cpuTestMode)
+    Write-Debug('minFFTSize:    ' + $minFFTSize)
+    Write-Debug('maxFFTSize:    ' + $maxFFTSize)
+    Write-Debug('startKey:      ' + $startKey)
+    Write-Debug('endKey:        ' + $endKey)
+    Write-Debug('The selected fftSubarray to test:')
+    Write-Debug($Script:fftSubarray)
+
 
 
     # The Prime95 results.txt file name and path for this run
@@ -3709,10 +3721,10 @@ function Test-StressTestProgrammIsRunning {
                         
                         if ($hasMatched) {
                             if ($matches[2] -eq 'K') {
-                                $lastPassedFFT = [Int64] $matches[1] * 1024
+                                $lastPassedFFT = [Int] $matches[1] * 1024
                             }
                             else {
-                                $lastPassedFFT = [Int64] $matches[1]
+                                $lastPassedFFT = [Int] $matches[1]
                             }
                         }
 
@@ -3774,10 +3786,10 @@ function Test-StressTestProgrammIsRunning {
 
                     if ($hasMatched) {
                         if ($matches[2] -eq 'K') {
-                            $lastPassedFFT = [Int64] $matches[1] * 1024
+                            $lastPassedFFT = [Int] $matches[1] * 1024
                         }
                         else {
-                            $lastPassedFFT = [Int64] $matches[1]
+                            $lastPassedFFT = [Int] $matches[1]
                         }
                     }
                     
@@ -5012,10 +5024,10 @@ try {
 
                                 if ($hasMatched) {
                                     if ($matches[2] -eq 'K') {
-                                        $currentPassedFFTSize = [Int64] $matches[1] * 1024
+                                        $currentPassedFFTSize = [Int] $matches[1] * 1024
                                     }
                                     else {
-                                        $currentPassedFFTSize = [Int64] $matches[1]
+                                        $currentPassedFFTSize = [Int] $matches[1]
                                     }
                                 }
                                 
