@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.4.1
+    0.9.4.2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.4.1'
+$version                    = '0.9.4.2'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -4310,24 +4310,29 @@ try {
 
     $logLevel = [Math]::Min([Math]::Max(0, $settings.Logging.logLevel), 4)
 
-    Write-ColorText('Log Level set to: ................ ' + $logLevel + ' [' + $logLevelText[$logLevel] + ']') Cyan
+    Write-ColorText('Log Level set to: ..................... ' + $logLevel + ' [' + $logLevelText[$logLevel] + ']') Cyan
 
     # Display some initial information
-    Write-ColorText('Stress test program: ............. ' + $selectedStressTestProgram.ToUpperInvariant()) Cyan
-    Write-ColorText('Selected test mode: .............. ' + $settings.mode.ToUpperInvariant()) Cyan
-    Write-ColorText('Logical/Physical cores: .......... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
-    Write-ColorText('Hyperthreading / SMT is: ......... ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
-    Write-ColorText('Selected number of threads: ...... ' + $settings.General.numberOfThreads) Cyan
-    Write-ColorText('Runtime per core: ................ ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpperInvariant()) Cyan
-    Write-ColorText('Suspend periodically: ............ ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-    Write-ColorText('Restart for each core: ........... ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ON' } else { 'OFF' }))) Cyan
-    Write-ColorText('Test order of cores: ............. ' + $settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') {' (' + $coreTestOrderMode.ToUpperInvariant() + ')'})) Cyan
-    Write-ColorText('Number of iterations: ............ ' + $settings.General.maxIterations) Cyan
+    Write-ColorText('Stress test program: .................. ' + $selectedStressTestProgram.ToUpperInvariant()) Cyan
+    Write-ColorText('Selected test mode: ................... ' + $settings.mode.ToUpperInvariant()) Cyan
+    Write-ColorText('Logical/Physical cores: ............... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
+    Write-ColorText('Hyperthreading / SMT is: .............. ' + ($(if ($isHyperthreadingEnabled) { 'ON' } else { 'OFF' }))) Cyan
+    Write-ColorText('Selected number of threads: ........... ' + $settings.General.numberOfThreads) Cyan
+    
+    if ($settings.General.numberOfThreads -eq 1) {
+        Write-ColorText('Assign both cores to stress thread: ... ' + ($(if ($settings.General.assignBothVirtualCoresForSingleThread) { 'ON' } else { 'OFF' }))) Cyan
+    }
+
+    Write-ColorText('Runtime per core: ..................... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpperInvariant()) Cyan
+    Write-ColorText('Suspend periodically: ................. ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
+    Write-ColorText('Restart for each core: ................ ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ON' } else { 'OFF' }))) Cyan
+    Write-ColorText('Test order of cores: .................. ' + $settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') {' (' + $coreTestOrderMode.ToUpperInvariant() + ')'})) Cyan
+    Write-ColorText('Number of iterations: ................. ' + $settings.General.maxIterations) Cyan
 
     # Print a message if we're ignoring certain cores
     if ($settings.General.coresToIgnore.Length -gt 0) {
         $coresToIgnoreString = (($settings.General.coresToIgnore | sort) -Join ', ')
-        Write-ColorText('Ignored cores: ................... ' + $coresToIgnoreString) Cyan
+        Write-ColorText('Ignored cores: ........................ ' + $coresToIgnoreString) Cyan
         Write-ColorText('--------------------------------------------------------------------------------') Cyan
     }
 
@@ -4346,10 +4351,10 @@ try {
     }
     else {
         if ($isPrime95) {
-            Write-ColorText('Selected FFT size: ............... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
+            Write-ColorText('Selected FFT size: .................... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
         }
         if ($isYCruncher) {
-            Write-ColorText('Selected y-Cruncher Tests: ....... ' + ($settings.yCruncher.tests -Join ', ')) Cyan
+            Write-ColorText('Selected y-Cruncher Tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
         }
     }
 
@@ -4387,25 +4392,25 @@ try {
     }
 
     if ($stressTestProgramPriority.ToLowerInvariant() -ne $stressTestProgramPriorityDefault.ToLowerInvariant()) {
-        Write-ColorText('Stress test program priority: .... ' + $stressTestProgramPriority) Magenta
+        Write-ColorText('Stress test program priority: ......... ' + $stressTestProgramPriority) Magenta
     }
     if ($stressTestProgramWindowToForeground -ne $stressTestProgramWindowToForegroundDefault) {
-        Write-ColorText('Stress test program to foreground: ' + ($(if ($stressTestProgramWindowToForeground) { 'TRUE' } else { 'FALSE' }))) Magenta
+        Write-ColorText('Stress test program to foreground: .... ' + ($(if ($stressTestProgramWindowToForeground) { 'TRUE' } else { 'FALSE' }))) Magenta
     }
     if ($disableCpuUtilizationCheck -ne $disableCpuUtilizationCheckDefault) {
-        Write-ColorText('Disabled CPU utilization check: .. ' + ($(if ($disableCpuUtilizationCheck) { 'TRUE' } else { 'FALSE' }))) Magenta
+        Write-ColorText('Disabled CPU utilization check: ....... ' + ($(if ($disableCpuUtilizationCheck) { 'TRUE' } else { 'FALSE' }))) Magenta
     }
     if ($enableCpuFrequencyCheck -ne $enableCpuFrequencyCheckDefault) {
-        Write-ColorText('Enabled CPU frequency check: ..... ' + ($(if ($enableCpuFrequencyCheck) { 'TRUE' } else { 'FALSE' }))) Magenta
+        Write-ColorText('Enabled CPU frequency check: .......... ' + ($(if ($enableCpuFrequencyCheck) { 'TRUE' } else { 'FALSE' }))) Magenta
     }
     if ($tickInterval -ne $tickIntervalDefault) {
-        Write-ColorText('Tick interval: ................... ' + $tickInterval) Magenta
+        Write-ColorText('Tick interval: ........................ ' + $tickInterval) Magenta
     }
     if ($delayFirstErrorCheck -ne $delayFirstErrorCheckDefault) {
-        Write-ColorText('Delay first error check: ......... ' + $delayFirstErrorCheck) Magenta
+        Write-ColorText('Delay first error check: .............. ' + $delayFirstErrorCheck) Magenta
     }
     if ($suspensionTime -ne $suspensionTimeDefault) {
-        Write-ColorText('Suspension time: ................. ' + $suspensionTime) Magenta
+        Write-ColorText('Suspension time: ...................... ' + $suspensionTime) Magenta
     }
 
     if ($debugSettingsActive) {
@@ -4590,11 +4595,26 @@ try {
 
             # Only one thread
             else {
-                # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
-                # Otherwise, it's the same value
-                $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
-                $cpuNumbersArray += $cpuNumber
-                $affinity         = [Int64] [Math]::Pow(2, $cpuNumber)
+                # assignBothVirtualCoresForSingleThread is enabled, we want to use both virtual cores, but with only one thread
+                # The load should bounce back and forth between the two cores this way
+                # Hyperthreading needs to be enabled for this
+                if ($settings.General.assignBothVirtualCoresForSingleThread -and $isHyperthreadingEnabled) {
+                    Write-Verbose('assignBothVirtualCoresForSingleThread is enabled, choosing both virtual cores for the affinity')
+                    for ($currentThread = 0; $currentThread -lt 2; $currentThread++) {
+                        $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
+                        $cpuNumbersArray += $cpuNumber
+                        $affinity        += [Int64] [Math]::Pow(2, $cpuNumber)
+                    }
+                }
+
+                # Setting not active, only one core for the load thread
+                else {
+                    # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
+                    # Otherwise, it's the same value
+                    $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
+                    $cpuNumbersArray += $cpuNumber
+                    $affinity         = [Int64] [Math]::Pow(2, $cpuNumber)
+                }
             }
 
             Write-Verbose('The selected core to test: ' + $actualCoreNumber)
