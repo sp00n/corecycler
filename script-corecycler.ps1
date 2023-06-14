@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.4.2
+    0.9.5.0alpha1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,13 +17,14 @@
 #>
 
 # Global variables
-$version                    = '0.9.4.2'
+$version                    = '0.9.5.0alpha1'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
 $logFilePathAbsolute        = $PSScriptRoot + '\' + $logFilePath + '\'
 $logFileName                = 'CoreCycler_' + $startDateTime + '.log'
 $logFileFullPath            = $logFilePathAbsolute + $logFileName
+$helpersPathAbsolute        = $PSScriptRoot + '\helpers\'
 $settings                   = $null
 $selectedStressTestProgram  = $null
 $useAutomaticRuntimePerCore = $false
@@ -61,6 +62,7 @@ $previousPassedFFTEntry     = $null
 $isPrime95                  = $false
 $isAida64                   = $false
 $isYCruncher                = $false
+$isYCruncherWithLogging     = $false
 $cpuCheckIterations         = 0
 
 # Parameters that are controllable by debug settings
@@ -84,7 +86,7 @@ $suspensionTime                             = $suspensionTimeDefault
 
 
 # Set the title
-$host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' running')
+$host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' starting')
 
 
 # Stress test program executables and paths
@@ -97,18 +99,20 @@ $host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' running')
 # 6 = MinimizedNoFocus
 $stressTestPrograms = @{
     'prime95' = @{
-        'displayName'        = 'Prime95'
-        'processName'        = 'prime95'
-        'processNameExt'     = 'exe'
-        'processNameForLoad' = 'prime95'
-        'processPath'        = 'test_programs\p95'
-        'configName'         = $null
-        'configFilePath'     = $null
-        'absolutePath'       = $null
-        'fullPathToExe'      = $null
-        'command'            = """%fullPathToExe%"" -t"
-        'windowBehaviour'    = 0
-        'testModes'          = @(
+        'displayName'         = 'Prime95'
+        'processName'         = 'prime95'
+        'processNameExt'      = 'exe'
+        'processNameForLoad'  = 'prime95'
+        'processPath'         = 'test_programs\p95'
+        'installPath'         = 'test_programs\p95'
+        'configName'          = $null
+        'configFilePath'      = $null
+        'absolutePath'        = $null
+        'absoluteInstallPath' = $null
+        'fullPathToExe'       = $null
+        'command'             = """%fullPathToExe%"" -t"
+        'windowBehaviour'     = 0
+        'testModes'           = @(
             'SSE',
             'AVX',
             'AVX2',
@@ -125,18 +129,20 @@ $stressTestPrograms = @{
     }
 
     'prime95_dev' = @{
-        'displayName'        = 'Prime95 DEV'
-        'processName'        = 'prime95_dev'
-        'processNameExt'     = 'exe'
-        'processNameForLoad' = 'prime95_dev'
-        'processPath'        = 'test_programs\p95_dev'
-        'configName'         = $null
-        'configFilePath'     = $null
-        'absolutePath'       = $null
-        'fullPathToExe'      = $null
-        'command'            = """%fullPathToExe%"" -t"
-        'windowBehaviour'    = 0
-        'testModes'          = @(
+        'displayName'         = 'Prime95 DEV'
+        'processName'         = 'prime95_dev'
+        'processNameExt'      = 'exe'
+        'processNameForLoad'  = 'prime95_dev'
+        'processPath'         = 'test_programs\p95_dev'
+        'installPath'         = 'test_programs\p95_dev'
+        'configName'          = $null
+        'configFilePath'      = $null
+        'absolutePath'        = $null
+        'absoluteInstallPath' = $null
+        'fullPathToExe'       = $null
+        'command'             = """%fullPathToExe%"" -t"
+        'windowBehaviour'     = 0
+        'testModes'           = @(
             'SSE',
             'AVX',
             'AVX2',
@@ -153,18 +159,20 @@ $stressTestPrograms = @{
     }
 
     'aida64' = @{
-        'displayName'        = 'Aida64'
-        'processName'        = 'aida64'
-        'processNameExt'     = 'exe'
-        'processNameForLoad' = 'aida_bench64.dll'   # This needs to be with file extension
-        'processPath'        = 'test_programs\aida64'
-        'configName'         = $null
-        'configFilePath'     = $null
-        'absolutePath'       = $null
-        'fullPathToExe'      = $null
-        'command'            = """%fullPathToExe%"" /SAFEST /SILENT /SST %mode%"
-        'windowBehaviour'    = 6
-        'testModes'          = @(
+        'displayName'         = 'Aida64'
+        'processName'         = 'aida64'
+        'processNameExt'      = 'exe'
+        'processNameForLoad'  = 'aida_bench64.dll'   # This needs to be with file extension
+        'processPath'         = 'test_programs\aida64'
+        'installPath'         = 'test_programs\aida64'
+        'configName'          = $null
+        'configFilePath'      = $null
+        'absolutePath'        = $null
+        'absoluteInstallPath' = $null
+        'fullPathToExe'       = $null
+        'command'             = """%fullPathToExe%"" /SAFEST /SILENT /SST %mode%"
+        'windowBehaviour'     = 6
+        'testModes'           = @(
             'CACHE',
             'CPU',
             'FPU',
@@ -176,18 +184,22 @@ $stressTestPrograms = @{
     }
 
     'ycruncher' = @{
-        'displayName'        = "y-Cruncher"
-        'processName'        = '' # Depends on the selected modeYCruncher
-        'processNameExt'     = 'exe'
-        'processNameForLoad' = '' # Depends on the selected modeYCruncher
-        'processPath'        = 'test_programs\y-cruncher\Binaries'
-        'configName'         = 'stressTest.cfg'
-        'configFilePath'     = $null
-        'absolutePath'       = $null
-        'fullPathToExe'      = $null
-        'command'            = "cmd /C start /MIN ""y-Cruncher - %fileName%"" ""%fullPathToExe%"" priority:2 config ""%configFilePath%"""
-        'windowBehaviour'    = 6
-        'testModes'          = @(
+        'displayName'         = "y-Cruncher"
+        'processName'         = '' # Depends on the selected modeYCruncher
+        'processNameExt'      = 'exe'
+        'processNameForLoad'  = '' # Depends on the selected modeYCruncher
+        'processPath'         = 'test_programs\y-cruncher\Binaries'
+        'installPath'         = 'test_programs\y-cruncher'
+        'configName'          = 'stressTest.cfg'
+        'configFilePath'      = $null
+        'absolutePath'        = $null
+        'absoluteInstallPath' = $null
+        'fullPathToExe'       = $null
+        'fullPathToLoadExe'   = $null
+        'command'             = "cmd /C start /MIN ""y-Cruncher - %fileName%"" ""%fullPathToExe%"" priority:2 config ""%configFilePath%"""
+        'commandWithLogging'  = "cmd /C start /MIN ""y-Cruncher - %fileName%"" ""%helpersPath%WriteConsoleToWriteFileWrapper.exe"" ""%fullPathToLoadExe%"" priority:2 config ""%configFilePath%"" /dlllog:""%logFilePath%"""
+        'windowBehaviour'     = 6
+        'testModes'           = @(
             '00-x86',
             '04-P4P',
             '05-A64 ~ Kasumi',
@@ -1318,13 +1330,13 @@ function Import-Settings {
 
         # Sections
         '^\[(.+)\]$' {
-            $section = $matches[1].ToString().Trim()
+            $section = $Matches[1].ToString().Trim()
             $ini[$section] = @{}
         }
 
         # Settings
         '^(.+)\s?=\s?(.+)$' {
-            $name, $value = $matches[1..2]
+            $name, $value = $Matches[1..2]
             $name    = $name.ToString().Trim()
             $value   = $value.ToString().Trim()
             $setting = $null
@@ -1386,7 +1398,7 @@ function Import-Settings {
                     # Parse the hours, minutes, seconds
                     elseif ($valueLower.indexOf('h') -ge 0 -or $valueLower.indexOf('m') -ge 0 -or $valueLower.indexOf('s') -ge 0) {
                         $hasMatched = $valueLower -match '(?-i)((?<hours>\d+(\.\d+)*)h)*\s*((?<minutes>\d+(\.\d+)*)m)*\s*((?<seconds>\d+(\.\d+)*)s)*'
-                        $seconds = [Double] $matches.hours * 60 * 60 + [Double] $matches.minutes * 60 + [Double] $matches.seconds
+                        $seconds = [Double] $Matches.hours * 60 * 60 + [Double] $Matches.minutes * 60 + [Double] $Matches.seconds
                         $thisSetting = [Int] $seconds
                     }
 
@@ -1532,9 +1544,10 @@ function Get-Settings {
 
 
     # Set the correct flag 
-    $Script:isPrime95   = $(if ($settings.General.stressTestProgram -eq 'prime95' -or $settings.General.stressTestProgram -eq 'prime95_dev') { $true } else { $false })
-    $Script:isAida64    = $(if ($settings.General.stressTestProgram -eq 'aida64') { $true } else { $false })
-    $Script:isYCruncher = $(if ($settings.General.stressTestProgram -eq 'ycruncher') { $true } else { $false })
+    $Script:isPrime95              = $(if ($settings.General.stressTestProgram -eq 'prime95' -or $settings.General.stressTestProgram -eq 'prime95_dev') { $true } else { $false })
+    $Script:isAida64               = $(if ($settings.General.stressTestProgram -eq 'aida64') { $true } else { $false })
+    $Script:isYCruncher            = $(if ($settings.General.stressTestProgram -eq 'ycruncher') { $true } else { $false })
+    $Script:isYCruncherWithLogging = $(if ($settings.General.stressTestProgram -eq 'ycruncher' -and $settings.yCruncher.enableYCruncherLoggingWrapper) { $true } else { $false })
 
 
     # Set the general "mode" setting
@@ -1555,7 +1568,19 @@ function Get-Settings {
     $Script:stressTestPrograms['ycruncher']['processName']        = $yCruncherBinary
     $Script:stressTestPrograms['ycruncher']['processNameForLoad'] = $yCruncherBinary
     $Script:stressTestPrograms['ycruncher']['fullPathToExe']      = $stressTestPrograms['ycruncher']['absolutePath'] + $yCruncherBinary
-    $Script:stressTestPrograms['ycruncher']['windowNames']        = @('^.*' + $yCruncherBinary + '\.exe$')
+    $Script:stressTestPrograms['ycruncher']['fullPathToLoadExe']  = $stressTestPrograms['ycruncher']['absolutePath'] + $yCruncherBinary
+
+    # Special handling if enableYCruncherLoggingWrapper is enabled
+    if ($isYCruncherWithLogging) {
+        $Script:stressTestPrograms['ycruncher']['processName']    = 'WriteConsoleToWriteFileWrapper'
+        $Script:stressTestPrograms['ycruncher']['windowNames']    = @(
+            '^.*WriteConsoleToWriteFileWrapper\.exe$'
+            '^.*' + $yCruncherBinary + '\.exe$'
+        )
+    }
+    else {
+        $Script:stressTestPrograms['ycruncher']['windowNames']    = @('^.*' + $yCruncherBinary + '\.exe$')
+    }
 
 
     # Sanity check the selected test mode
@@ -1883,9 +1908,29 @@ function Get-StressTestProcessInformation {
     
     Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
 
-    $filteredWindowObj = $windowObj | Where-Object {
-        #(Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -match $searchForProcess
-        $_.ProcessPath -match $searchForProcess
+    # If we're running the wrapper for y-Cruncher to capture the output, we need to check the commandline
+    if ($isYCruncherWithLogging) {
+        Write-Verbose('enableYCruncherLoggingWrapper has been set, special handling')
+        $searchForProcess = '*"' + $stressTestPrograms['ycruncher']['fullPathToLoadExe'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'] + '"*'
+        $filteredWindowObj = $windowObj | Where-Object {
+            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.ProcessId)" | select CommandLine).CommandLine
+            $hasMatch = $commandLine -like $searchForProcess
+
+            Write-Verbose(' - ProcessId:        ' + $_.ProcessId)
+            Write-Verbose('   searchForProcess: ' + $searchForProcess)
+            Write-Verbose('   CommandLine:      ' + $commandLine)
+            Write-Verbose('   hasMatch:         ' + $hasMatch)
+            
+            $hasMatch
+        }
+    }
+
+    # Regular y-Cruncher or other stress test programs
+    else {
+        $filteredWindowObj = $windowObj | Where-Object {
+            #(Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -match $searchForProcess
+            $_.ProcessPath -match $searchForProcess
+        }
     }
 
     $filteredWindowObj | ForEach-Object {
@@ -1997,7 +2042,7 @@ function Test-Prime95 {
     if (!(Test-Path ($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt']) -PathType leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Prime95!') Red
         Write-ColorText('Make sure to download and extract Prime95 into the following directory:') Red
-        Write-ColorText($stressTestPrograms[$p95Type]['absolutePath']) Yellow
+        Write-ColorText($stressTestPrograms[$p95Type]['absoluteInstallPath']) Yellow
         Write-Text ''
         Write-ColorText('You can download Prime95 from:') Red
         Write-ColorText('https://www.mersenne.org/download/') Cyan
@@ -2663,7 +2708,7 @@ function Initialize-Aida64 {
     if (!(Test-Path ($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt']) -PathType leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Aida64!') Red
         Write-ColorText('Make sure to download and extract the PORTABLE ENGINEER(!) version of Aida64 into the following directory:') Red
-        Write-ColorText($stressTestPrograms['aida64']['absolutePath']) Yellow
+        Write-ColorText($stressTestPrograms['aida64']['absoluteInstallPath']) Yellow
         Write-Text ''
         Write-ColorText('You can download the PORTABLE ENGINEER(!) version of Aida64 from:') Red
         Write-ColorText('https://www.aida64.com/downloads') Cyan
@@ -3150,14 +3195,21 @@ function Close-Aida64 {
     [Void]
 #>
 function Initialize-yCruncher {
-    # Check if the selected binary exists
-    Write-Verbose('Checking if ' + $stressTestPrograms['ycruncher']['processName'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'] + ' exists at:')
-    Write-Verbose($stressTestPrograms['ycruncher']['fullPathToExe'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'])
 
-    if (!(Test-Path ($stressTestPrograms['ycruncher']['fullPathToExe'] + '.' + $stressTestPrograms['ycruncher']['processNameExt']) -PathType leaf)) {
+    $fullPathToExe = $stressTestPrograms['ycruncher']['fullPathToExe']
+
+    if ($isYCruncherWithLogging) {
+        $fullPathToExe = $stressTestPrograms['ycruncher']['fullPathToLoadExe']
+    }
+
+    # Check if the selected binary exists
+    Write-Verbose('Checking if ' + $stressTestPrograms['ycruncher']['processNameForLoad'] + '.' + $stressTestPrograms['ycruncher']['processNameExt'] + ' exists at:')
+    Write-Verbose($fullPathToExe + '.' + $stressTestPrograms['ycruncher']['processNameExt'])
+
+    if (!(Test-Path ($fullPathToExe + '.' + $stressTestPrograms['ycruncher']['processNameExt']) -PathType leaf)) {
         Write-ColorText('FATAL ERROR: Could not find y-Cruncher!') Red
         Write-ColorText('Make sure to download and extract y-Cruncher into the following directory:') Red
-        Write-ColorText($stressTestPrograms['ycruncher']['absolutePath']) Yellow
+        Write-ColorText($stressTestPrograms['ycruncher']['absoluteInstallPath']) Yellow
         Write-Text ''
         Write-ColorText('You can download y-Cruncher from:') Red
         Write-ColorText('http://www.numberworld.org/y-cruncher/#Download') Cyan
@@ -3169,9 +3221,12 @@ function Initialize-yCruncher {
 
     # The log file name and path for this run
     # TODO: y-Cruncher doesn't seem to create any type of log :(
-    #       And I also cannot redirect the output via > logfile.txt 
-    #$Script:stressTestLogFileName = 'y-Cruncher_' + $startDateTime + '.txt'
-    #$Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+    #       And I also cannot redirect the output via > logfile.txt
+    # We're using a custom C++ exe with Microsoft Detours now to capture the WriteConsoleW output
+    # https://github.com/sp00n/WriteConsoleToWriteFileWrapperExe
+    # https://github.com/sp00n/WriteConsoleToWriteFileWrapperDll
+    # The actual assignment of these variables has to happen earlier though
+
 
     # The "C17" test only works with "13-HSW ~ Airi" and above
     # Let's use the first two digits to determine this
@@ -3193,8 +3248,9 @@ function Initialize-yCruncher {
     }
 
 
-    $coresLine  = '        LogicalCores : [2]'
-    $memoryLine = '        TotalMemory : 13418572'
+    $coresLine   = '        LogicalCores : [2]'
+    $memoryLine  = '        TotalMemory : 13418572'
+    $stopOnError = '        StopOnError : "true"'
 
     if ($settings.General.numberOfThreads -gt 1) {
         $coresLine  = '        LogicalCores : [2 3]'
@@ -3204,6 +3260,11 @@ function Initialize-yCruncher {
     # The allocated memory
     if ($settings.yCruncher.memory -ne 'default') {
         $memoryLine = '        TotalMemory : ' + $settings.yCruncher.memory
+    }
+
+    # Stop on error or not
+    if ($settings.yCruncher.enableYCruncherLoggingWrapper -eq 1 -and $settings.General.stopOnError -eq 0) {
+        $stopOnError = '        StopOnError : "false"'
     }
 
     # The tests to run
@@ -3219,7 +3280,7 @@ function Initialize-yCruncher {
         $memoryLine
         '        SecondsPerTest : 60'
         '        SecondsTotal : 0'
-        '        StopOnError : "true"'
+        $stopOnError
         '        Tests : ['
         $testsToRun
         '        ]'
@@ -3267,6 +3328,7 @@ function Start-yCruncher {
     # 0 = Hide
     # Apparently on some computers (not mine) the windows title is not set to the binary path, so the Get-StressTestProcessInformation function doesn't work
     # Therefore we're now using "cmd /C start" to be able to set a window title...
+    
     $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
     $command         = $(if ($stressTestProgramWindowToForeground) {$command.replace('/MIN ', '')} else {$command})   # Remove the /MIN so that the window isn't placed in the background
     $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
@@ -3460,11 +3522,11 @@ function Close-StressTestProgram {
 .DESCRIPTION
     Check if there has been an error while running the stress test program and restart it if necessary
     Checks the existance of the process, the log file (if available), and the CPU utilization (if the setting is enabled)
-    Throws an error if something is wrong (PROCESSMISSING, FATALERROR, CPULOAD)
+    Throws an error if something is wrong (PROCESSMISSING, CALCULATIONERROR, CPULOAD)
 .PARAMETER coreNumber
     [Int] The current core being tested
 .OUTPUTS
-    [Void] But throws a string if there was an error with the CPU usage (PROCESSMISSING, FATALERROR, CPULOAD)
+    [Void] But throws a string if there was an error with the CPU usage (PROCESSMISSING, CALCULATIONERROR, CPULOAD)
 #>
 function Test-StressTestProgrammIsRunning {
     param (
@@ -3482,7 +3544,7 @@ function Test-StressTestProgrammIsRunning {
     # Does the stress test process still exist?
     $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
-    # What type of error occurred (PROCESSMISSING, FATALERROR, CPULOAD)
+    # What type of error occurred (PROCESSMISSING, CALCULATIONERROR, CPULOAD)
     $errorType = $null
     
 
@@ -3498,16 +3560,49 @@ function Test-StressTestProgrammIsRunning {
     if (!$stressTestError -and $isPrime95) {
 
         # Look for a line with an "error" string in the new log entries
-        $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
+        $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
         
         # Found the "error" string
-        if ($primeErrorResults.Length -gt 0) {
+        if ($errorResults.Length -gt 0) {
             # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-            $stressTestError = $primeErrorResults.Line
-            $errorType = 'FATALERROR'
+            $stressTestError = $errorResults.Line
+            $errorType = 'CALCULATIONERROR'
 
             Write-Verbose($timestamp)
             Write-Verbose('Found an error in the new entries of the results.txt!')
+        }
+    }
+
+
+    # 2a. But we can use a wrapper to capture the output for yCruncher!
+    if (!$stressTestError -and $isYCruncherWithLogging) {
+
+        # The messages y-Cruncher displays:
+        # Exception Encountered: XYZ
+        # 
+        # <ERROR MESSAGE>
+        # <May have multiple lines>
+        # 
+        # 
+        # Error(s) encountered on logical core X
+        # 
+        # Failed  Test Speed <...>
+        # Errors encountered. Stopping test...
+
+        # Look for a line with an "error" string in the new log entries
+        $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error\(s\).*'} | Select -Last 1
+        
+        # Found the "error" string
+        if ($errorResults.Length -gt 0) {
+            # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+            $stressTestError = $errorResults.Line
+            $errorType = 'CALCULATIONERROR'
+
+            Write-Verbose($timestamp)
+            Write-Verbose('Found an error in the new entries of the y-Cruncher output!')
+
+            # For y-Cruncher, remove the core number, since it doesn't represent the actual core being tested
+            $stressTestError = $stressTestError -replace '\s*\d+\.', ''
         }
     }
 
@@ -3531,13 +3626,27 @@ function Test-StressTestProgrammIsRunning {
                 # For Prime95
                 if ($isPrime95) {
                     # Look for a line with an "error" string in the new log entries
-                    $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
+                    $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
                     
                     # Found the "error" string
-                    if ($primeErrorResults.Length -gt 0) {
+                    if ($errorResults.Length -gt 0) {
                         # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-                        $stressTestError = $primeErrorResults.Line
-                        $errorType = 'FATALERROR'
+                        $stressTestError = $errorResults.Line
+                        $errorType = 'CALCULATIONERROR'
+                    }
+                }
+
+
+                # For y-Cruncher with logging enabled
+                if ($isYCruncherWithLogging) {
+                    # Look for a line with an "error" string in the new log entries
+                    $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error\(s\).*'} | Select -Last 1
+                    
+                    # Found the "error" string
+                    if ($errorResults.Length -gt 0) {
+                        # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                        $stressTestError = $errorResults.Line
+                        $errorType = 'CALCULATIONERROR'
                     }
                 }
 
@@ -3605,7 +3714,7 @@ function Test-StressTestProgrammIsRunning {
 
     # We now have an error message, process
     if ($stressTestError) {
-        Write-Verbose('There has been an error with the stress test program!')
+        Write-Verbose('There has been an error while running the stress test program!')
         Write-Verbose('Error type: ' + $errorType)
 
         # Store the core number in the array
@@ -3614,46 +3723,78 @@ function Test-StressTestProgrammIsRunning {
         # Count the number of errors per core
         $Script:coresWithErrorsCounter[$coreNumber]++ 
 
-        # If Hyperthreading / SMT is enabled and the number of threads larger than 1
-        if ($isHyperthreadingEnabled -and ($settings.General.numberOfThreads -gt 1)) {
-            $cpuNumbersArray = @($coreNumber, ($coreNumber + 1))
-            $cpuNumberString = (($cpuNumbersArray | sort) -Join ' or ')
-        }
+        $cpuNumbersArray = @()
 
-        # Only one core is being tested
-        else {
-            # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
-            # Otherwise, it's the same value
-            $cpuNumberString = $coreNumber * (1 + [Int] $isHyperthreadingEnabled)
-        }
-
-
-        # If running Prime95, make one additional check if the result.txt now has an error entry
-        if ($isPrime95 -and $errorType -ne 'FATALERROR') {
-            $timestamp = Get-Date -format HH:mm:ss
-
-            Write-Verbose($timestamp + ' - The stress test program is Prime95, trying to look for an error message in the results.txt')
-            
-            Get-Prime95LogfileEntries
-
-            # Look for a line with an "error" string in the new log entries
-            $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
-            
-            # Found the "error" string
-            if ($primeErrorResults.Length -gt 0) {
-                # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-                $stressTestError = $primeErrorResults.Line
-
-                Write-Verbose($timestamp)
-                Write-Verbose('           Now found an error in the new entries of the results.txt!')
+        # If the number of threads is more than 1
+        if ($settings.General.numberOfThreads -gt 1) {
+            for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
+                # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
+                $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
+                $cpuNumbersArray += $cpuNumber
             }
         }
 
+        # Only one thread
+        else {
+            # assignBothVirtualCoresForSingleThread is enabled, we want to use both virtual cores, but with only one thread
+            # The load should bounce back and forth between the two cores this way
+            # Hyperthreading needs to be enabled for this
+            if ($settings.General.assignBothVirtualCoresForSingleThread -and $isHyperthreadingEnabled) {
+                for ($currentThread = 0; $currentThread -lt 2; $currentThread++) {
+                    $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
+                    $cpuNumbersArray += $cpuNumber
+                }
+            }
+
+            # Setting not active, only one core for the load thread
+            else {
+                # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
+                # Otherwise, it's the same value
+                $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
+                $cpuNumbersArray += $cpuNumber
+            }
+        }
+
+        $cpuNumberString = (($cpuNumbersArray | sort) -Join ' or ')
+
+
+        # If running Prime95 or y-Cruncher with logging wrapper, make one additional check if the log file now has an error entry
+        if (($isPrime95 -or $isYCruncherWithLogging) -and $errorType -ne 'CALCULATIONERROR') {
+            $timestamp = Get-Date -format HH:mm:ss
+
+            Write-Verbose($timestamp + ' - The stress test program has a log file, trying to look for an error message in the log')
+            
+            Get-NewLogfileEntries
+
+            # Prime95: Look for a line with an "error" string in the new log entries
+            if ($isPrime95) {
+                $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'} | Select -Last 1
+            }
+
+            # y-Cruncher: Look for error(s)
+            elseif ($isYCruncherWithLogging) {
+                $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error\(s\).*'} | Select -Last 1
+            }
+            
+            # Found the "error" string
+            if ($errorResults.Length -gt 0) {
+                # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                $stressTestError = $errorResults.Line
+
+                # For y-Cruncher, remove the core number, since it doesn't represent the actual core being tested
+                if ($isYCruncherWithLogging) {
+                    $stressTestError = $stressTestError -replace '\s*\d+\.', ''
+                }
+
+                Write-Verbose($timestamp)
+                Write-Verbose('           Now found an error in the new entries of the log file!')
+            }
+        }
 
         # Put out an error message
         $timestamp = Get-Date -format HH:mm:ss
         Write-ColorText('ERROR: ' + $timestamp) Magenta
-        Write-ColorText('ERROR: ' + $selectedStressTestProgram + ' seems to have stopped with an error!') Magenta
+        Write-ColorText('ERROR: There has been an error while running ' + $selectedStressTestProgram + '!') Magenta
         Write-ColorText('ERROR: At Core ' + $coreNumber + ' (CPU ' + $cpuNumberString + ')') Magenta
         Write-ColorText('ERROR MESSAGE: ' + $stressTestError) Magenta
 
@@ -3672,11 +3813,6 @@ function Test-StressTestProgrammIsRunning {
 
             if ($lastFFTErrorEntry) {
                 Write-Verbose('There was an FFT size provided in the error message, use it.')
-
-                #$lastFiveRows     = $allLogEntries | Select -Last 5
-                #$lastPassedFFTArr = @($lastFiveRows | Where-Object {$_ -like '*Hardware failure detected running*'})  # This needs to be an array
-                #$hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Hardware failure detected running (\d+)K FFT size'
-                #$lastPassedFFT    = if ($hasMatched) { [Int] $Matches[1] }   # $Matches is a fixed(?) variable name for -match
 
                 $hasMatched = $lastFFTErrorEntry -match 'Hardware failure detected running (\d+)K FFT size'
                 $lastRunFFT = if ($hasMatched) { [Int] $Matches[1] }   # $Matches is a fixed(?) variable name for -match
@@ -3720,11 +3856,11 @@ function Test-StressTestProgrammIsRunning {
                         $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)(K?) passed'
                         
                         if ($hasMatched) {
-                            if ($matches[2] -eq 'K') {
-                                $lastPassedFFT = [Int] $matches[1] * 1024
+                            if ($Matches[2] -eq 'K') {
+                                $lastPassedFFT = [Int] $Matches[1] * 1024
                             }
                             else {
-                                $lastPassedFFT = [Int] $matches[1]
+                                $lastPassedFFT = [Int] $Matches[1]
                             }
                         }
 
@@ -3785,11 +3921,11 @@ function Test-StressTestProgrammIsRunning {
                     $hasMatched       = $lastPassedFFTArr[$lastPassedFFTArr.Length-1] -match 'Self\-test (\d+)(K?) passed'
 
                     if ($hasMatched) {
-                        if ($matches[2] -eq 'K') {
-                            $lastPassedFFT = [Int] $matches[1] * 1024
+                        if ($Matches[2] -eq 'K') {
+                            $lastPassedFFT = [Int] $Matches[1] * 1024
                         }
                         else {
-                            $lastPassedFFT = [Int] $matches[1]
+                            $lastPassedFFT = [Int] $Matches[1]
                         }
                     }
                     
@@ -3827,6 +3963,97 @@ function Test-StressTestProgrammIsRunning {
         }
 
 
+        # y-Cruncher with logging wrapper
+        elseif ($isYCruncherWithLogging) {
+            Write-Verbose('y-Cruncher with logging wrapper enabled')
+
+            # The messages y-Cruncher displays:
+            # Exception Encountered: XYZ
+            # 
+            # <ERROR MESSAGE>
+            # <May have multiple lines>
+            # 
+            # 
+            # Error(s) encountered on logical core X
+            # 
+            # Failed  Test Speed <...>
+            # Errors encountered. Stopping test...
+
+
+            # Get the last 20 rows
+            $lastTwentyRows = $allLogEntries | Select -Last 20
+
+
+            # Get the last test that was being run
+            # We want the test that was started before the error message was thrown
+            # The last entry may already be the next test that was started after the error happened
+
+            # Look for the line the error message appears in
+            $errorResults   = $newLogEntries | Where-Object {$_.Line -match '.*error\(s\).*'} | Select -Last 1
+            
+            if ($errorResults.Length -gt 0) {
+                $lastLineEntry  = $lastTwentyRows | Select-String -Pattern $errorResults.Line -SimpleMatch | select Line,LineNumber
+                $lastLineNumber = $lastLineEntry.LineNumber
+            }
+            else {
+                $lastLineNumber = 20
+            }
+
+
+            # Reduce the Last Twenty Rows up to this line
+            $lastRowsUpToError = $lastTwentyRows | Select -First $lastLineNumber
+
+            # Now get the last started test
+            $allLatestTestArr = @($lastRowsUpToError | Where-Object {$_ -like '*Running *'})
+            $hasMatched       = $allLatestTestArr[$allLatestTestArr.Length-1] -match 'Running ([a-z0-9]+):'
+
+            if ($hasMatched) {
+                $lastRunTest = $Matches[1]
+            }
+
+            if ($lastRunTest) {
+                Write-ColorText('ERROR: The last test being started was: ' + $lastRunTest) Magenta 
+            }
+            else {
+                Write-ColorText('ERROR: No last test being started was found') Magenta
+            }
+            
+
+            $exceptionEntry = $lastTwentyRows | Where-Object {$_ -match 'Exception Encountered'} | Select -Last 1
+            $hasMatched = $($lastTwentyRows | Out-String) | Where-Object {$_ -match "(?s)Exception Encountered.+`r`n`r`n(.+)`r`n`r`nError\(s\) encountered on logical core"}
+
+            if ($hasMatched) {
+                $lastErrorMessage = $Matches[1]
+            }
+
+            
+            if ($exceptionEntry -or $lastErrorMessage) {
+                Write-ColorText('ERROR: The error message:') Magenta
+
+                if ($exceptionEntry) {
+                    Write-ColorText($exceptionEntry) Yellow
+                }
+                    if ($lastErrorMessage) {
+                    Write-ColorText($lastErrorMessage) Yellow
+                }
+            }
+            else {
+                Write-ColorText('ERROR: No error message was found') Magenta
+            }
+
+
+            Write-Verbose('The last 20 entries of the output:')
+            $lastTwentyRows | ForEach-Object -Begin {
+                $index = $allLogEntries.Count - 20
+            } `
+            -Process {
+                Write-Verbose('- [Line ' + $index + '] ' + $_)
+                $index++
+            }
+
+            Write-Text('')
+        }
+
         # y-Cruncher
         elseif ($isYCruncher) {
             Write-Verbose('The stress test program is y-Cruncher, no detailed error detection available')
@@ -3834,17 +4061,22 @@ function Test-StressTestProgrammIsRunning {
 
 
         # Throw an error to let the caller know to close and possibily restart the stress test program
-        # Maybe use a specific exception type instead / additionally?
-        # System.ApplicationException
-        # System.Activities.WorkflowApplicationAbortedException
-        throw '999'
+        # PROCESSMISSING
+        # CALCULATIONERROR
+        # CPULOAD
+        if (!$errorType) {
+            $errorType = 'UNKNOWN_STRESS_TEST_ERROR'
+        }
+
+        $exception = New-Object System.ApplicationException -ArgumentList ('StressTestError', $errorType)
+        throw $exception
     }
 }
 
 
 <#
 .DESCRIPTION
-    Get the (new) entries from the Prime95 results.txt and store them in a global variable
+    Get the (new) entries from a log file and store them in a global variable
 .PARAMETER
     [Void]
 .OUTPUTS
@@ -3856,7 +4088,7 @@ function Test-StressTestProgrammIsRunning {
     - $allLogEntries
     - $newLogEntries
 #>
-function Get-Prime95LogfileEntries {
+function Get-NewLogfileEntries {
     $timestamp = Get-Date -format HH:mm:ss
     Write-Debug($timestamp + ' - Getting new log file entries')
 
@@ -3939,6 +4171,7 @@ function Get-Prime95LogfileEntries {
     The main functionality
 #>
 Write-Host('Starting the CoreCycler...')
+Write-Host('Press CTRL+C to abort') -ForegroundColor Yellow
 
 
 # We need the logs directory to exist
@@ -3957,7 +4190,7 @@ Get-Settings
 
 # PowerShell version too low
 # This is a neat flag
-#requires -version 3.0
+#requires -version 5.0
 
 # The script doesn't work for Powershell version 6 and 7
 # There are some missing cmdlets
@@ -3968,7 +4201,24 @@ if ($PSVersionTable.PSVersion.Major -gt 5) {
     Write-Host
     Write-Host 'Please run this script with PowerShell 5.1, which is included with Windows' -ForegroundColor Yellow
     
-    Exit-WithFatalError    
+    Exit-WithFatalError
+}
+
+
+# Non-ANSI characters in the directory path may pose problems
+Write-Debug('PSScriptRoot: ' + $PSScriptRoot)
+
+if ($PSScriptRoot -match '[^\x00-\x7F]') {
+    Write-Host
+    Write-Host 'FATAL ERROR: The directory path contains non-ANSI characters!' -ForegroundColor Red
+    Write-Host
+    Write-Host 'Please run this script from a directory that only contains ANSI characters.' -ForegroundColor Yellow
+    Write-Host '(for example D:\Overclock\CoreCycler\)' -ForegroundColor Yellow
+    Write-Host
+    Write-Host 'The current directory is:' -ForegroundColor Yellow
+    Write-Host $PSScriptRoot -ForegroundColor Yellow
+    
+    Exit-WithFatalError
 }
 
 
@@ -4113,9 +4363,10 @@ catch {
 
 # Get the final stress test program file paths and command lines
 foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
-    $stressTestPrograms[$testProgram.Name]['absolutePath']   = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
-    $stressTestPrograms[$testProgram.Name]['fullPathToExe']  = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
-    $stressTestPrograms[$testProgram.Name]['configFilePath'] = $testProgram.Value['absolutePath'] + $testProgram.Value['configName']
+    $stressTestPrograms[$testProgram.Name]['absolutePath']        = $PSScriptRoot + '\' + $testProgram.Value['processPath'] + '\'
+    $stressTestPrograms[$testProgram.Name]['absoluteInstallPath'] = $PSScriptRoot + '\' + $testProgram.Value['installPath'] + '\'
+    $stressTestPrograms[$testProgram.Name]['fullPathToExe']       = $testProgram.Value['absolutePath'] + $testProgram.Value['processName']
+    $stressTestPrograms[$testProgram.Name]['configFilePath']      = $testProgram.Value['absolutePath'] + $testProgram.Value['configName']
 
     # If we have a comma separated list, remove all spaces and transform to upper case
     $commandMode = (($settings[$testProgram.Name].mode -Split ',\s*') -Join ',').ToUpperInvariant()
@@ -4129,6 +4380,21 @@ foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
     }
 
     $command = $stressTestPrograms[$testProgram.Name]['command']
+
+    # Special behaviour if the custom logging wrapper for y-Cruncher is activated
+    if ($testProgram.Name -eq 'ycruncher' -and $isYCruncherWithLogging) {
+        $stressTestPrograms['ycruncher']['fullPathToLoadExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processNameForLoad']
+        
+        $command = $stressTestPrograms[$testProgram.Name]['commandWithLogging']
+
+        $Script:stressTestLogFileName = 'yCruncher_' + $startDateTime + '_mode_' + $settings.mode + '.txt'
+        $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+
+        $data['%fileName%'] = ($testProgram.Value['processNameForLoad'] + '.' + $testProgram.Value['processNameExt'])
+        $data.add('%fullPathToLoadExe%', $testProgram.Value['fullPathToLoadExe'] + '.' + $testProgram.Value['processNameExt'])
+        $data.add('%helpersPath%', $helpersPathAbsolute)
+        $data.add('%logFilePath%', $stressTestLogFilePath)
+    }
 
     foreach ($key in $data.Keys) {
         $command = $command.replace($key, $data.$key)
@@ -4748,6 +5014,9 @@ try {
 
             Write-Verbose('Successfully set the affinity to ' + $affinity)
 
+            # Change the title
+            $host.ui.RawUI.WindowTitle = 'CoreCycler: Core ' + $actualCoreNumber
+
 
             # Set the process priority
             try {
@@ -4869,9 +5138,10 @@ try {
                 }
 
 
-                # For Prime95, try to get the new log file entries from the results.txt
-                if ($isPrime95) {
-                    Get-Prime95LogfileEntries
+                # For Prime95, try to get the new log file entries
+                # Also for y-Cruncher with the logging wrapper
+                if ($isPrime95 -or $isYCruncherWithLogging) {
+                    Get-NewLogfileEntries
                 }
                 
                 # If the runtime per core is set to auto and we're running Prime95
@@ -4895,9 +5165,9 @@ try {
                         # Check for an error, if we've found one, we don't even need to process any further
                         # Note: there is a potential to miss log entries this way
                         # However, since the script either stops at this point or the stress test program is restarted, we don't really need to worry about this
-                        $primeErrorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'}
+                        $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error.*'}
 
-                        if ($primeErrorResults) {
+                        if ($errorResults) {
                             Write-Debug('           Found an error entry in the new log entries, proceed to the error check')
                             break LoopCheckForAutomaticRuntime
                         }
@@ -5043,11 +5313,11 @@ try {
                                 $hasMatched = $currentResultLineEntry.Line -match 'Self\-test (\d+)(K?) passed'
 
                                 if ($hasMatched) {
-                                    if ($matches[2] -eq 'K') {
-                                        $currentPassedFFTSize = [Int] $matches[1] * 1024
+                                    if ($Matches[2] -eq 'K') {
+                                        $currentPassedFFTSize = [Int] $Matches[1] * 1024
                                     }
                                     else {
-                                        $currentPassedFFTSize = [Int] $matches[1]
+                                        $currentPassedFFTSize = [Int] $Matches[1]
                                     }
                                 }
                                 
@@ -5125,27 +5395,26 @@ try {
                     Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (#1)')
 
                     # There is an error message
-                    if ($Error -and $Error[0].ToString() -eq '999') {
-                        # Try to close the stress test program process if it is still running
-                        Write-Verbose('Trying to close the stress test program to re-start it')
-                        
-                        # Set the flag to only stop the stress test program if possible
-                        Close-StressTestProgram $true
-                        
-
+                    if ($_.Exception -and $_.Exception.Message -eq 'StressTestError') {
                         # If the stopOnError flag is set, stop at this point
+                        # But leave the stress test program open if possible
                         if ($settings.General.stopOnError) {
                             Write-Text('')
                             Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
+                            # Display the path to the log file
                             if ($isPrime95) {
-                                # Display the results.txt file name for Prime95 for this run
                                 Write-Text('')
                                 Write-ColorText('Prime95''s results log file can be found at:') Cyan
                                 Write-ColorText($stressTestLogFilePath) Cyan
                             }
+                            elseif ($isYCruncherWithLogging) {
+                                Write-Text('')
+                                Write-ColorText('y-Cruncher''s log file can be found at:') Cyan
+                                Write-ColorText($stressTestLogFilePath) Cyan
+                            }
 
-                            # And the name of the log file for this run
+                            # And the path to the CoreCycler the log file for this run
                             Write-Text('')
                             Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
                             Write-ColorText($logfileFullPath) Cyan
@@ -5154,21 +5423,35 @@ try {
                             Exit-Script
                         }
 
-
-                        # Try to restart the stress test program and continue with the next core
-                        # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
-                        # This will be taken care of in another routine
-                        if (!$settings.General.restartTestProgramForEachCore) {
-                            Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
-
-                            $timestamp = Get-Date -format HH:mm:ss
-                            Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
-
-                            # Start the stress test program again
-                            # Set the flag to only start the stress test program if possible
-                            Start-StressTestProgram $true
+                        # y-Cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
+                        # And the process is still running of course
+                        elseif ($isYCruncherWithLogging -and !$settings.General.restartTestProgramForEachCore -and $_.Exception.InnerException.Message -ne 'PROCESSMISSING') {
+                            Write-Verbose('Running y-Cruncher with the log wrapper and restartTestProgramForEachCore disabled, continue to the next core')
                         }
-                    }   # End: if ($Error -and $Error[0].ToString() -eq '999')
+
+                        # Otherwise for Prime95 (and others), try to close and restart the stress test program process if it is still running
+                        else {
+                            Write-Verbose('Trying to close the stress test program to re-start it')
+                            
+                            # Set the flag to only stop the stress test program if possible
+                            Close-StressTestProgram $true
+
+
+                            # Try to restart the stress test program and continue with the next core
+                            # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
+                            # This will be taken care of in another routine
+                            if (!$settings.General.restartTestProgramForEachCore) {
+                                Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
+
+                                $timestamp = Get-Date -format HH:mm:ss
+                                Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
+
+                                # Start the stress test program again
+                                # Set the flag to only start the stress test program if possible
+                                Start-StressTestProgram $true
+                            }
+                        }
+                    }   # End: if ($_.Exception -and $_.Exception.Message -eq 'StressTestError')
 
                     # Unknown error
                     else {
@@ -5204,7 +5487,7 @@ try {
 
 
                 # There is an error message
-                if ($Error -and $Error[0].ToString() -eq '999') {
+                if ($_.Exception -and $_.Exception.Message -eq 'StressTestError') {
                     # Try to close the stress test program process if it is still running
                     Write-Verbose('Trying to close the stress test program to re-start it')
                     
