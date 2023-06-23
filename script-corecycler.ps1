@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.5.0alpha1
+    0.9.5.0alpha2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.5.0alpha1'
+$version                    = '0.9.5.0alpha2'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -50,6 +50,7 @@ $lineCounter                = 0
 $newLogEntries              = [System.Collections.ArrayList]::new()
 $allLogEntries              = [System.Collections.ArrayList]::new()
 $allFFTLogEntries           = [System.Collections.ArrayList]::new()
+$allTestLogEntries          = [System.Collections.ArrayList]::new()
 $cpuTestMode                = $null
 $coreTestOrderMode          = $null
 $coreTestOrderCustom        = @()
@@ -59,6 +60,8 @@ $otherError                 = $false
 $previousFileSize           = $null
 $previousPassedFFTSize      = $null
 $previousPassedFFTEntry     = $null
+$previousPassedTest         = $null
+$previousPassedTestEntry    = $null
 $isPrime95                  = $false
 $isAida64                   = $false
 $isYCruncher                = $false
@@ -70,7 +73,7 @@ $debugSettingsActive                        = $false
 $disableCpuUtilizationCheckDefault          = 0
 $enableCpuFrequencyCheckDefault             = 0
 $tickIntervalDefault                        = 10
-$delayFirstErrorCheckDefault                      = 0
+$delayFirstErrorCheckDefault                = 0
 $stressTestProgramPriorityDefault           = 'High'
 $stressTestProgramWindowToForegroundDefault = 0
 $suspensionTimeDefault                      = 1000
@@ -110,7 +113,7 @@ $stressTestPrograms = @{
         'absolutePath'        = $null
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
-        'command'             = """%fullPathToExe%"" -t"
+        'command'             = '"%fullPathToExe%" -t'
         'windowBehaviour'     = 0
         'testModes'           = @(
             'SSE',
@@ -140,7 +143,7 @@ $stressTestPrograms = @{
         'absolutePath'        = $null
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
-        'command'             = """%fullPathToExe%"" -t"
+        'command'             = '"%fullPathToExe%"" -t'
         'windowBehaviour'     = 0
         'testModes'           = @(
             'SSE',
@@ -170,7 +173,7 @@ $stressTestPrograms = @{
         'absolutePath'        = $null
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
-        'command'             = """%fullPathToExe%"" /SAFEST /SILENT /SST %mode%"
+        'command'             = '"%fullPathToExe%" /SAFEST /SILENT /SST %mode%'
         'windowBehaviour'     = 6
         'testModes'           = @(
             'CACHE',
@@ -184,7 +187,7 @@ $stressTestPrograms = @{
     }
 
     'ycruncher' = @{
-        'displayName'         = "y-Cruncher"
+        'displayName'         = 'y-Cruncher'
         'processName'         = '' # Depends on the selected modeYCruncher
         'processNameExt'      = 'exe'
         'processNameForLoad'  = '' # Depends on the selected modeYCruncher
@@ -196,8 +199,8 @@ $stressTestPrograms = @{
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
         'fullPathToLoadExe'   = $null
-        'command'             = "cmd /C start /MIN ""y-Cruncher - %fileName%"" ""%fullPathToExe%"" priority:2 config ""%configFilePath%"""
-        'commandWithLogging'  = "cmd /C start /MIN ""y-Cruncher - %fileName%"" ""%helpersPath%WriteConsoleToWriteFileWrapper.exe"" ""%fullPathToLoadExe%"" priority:2 config ""%configFilePath%"" /dlllog:""%logFilePath%"""
+        'command'             = 'cmd /C start /MIN "y-Cruncher - %fileName%" "%fullPathToExe%" priority:2 config "%configFilePath%"'
+        'commandWithLogging'  = 'cmd /C start /MIN "y-Cruncher - %fileName%" "%helpersPath%WriteConsoleToWriteFileWrapper.exe" "%fullPathToLoadExe%" priority:2 config "%configFilePath%" /dlllog:"%logFilePath%"'
         'windowBehaviour'     = 6
         'testModes'           = @(
             '00-x86',
@@ -219,7 +222,9 @@ $stressTestPrograms = @{
             # This setting is designed for Ryzen 7000 (Zen 4) CPUs and uses AVX-512
             '22-ZN4 ~ Kizuna'
         )
-        'windowNames'        = @(
+        'availableTests'      = @('BKT', 'BBP', 'SFT', 'FFT', 'N32', 'N64', 'HNT', 'VST', 'C17')
+        'defaultTests'        = @('BKT', 'BBP', 'SFT', 'FFT', 'N32', 'N64', 'HNT', 'VST')
+        'windowNames'         = @(
             '' # Depends on the selected modeYCruncher
         )
     }
@@ -1368,17 +1373,28 @@ function Import-Settings {
 
                 # Empty value, use the default
                 if ($value -eq $null -or [String]::IsNullOrWhiteSpace($value)) {
-                    $value = 'BKT, BBP, SFT, FFT, N32, N64, HNT, VST'
+                    $value = $stressTestPrograms.ycruncher.defaultTests -Join ', '
                 }
 
                 # Split the string by comma
                 $value -split ',\s*' | ForEach-Object {
                     if ($_.Length -gt 0) {
-                        $thisSetting += $_.ToString().Trim()
+                        $thisSetting += $_.ToString().Trim().ToUpperInvariant()
                     }
                 }
 
-                $setting = $thisSetting
+                # The possible y-Cruncher test values
+                $possibleTests = $stressTestPrograms.ycruncher.availableTests
+                $selectedTests = @()
+
+                # Filter for only the possible test values
+                $thisSetting | ForEach-Object {
+                    if ($possibleTests.Contains($_.ToUpperInvariant())) {
+                        $selectedTests += $_.ToUpperInvariant()
+                    }
+                }
+
+                $setting = $selectedTests
             }
 
 
@@ -1631,8 +1647,11 @@ function Get-FormattedRuntimePerCoreString {
     )
 
     if ($seconds.ToString().ToLowerInvariant() -eq 'auto') {
-        if ($isAida64 -or $isYCruncher) {
-            $returnString = [Math]::Round($script:runtimePerCore/60, 2).ToString() + ' minutes (Auto-Mode)'
+        if ($isAida64) {
+            $returnString = [Math]::Round($Script:runtimePerCore/60, 2).ToString() + ' minutes (Auto-Mode)'
+        }
+        elseif ($isYCruncher -and !$isYCruncherWithLogging) {
+            $returnString = $Script:runtimePerCore.ToString() + ' seconds (' + [Math]::Round($Script:runtimePerCore/60, 2).ToString() + ' minutes) (Auto-Mode)'
         }
         else {
             $returnString = 'AUTOMATIC'
@@ -1677,6 +1696,29 @@ function Get-FormattedRuntimePerCoreString {
     }
 
     return ($runtimePerCoreStringArray -Join ', ')
+}
+
+
+
+<#
+.DESCRIPTION
+    Get the estimated runtime per core for the y-Cruncher "auto" setting
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Int] The runtime in seconds
+#>
+function Get-EstimatedYCruncherRuntimePerCore {
+    # Selected tests * duration of test + time in suspension + buffer
+    $estimatedTime =   ($settings.yCruncher.tests.Count * $settings.yCruncher.testDuration) `
+                        + (`
+                            $settings.General.suspendPeriodically * `
+                            ($settings.yCruncher.tests.Count * $settings.yCruncher.testDuration) / $settings.Debug.tickInterval * (1000 / $settings.Debug.suspensionTime)`
+                        )`
+                        + ($settings.yCruncher.tests.Count * $settings.yCruncher.testDuration * 0.05) # Some extra buffer (5% of runtime per test)
+    $estimatedTime = [Math]::Ceiling($estimatedTime)
+
+    return $estimatedTime
 }
 
 
@@ -3216,28 +3258,20 @@ function Initialize-yCruncher {
         Exit-WithFatalError
     }
 
-    $modeString = $settings.mode
-    $configFile = $stressTestPrograms['ycruncher']['configFilePath']
-
-    # The log file name and path for this run
-    # TODO: y-Cruncher doesn't seem to create any type of log :(
-    #       And I also cannot redirect the output via > logfile.txt
-    # We're using a custom C++ exe with Microsoft Detours now to capture the WriteConsoleW output
-    # https://github.com/sp00n/WriteConsoleToWriteFileWrapperExe
-    # https://github.com/sp00n/WriteConsoleToWriteFileWrapperDll
-    # The actual assignment of these variables has to happen earlier though
+    $modeString    = $settings.mode
+    $configFile    = $stressTestPrograms['ycruncher']['configFilePath']
+    $selectedTests = $settings.yCruncher.tests
 
 
     # The "C17" test only works with "13-HSW ~ Airi" and above
-    # Let's use the first two digits to determine this
-    if ($settings.yCruncher.tests.Contains("C17")) {
+    # Let's use the first two digits to determine this (so 00 to 22)
+    if ($selectedTests.Contains('C17')) {
         $modeNum = [Int] $modeString.Substring(0, 2)
 
         if ($modeNum -lt 13) {
             Exit-WithFatalError('Test "C17" is present in the "tests" setting, but the selected y-Cruncher mode "' + $modeString + '" does not support it! Aborting!')
         }
     }
-
 
     # Create the config file and overwrite if necessary
     $null = New-Item $configFile -ItemType File -Force
@@ -3248,9 +3282,10 @@ function Initialize-yCruncher {
     }
 
 
-    $coresLine   = '        LogicalCores : [2]'
-    $memoryLine  = '        TotalMemory : 13418572'
-    $stopOnError = '        StopOnError : "true"'
+    $coresLine      = '        LogicalCores : [2]'
+    $memoryLine     = '        TotalMemory : 13418572'
+    $stopOnError    = '        StopOnError : "true"'
+    $secondsPerTest = 60
 
     if ($settings.General.numberOfThreads -gt 1) {
         $coresLine  = '        LogicalCores : [2 3]'
@@ -3268,7 +3303,12 @@ function Initialize-yCruncher {
     }
 
     # The tests to run
-    $testsToRun = $settings.yCruncher.tests | % { -Join('            "', $_, '"') }
+    $testsToRun = $selectedTests | % { -Join('            "', $_, '"') }
+
+    # The duration per test
+    if ($settings.yCruncher.testDuration -gt 0) {
+        $secondsPerTest = $settings.yCruncher.testDuration
+    }
 
 
     $configEntries = @(
@@ -3278,7 +3318,7 @@ function Initialize-yCruncher {
         '        AllocateLocally : "true"'
         $coresLine
         $memoryLine
-        '        SecondsPerTest : 60'
+        '        SecondsPerTest : ' + $secondsPerTest
         '        SecondsTotal : 0'
         $stopOnError
         '        Tests : ['
@@ -3989,10 +4029,10 @@ function Test-StressTestProgrammIsRunning {
             # The last entry may already be the next test that was started after the error happened
 
             # Look for the line the error message appears in
-            $errorResults   = $newLogEntries | Where-Object {$_.Line -match '.*error\(s\).*'} | Select -Last 1
+            $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error\(s\).*'} | Select -Last 1
             
             if ($errorResults.Length -gt 0) {
-                $lastLineEntry  = $lastTwentyRows | Select-String -Pattern $errorResults.Line -SimpleMatch | select Line,LineNumber
+                $lastLineEntry  = $lastTwentyRows | Select-String -Pattern $errorResults.Line -SimpleMatch | Select -First 1 | Select Line,LineNumber
                 $lastLineNumber = $lastLineEntry.LineNumber
             }
             else {
@@ -4021,6 +4061,7 @@ function Test-StressTestProgrammIsRunning {
 
             $exceptionEntry = $lastTwentyRows | Where-Object {$_ -match 'Exception Encountered'} | Select -Last 1
             $hasMatched = $($lastTwentyRows | Out-String) | Where-Object {$_ -match "(?s)Exception Encountered.+`r`n`r`n(.+)`r`n`r`nError\(s\) encountered on logical core"}
+            # Note: this needs double quotes to recognize the line breaks
 
             if ($hasMatched) {
                 $lastErrorMessage = $Matches[1]
@@ -4460,8 +4501,14 @@ if ($settings.General.runtimePerCore.ToString().ToLowerInvariant() -eq 'auto') {
     elseif ($isAida64) {
         $runtimePerCore = 10 * 60
     }
+    elseif ($isYCruncherWithLogging) {
+        $runtimePerCore = 24 * 60 * 60  # 24 hours as a temporary value
+        $useAutomaticRuntimePerCore = $true
+    }
+    # For y-Cruncher without logging, try to estimate the duration
     elseif ($isYCruncher) {
-        $runtimePerCore = 10 * 60
+        # Selected tests * duration of test + time in suspension + buffer
+        $runtimePerCore = Get-EstimatedYCruncherRuntimePerCore
     }
 }
 
@@ -4620,7 +4667,8 @@ try {
             Write-ColorText('Selected FFT size: .................... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
         }
         if ($isYCruncher) {
-            Write-ColorText('Selected y-Cruncher Tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
+            Write-ColorText('Selected y-Cruncher tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
+            Write-ColorText('Duration per test: .................... ' + ($settings.yCruncher.testDuration)) Cyan
         }
     }
 
@@ -4843,6 +4891,8 @@ try {
             $cpuNumbersArray    = @()
             $allPassedFFTs      = [System.Collections.ArrayList]::new()
             $uniquePassedFFTs   = [System.Collections.ArrayList]::new()
+            $allPassedTests     = [System.Collections.ArrayList]::new()
+            $uniquePassedTests  = [System.Collections.ArrayList]::new()
             $proceedToNextCore  = $false
             $fftSizeOverflow    = $false
 
@@ -5068,7 +5118,14 @@ try {
             }
 
             if ($useAutomaticRuntimePerCore) {
-                Write-Text('           Running until all FFT sizes have been tested...')
+                if ($isPrime95) {
+                    Write-Text('           Running until all FFT sizes have been tested...')
+                }
+                elseif ($isYCruncherWithLogging) {
+                    $estimatedRuntime = Get-EstimatedYCruncherRuntimePerCore
+                    $formattedEstimatedTime = Get-FormattedRuntimePerCoreString $estimatedRuntime
+                    Write-Text('           Running until all selected tests have been completed (around ' + $formattedEstimatedTime + ')...')
+                }
             }
             else {
                 Write-Text('           Running for ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore) + '...')
@@ -5384,6 +5441,217 @@ try {
                     }   # End :LoopCheckForAutomaticRuntime while ($true)
                 }   # End if ($useAutomaticRuntimePerCore -and $isPrime95)
 
+                # If the runtime per core is set to auto and we're running y-Cruncher with the logging functionality enabled
+                # We need to check if all the selected tests have run
+                # Note that the iterations in y-Cruncher may not reflect the iterations in CoreCycler if there has been an error in-between
+                elseif ($useAutomaticRuntimePerCore -and $isYCruncherWithLogging) {
+                    :LoopCheckForAutomaticRuntime while ($true) {
+                        $timestamp = Get-Date -format HH:mm:ss
+                        $proceed = $false
+                        $foundPassedTestLines = @()
+
+                        Write-Debug($timestamp + ' - Automatic runtime per core selected')
+                        
+                        # Only perform the check if the file size has increased
+                        # The size has increased, so something must have changed
+                        # It's either a new passed test entry, a new iteration, an error, or a restarted program
+                        if ($newLogEntries.Length -le 0) {
+                            Write-Debug('           No new log file entries found')
+                            break LoopCheckForAutomaticRuntime
+                        }
+
+
+                        # Check for an error, if we've found one, we don't even need to process any further
+                        # Note: there is a potential to miss log entries this way
+                        # However, since the script either stops at this point or the stress test program is restarted, we don't really need to worry about this
+                        $errorResults = $newLogEntries | Where-Object {$_.Line -match '.*error\(s\).*'} | Select -Last 1
+
+                        if ($errorResults) {
+                            Write-Debug('           Found an error entry in the new log entries, proceed to the error check')
+                            break LoopCheckForAutomaticRuntime
+                        }
+
+
+                        # Get only the passed test lines
+                        # Note: the new entries do not have the "Running XYZ:" part, so the test itself does not even appear
+                        # We need to get the "line" directly before to get the actual test
+                        $lastPassedTestResults = $newLogEntries | Where-Object {$_.Line -match '.*Passed.*'}
+
+
+                        # No passed tests found
+                        if (!$lastPassedTestResults) {
+                            Write-Debug('           No passed tests found yet, assuming we''re at the very beginning of the run')
+                            break LoopCheckForAutomaticRuntime
+                        }
+
+
+                        Write-Debug('           The last passed test lines:')
+                        $lastPassedTestResults | % {
+                            Write-Debug('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
+                        }
+
+
+                        # Check all the entries in the found test results
+                        # There may have been some sort of hiccup in the result file generation or file check, where one test is overlooked
+                        # Start at the oldest line
+                        foreach ($currentResultLineEntry in $lastPassedTestResults) {
+                            # There's no previous entry, nothing to compare to
+                            if (!$previousPassedTestEntry) {
+                                # Add it to the list whether it's a new test or not
+                                $foundPassedTestLines += $currentResultLineEntry
+                            }
+
+                            # Not reached the line number of the last entry yet
+                            elseif ($currentResultLineEntry.LineNumber -le $previousPassedTestEntry.LineNumber) {
+                                Write-Debug('           Line number of previous entry not reached yet, skipping (Line ' + $currentResultLineEntry.LineNumber + ' <= ' + $previousPassedTestEntry.LineNumber + ')')
+                                continue
+                            }
+
+                            # A new line number has been reached
+                            elseif ($currentResultLineEntry.LineNumber -gt $previousPassedTestEntry.LineNumber) {
+                                $foundPassedTestLines += $currentResultLineEntry
+                            }
+                        }
+
+
+                        Write-Debug('           All found passed test lines:')
+                        $foundPassedTestLines | % {
+                            Write-Debug('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
+                        }
+                        
+
+                        for ($currentLineIndex = 0; $currentLineIndex -lt $foundPassedTestLines.Length; $currentLineIndex++) {
+                            $currentResultLineEntry = $foundPassedTestLines[$currentLineIndex]
+                            
+                            Write-Debug('')
+                            Write-Debug('           Checking line ' + $currentResultLineEntry.LineNumber)
+                            Write-Debug('           ' + $currentResultLineEntry.Line)
+
+                            # Store the entry itself
+                            Write-Debug('           Line number of this entry:         ' + $currentResultLineEntry.LineNumber)
+                            Write-Debug('           Line number of the previous entry: ' + $allTestLogEntries[$allTestLogEntries.Count-1].LineNumber)
+
+                            if (
+                                $allTestLogEntries.Count -eq 0 -or `
+                                ($allTestLogEntries.Count -gt 0 -and $currentResultLineEntry.LineNumber -ne $allTestLogEntries[$allTestLogEntries.Count-1].LineNumber)`
+                            ) {
+                                Write-Debug('           + Adding this line to the allTestLogEntries array')
+                                [Void] $allTestLogEntries.Add($currentResultLineEntry)
+                            }
+
+
+                            # Process and insert the test
+                            # Note: the new entries do not have the "Running XYZ:" part, so the test itself does not even appear
+                            # We need to get the "line" directly before to get the actual test
+                            # So this line looks like this:
+                            # Passed  Test Time:  65.252 seconds  ( 1.088 minutes )
+                            $foundTestLine = $null
+                            $currentPassedTest = $null
+
+                            # $hasMatched = $currentResultLineEntry.Line -match '(.*Passed.*)'
+                            # 
+                            # if ($hasMatched) {
+                                # $currentPassedTestPartialLine = $Matches[1]
+                            # }
+                            # 
+                            # Write-Debug('currentPassedTestPartialLine:')
+                            # Write-Debug($currentPassedTestPartialLine)
+
+
+                            Write-Debug('           Trying to get the passed test')
+                            Write-Debug('           Looking for ->')
+                            Write-Debug('           ' + $currentResultLineEntry.Line)
+
+                            $hasMatched = $currentResultLineEntry.Line -match 'Running ([a-z0-9]+):.*'
+
+                            if ($hasMatched) {
+                                $currentPassedTest = $Matches[1]
+                            }
+
+                            # If the line itself doesn't include the test name, we now try to get the passed test from the last entry up
+                            else {
+                                Write-Debug('           Test not showing up in current line, searching the log entries for the passed test')
+
+                                for ($x = $allLogEntries.Count-1; $x -ge 0; $x--) {
+                                    Write-Debug('           >>> [' + $x + '] ' + $allLogEntries[$x])
+
+                                    if ($allLogEntries[$x] -eq $currentResultLineEntry.Line) {
+                                        if ($x -gt 0) {
+                                            $foundTestLine = $allLogEntries[$x-1]
+                                            break
+                                        }
+                                    }
+                                }
+
+                                Write-Debug('           Found line with test:')
+                                Write-Debug('           ' + $foundTestLine)
+
+                                $hasMatched = $foundTestLine -match 'Running ([a-z0-9]+):.*'
+                                
+                                if ($hasMatched) {
+                                    $currentPassedTest = $Matches[1]
+                                }
+                            }
+
+
+                            if (!$currentPassedTest) {
+                                Write-Debug('           Couldn''t find the currently passed test, possible detection error?')
+                                break LoopCheckForAutomaticRuntime
+                            }
+
+                           
+                            Write-Debug('')
+                            Write-Debug('           Checked Line ' + $currentResultLineEntry.LineNumber)
+                            Write-Debug('           - The previous passed test - old: ' + $previousPassedTest)
+                            Write-Debug('           - The current passed test  - new: ' + $currentPassedTest)
+
+                            # Enter the last passed test arrays, both all and unique
+                            [Void] $allPassedTests.Add($currentPassedTest)
+
+                            if (!($uniquePassedTests -contains $currentPassedTest)) {
+                                [Void] $uniquePassedTests.Add($currentPassedTest)
+                            }
+
+                            
+                            Write-Debug('           - All passed tests:')
+                            Write-Debug('           - ' + ($allPassedTests -Join ', '))
+                            Write-Debug('           - All unique passed tests:')
+                            Write-Debug('           - ' + ($uniquePassedTests -Join ', '))
+
+                            Write-Verbose($timestamp + ' - The last passed test: ' + $currentPassedTest)
+                            Write-Verbose('           The number of tests to run:      ' + $settings.yCruncher.tests.Count)
+                            Write-Verbose('           The number of tests already run: ' + $uniquePassedTests.Count)
+
+                            # Store the entries to be able to compare to the previous value
+                            $previousPassedTestEntry = $currentResultLineEntry
+                            $previousPassedTest      = $currentPassedTest
+
+
+                            # This check might come too late, and so we're testing more tests than necessary
+                            # Unfortunate, but no way around this if we want to correctly test all test sizes on each core
+                            if ($uniquePassedTests.Count -eq $settings.yCruncher.tests.Count) {
+                                $proceedToNextCore = $true
+                            }
+                        }
+
+
+                        # Continue to the next core if the flag was set
+                        if ($proceedToNextCore) {
+                            Write-Verbose('')
+                            Write-Verbose('           The number of unique test names matches the number of the selected test names!')
+                            Write-Text('           All tests have been run for this core, proceeding to the next one')
+
+                            continue LoopCoreRunner
+                        }
+
+                        Write-Debug('')
+
+
+                        # Break out of the while ($true) loop, we only want one iteration
+                        break
+                    }   # End :LoopCheckForAutomaticRuntime while ($true)
+                }   # End if ($useAutomaticRuntimePerCore -and $isYCruncherWithLogging)
+
 
                 # Check if the process is still using enough CPU process power
                 try {
@@ -5426,7 +5694,8 @@ try {
                         # y-Cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
                         # And the process is still running of course
                         elseif ($isYCruncherWithLogging -and !$settings.General.restartTestProgramForEachCore -and $_.Exception.InnerException.Message -ne 'PROCESSMISSING') {
-                            Write-Verbose('Running y-Cruncher with the log wrapper and restartTestProgramForEachCore disabled, continue to the next core')
+                            Write-Verbose('Running y-Cruncher with the log wrapper and restartTestProgramForEachCore disabled')
+                            Write-Verbose('Continue to the next core')
                         }
 
                         # Otherwise for Prime95 (and others), try to close and restart the stress test program process if it is still running
