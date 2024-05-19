@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.5.0alpha2
+    0.9.5.0alpha3
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,7 +17,7 @@
 #>
 
 # Global variables
-$version                    = '0.9.5.0alpha2'
+$version                    = '0.9.5.0alpha3'
 $startDate                  = Get-Date
 $startDateTime              = Get-Date -format yyyy-MM-dd_HH-mm-ss
 $logFilePath                = 'logs'
@@ -51,6 +51,7 @@ $newLogEntries              = [System.Collections.ArrayList]::new()
 $allLogEntries              = [System.Collections.ArrayList]::new()
 $allFFTLogEntries           = [System.Collections.ArrayList]::new()
 $allTestLogEntries          = [System.Collections.ArrayList]::new()
+$hasAsymmetricCoreThreads   = $false
 $cpuTestMode                = $null
 $coreTestOrderMode          = $null
 $coreTestOrderCustom        = @()
@@ -67,10 +68,13 @@ $isAida64                   = $false
 $isYCruncher                = $false
 $isYCruncherWithLogging     = $false
 $cpuCheckIterations         = 0
+$runtimeRemaining           = 0
+$runtimeRemainingMax        = 0
+
 
 # Parameters that are controllable by debug settings
 $debugSettingsActive                        = $false
-$disableCpuUtilizationCheckDefault          = 0
+$disableCpuUtilizationCheckDefault          = 1
 $enableCpuFrequencyCheckDefault             = 0
 $tickIntervalDefault                        = 10
 $delayFirstErrorCheckDefault                = 0
@@ -108,6 +112,7 @@ $stressTestPrograms = @{
         'processNameForLoad'  = 'prime95'
         'processPath'         = 'test_programs\p95'
         'installPath'         = 'test_programs\p95'
+        'requiresCpuCheck'    = $false
         'configName'          = $null
         'configFilePath'      = $null
         'absolutePath'        = $null
@@ -138,6 +143,7 @@ $stressTestPrograms = @{
         'processNameForLoad'  = 'prime95_dev'
         'processPath'         = 'test_programs\p95_dev'
         'installPath'         = 'test_programs\p95_dev'
+        'requiresCpuCheck'    = $false
         'configName'          = $null
         'configFilePath'      = $null
         'absolutePath'        = $null
@@ -168,6 +174,7 @@ $stressTestPrograms = @{
         'processNameForLoad'  = 'aida_bench64.dll'   # This needs to be with file extension
         'processPath'         = 'test_programs\aida64'
         'installPath'         = 'test_programs\aida64'
+        'requiresCpuCheck'    = $true   # No log file, need to check the current CPU usage
         'configName'          = $null
         'configFilePath'      = $null
         'absolutePath'        = $null
@@ -194,6 +201,7 @@ $stressTestPrograms = @{
         'processPath'         = 'test_programs\y-cruncher\Binaries'
         'installPath'         = 'test_programs\y-cruncher'
         'configName'          = 'stressTest.cfg'
+        'requiresCpuCheck'    = $false  # Since 0.9.5 and with enableYCruncherLoggingWrapper enabled, can now read its output to look for errors
         'configFilePath'      = $null
         'absolutePath'        = $null
         'absoluteInstallPath' = $null
@@ -274,6 +282,7 @@ $counterNames = @{
 # We currently only test the first core for each hyperthreaded "package",
 # so e.g. only 12 cores for a 24 threaded Ryzen 5900x
 # If you disable hyperthreading / SMT, both values should be the same
+# Newer Intel processors have a mixed layout, where some cores only support 1 thread
 $processor       = Get-CimInstance -ClassName Win32_Processor
 $numLogicalCores = $($processor | Measure-Object -Property NumberOfLogicalProcessors -sum).Sum
 $numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).Sum
@@ -281,6 +290,27 @@ $numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -sum).S
 
 # Set the flag if Hyperthreading / SMT is enabled or not
 $isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
+
+
+# Set the flag if we have an asymmetric thread loadout, e.g. on a 12th or 13th generation Intel system
+# Where the Performance cores have 2 threads, but the Efficient cores have only 1
+$hasAsymmetricCoreThreads = ($isHyperthreadingEnabled -and ($numLogicalCores -lt $numPhysCores*2))
+
+
+# Get the cores with 2 threads and those with only 1
+$coresWithTwoThreads = @(0..($numPhysCores-1))
+$coresWithOneThread  = @()
+
+if ($hasAsymmetricCoreThreads) {
+    $numTheoreticalLogicalCores    = $numPhysCores * 2
+    $numCoresWithoutHyperthreading = $numTheoreticalLogicalCores - $numLogicalCores
+    $numCoresWithHyperthreading    = $numPhysCores - $numCoresWithoutHyperthreading
+
+    if ($numCoresWithoutHyperthreading -gt 0) {
+        $coresWithTwoThreads = @(0..($numCoresWithHyperthreading-1))
+        $coresWithOneThread  = @($numCoresWithHyperthreading..($numCoresWithoutHyperthreading+$numCoresWithHyperthreading-1))
+    }
+}
 
 
 # Override the HashTable .ToString() method to generate readable output
@@ -569,6 +599,7 @@ $SendMessage = Add-Type -TypeDefinition $SendMessageDefinition -PassThru
 Add-Type -Assembly Microsoft.VisualBasic
 
 
+
 <#
 .DESCRIPTION
     Write a message to the screen and to the log file
@@ -586,6 +617,7 @@ function Write-Text {
     Write-Host $text
     Add-Content $logFileFullPath ($text)
 }
+
 
 
 <#
@@ -614,6 +646,7 @@ function Write-ErrorText {
         Add-Content $logFileFullPath ($string)
     }
 }
+
 
 
 <#
@@ -654,6 +687,7 @@ function Write-ColorText {
 }
 
 
+
 <#
 .DESCRIPTION
     Write a verbose message to the screen and to the log file
@@ -677,6 +711,7 @@ function Write-Verbose {
         Add-Content $logFileFullPath (''.PadLeft(11, ' ') + '      + ' + $text)
     }
 }
+
 
 
 <#
@@ -704,6 +739,7 @@ function Write-Debug {
 }
 
 
+
 <#
 .DESCRIPTION
     Exit the script
@@ -726,6 +762,7 @@ function Exit-Script {
 
     exit
 }
+
 
 
 <#
@@ -848,6 +885,7 @@ function Get-PerformanceCounterLocalName {
         Throw 'Get-PerformanceCounterLocalName : Unable to retrieve localized name. Check computer name and performance counter ID.'
     }
 }
+
 
 
 <#
@@ -1030,6 +1068,7 @@ function Invoke-WindowsApi {
 }
 
 
+
 <#
 .DESCRIPTION
     Suspends a process
@@ -1110,6 +1149,7 @@ function Suspend-Process {
         return -1
     }
 }
+
 
 
 <#
@@ -1194,6 +1234,7 @@ function Resume-Process {
 }
 
 
+
 <#
 .DESCRIPTION
     Suspends a process via the DebugActiveProcess method
@@ -1216,6 +1257,7 @@ function Suspend-ProcessWithDebugMethod {
 }
 
 
+
 <#
 .DESCRIPTION
     Resumes a suspended process
@@ -1236,6 +1278,7 @@ function Resume-ProcessWithDebugMethod {
 
     Invoke-WindowsApi 'kernel32' ([Bool]) 'DebugActiveProcessStop' @([Int]) @($process.Id)
 }
+
 
 
 <#
@@ -1297,6 +1340,7 @@ function Get-CpuFrequency {
 
     return $returnObj
 }
+
 
 
 <#
@@ -1461,6 +1505,7 @@ function Import-Settings {
 }
 
 
+
 <#
 .DESCRIPTION
     Get the settings
@@ -1605,7 +1650,7 @@ function Get-Settings {
     $modeString = ($modesArray -Join '-').ToUpperInvariant()
 
     foreach ($mode in $modesArray) {
-        if (!($stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $mode)) {
+        if (!($Script:stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $mode)) {
             Exit-WithFatalError('The selected test mode "' + $mode + '" is not available for ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + '!')
         }
     }
@@ -1631,6 +1676,7 @@ function Get-Settings {
     $Script:stressTestProgramWindowToForeground = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.stressTestProgramWindowToForeground))  { $settings.Debug.stressTestProgramWindowToForeground }  else { $stressTestProgramWindowToForegroundDefault })
     $Script:suspensionTime                      = $(if (![String]::IsNullOrWhiteSpace($settings.Debug.suspensionTime))                       { $settings.Debug.suspensionTime }                       else { $suspensionTimeDefault })
 }
+
 
 
 <#
@@ -1722,6 +1768,7 @@ function Get-EstimatedYCruncherRuntimePerCore {
 }
 
 
+
 <#
 .DESCRIPTION
     Get the correct TortureWeak setting for the selected CPU settings
@@ -1792,6 +1839,7 @@ function Get-TortureWeakValue {
 }
 
 
+
 <#
 .DESCRIPTION
     Send a Start, Stop or Dismiss signal to Aida64
@@ -1844,6 +1892,7 @@ function Send-CommandToAida64 {
     #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
     #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandler, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
 }
+
 
 
 <#
@@ -2065,6 +2114,7 @@ function Get-StressTestProcessInformation {
 }
 
 
+
 <#
 .DESCRIPTION
     Check if Prime95 exists
@@ -2093,6 +2143,7 @@ function Test-Prime95 {
 }
 
 
+
 <#
 .DESCRIPTION
     Get the version info for Prime95
@@ -2118,6 +2169,7 @@ function Get-Prime95Version {
 
     return $p95Version
 }
+
 
 
 <#
@@ -2620,6 +2672,7 @@ function Initialize-Prime95 {
 }
 
 
+
 <#
 .DESCRIPTION
     Open Prime95 and set global script variables
@@ -2677,6 +2730,7 @@ function Start-Prime95 {
 }
 
 
+
 <#
 .DESCRIPTION
     Close Prime95
@@ -2732,6 +2786,7 @@ function Close-Prime95 {
         Write-Verbose('Prime95 closed')
     }
 }
+
 
 
 <#
@@ -2919,6 +2974,7 @@ function Initialize-Aida64 {
 }
 
 
+
 <#
 .DESCRIPTION
     Open Aida64
@@ -3043,6 +3099,7 @@ function Start-Aida64 {
         #'Could not get the process path'
     }
 }
+
 
 
 <#
@@ -3227,6 +3284,7 @@ function Close-Aida64 {
 }
 
 
+
 <#
 .DESCRIPTION
     Create the y-Cruncher config file
@@ -3337,6 +3395,7 @@ function Initialize-yCruncher {
 }
 
 
+
 <#
 .DESCRIPTION
     Open y-Cruncher and set global script variables
@@ -3412,6 +3471,7 @@ function Start-yCruncher {
 }
 
 
+
 <#
 .DESCRIPTION
     Close y-Cruncher
@@ -3469,6 +3529,7 @@ function Close-yCruncher {
 }
 
 
+
 <#
 .DESCRIPTION
     Initialize the selected stress test program
@@ -3494,6 +3555,7 @@ function Initialize-StressTestProgram {
         Exit-WithFatalError('No stress test program selected!')
     }
 }
+
 
 
 <#
@@ -3527,6 +3589,7 @@ function Start-StressTestProgram {
 }
 
 
+
 <#
 .DESCRIPTION
     Close the selected stress test program
@@ -3556,6 +3619,7 @@ function Close-StressTestProgram {
         Exit-WithFatalError('No stress test program selected!')
     }
 }
+
 
 
 <#
@@ -3651,9 +3715,10 @@ function Test-StressTestProgrammIsRunning {
     if (!$stressTestError) {
         # If the CPU utilization check is disabled in the settings
         if ($disableCpuUtilizationCheck -gt 0) {
-            Write-Verbose('Checking CPU usage is disabled, skipping the check')
+            #Write-Debug('Checking CPU usage is disabled, skipping the check')
         }
 
+        # If the CPU utilization check is enabled in the settings
         else {
             # Get the CPU percentage
             $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
@@ -3765,40 +3830,60 @@ function Test-StressTestProgrammIsRunning {
 
         $cpuNumbersArray = @()
 
-        # If the number of threads is more than 1
-        if ($settings.General.numberOfThreads -gt 1) {
-            for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
-                # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
-                $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
-                $cpuNumbersArray += $cpuNumber
-            }
+        # If the processor has a different architecture between the cores
+        # E.g. performance cores with 2 threads and efficient cores with only 1 thread
+        if ($hasAsymmetricCoreThreads -and $coresWithOneThread.Contains($coreNumber)) {
+            # All previous coresWithTwoThreads * 2 + all previous coresWithOneThread * 1
+            # We do assume that the cores with only one thread all appear after the cores with two threads
+            
+            #two: [0, 1, 2, 3, 4, 5]         -> [0,1 - 2,3 - 4,5 - 6,7 - 8,9 - 10,11]
+            #one: [6, 7, 8, 9]               -> [12, 13, 14, 15]
+            #core: 8
+            #index: 2
+            #cpu: (5+1) * 2 + 2 -> 12 + 2 -> 14
+
+            $cpuNumber        = ($coresWithTwoThreads[-1] + 1) * 2 + [Array]::indexOf($coresWithOneThread, $coreNumber)
+            $cpuNumbersArray += $cpuNumber
         }
 
-        # Only one thread
+        # All cores support the same amount of threads (either one or two)
         else {
-            # assignBothVirtualCoresForSingleThread is enabled, we want to use both virtual cores, but with only one thread
-            # The load should bounce back and forth between the two cores this way
-            # Hyperthreading needs to be enabled for this
-            if ($settings.General.assignBothVirtualCoresForSingleThread -and $isHyperthreadingEnabled) {
-                for ($currentThread = 0; $currentThread -lt 2; $currentThread++) {
-                    $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
+            # If the number of threads is more than 1
+            if ($settings.General.numberOfThreads -gt 1) {
+                for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
+                    # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
+                    $cpuNumber        = ($coreNumber * 2) + $currentThread
                     $cpuNumbersArray += $cpuNumber
                 }
             }
 
-            # Setting not active, only one core for the load thread
+            # Only one thread
             else {
-                # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
-                # Otherwise, it's the same value
-                $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
-                $cpuNumbersArray += $cpuNumber
+                # assignBothVirtualCoresForSingleThread is enabled, we want to use both virtual cores, but with only one thread
+                # The load should bounce back and forth between the two cores this way
+                # Hyperthreading needs to be enabled for this
+                if ($settings.General.assignBothVirtualCoresForSingleThread -and $isHyperthreadingEnabled) {
+                    for ($currentThread = 0; $currentThread -lt 2; $currentThread++) {
+                        $cpuNumber        = ($coreNumber * 2) + $currentThread
+                        $cpuNumbersArray += $cpuNumber
+                    }
+                }
+
+                # Setting not active, only one core for the load thread
+                else {
+                    # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
+                    # If disabled, the CPU number is the same value as the core number
+                    $cpuNumber        = $coreNumber * (1 + [Int] $isHyperthreadingEnabled)
+                    $cpuNumbersArray += $cpuNumber
+                }
             }
         }
 
         $cpuNumberString = (($cpuNumbersArray | sort) -Join ' or ')
 
 
-        # If running Prime95 or y-Cruncher with logging wrapper, make one additional check if the log file now has an error entry
+        # If running Prime95 or y-Cruncher with logging wrapper, and if we haven't already found a log entry,
+        # make one additional check if the log file now has an error entry
         if (($isPrime95 -or $isYCruncherWithLogging) -and $errorType -ne 'CALCULATIONERROR') {
             $timestamp = Get-Date -format HH:mm:ss
 
@@ -4115,6 +4200,7 @@ function Test-StressTestProgrammIsRunning {
 }
 
 
+
 <#
 .DESCRIPTION
     Get the (new) entries from a log file and store them in a global variable
@@ -4206,7 +4292,6 @@ function Get-NewLogfileEntries {
 
 
 
-
 <#
 .DESCRIPTION
     The main functionality
@@ -4283,7 +4368,7 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
 $Error.clear()
 
 
-# Try top get the localized counter names
+# Try to get the localized counter names
 try {
     Write-Verbose('Trying to get the localized performance counter names')
 
@@ -4524,15 +4609,22 @@ if ($tickInterval -ge 1) {
     else {
         $cpuCheckIterations = [Math]::Floor($runtimePerCore / $tickInterval)
     }
+
+    # We want at least one tick to happen
+    $cpuCheckIterations = [Math]::Max(1, $cpuCheckIterations)
 }
 
 
+# Calculate the remaining runtime after all the ticks have been processed
+# Note that we may ditch or make it conditional in a future release due the inconsistencies with the suspension and resuming
 if ($delayFirstErrorCheck) {
     $runtimeRemaining = $runtimePerCore - $delayFirstErrorCheck - ($cpuCheckIterations * $tickInterval)
 }
 else {
     $runtimeRemaining = $runtimePerCore - ($cpuCheckIterations * $tickInterval)
 }
+
+$runtimeRemaining = [Math]::Max(0, $runtimeRemaining)
 
 
 # Get the actual core test mode
@@ -4734,6 +4826,23 @@ try {
 
 
 
+
+
+    # If the selected stress test program requires the CPU usage to be checked to detect errors, but the debug setting to do so is disabled
+    # (This is the default setting now)
+    if ($settings.Debug.disableCpuUtilizationCheck -and $stressTestPrograms[$settings.General.stressTestProgram]['requiresCpuCheck']) {
+        Write-ColorText('NOTICE: With the selected stress test program errors can only be detected by checking the CPU utilization,') Black Cyan
+        Write-ColorText('        but "disableCpuUtilizationCheck" is set to 1 in the config file.') Black Cyan
+        Write-ColorText('        Setting it to 0 so that the program can run.') Black Cyan
+        Write-Text('')
+
+        #$settings.Debug.disableCpuUtilizationCheck = 0
+        $disableCpuUtilizationCheck = 0
+    }
+
+
+
+
     # Start the stress test program
     Start-StressTestProgram
 
@@ -4887,7 +4996,7 @@ try {
             $endDateThisCore    = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
             $timestamp          = $startDateThisCore.ToString('HH:mm:ss')
             $affinity           = [Int64] 0
-            $actualCoreNumber   = [Int] $coreTestOrderArray[0]
+            $actualCoreNumber   = [Int] $coreTestOrderArray[0]      # The coreTestOrderArray is reduced for each iteration, so this will always get the next core in line
             $cpuNumbersArray    = @()
             $allPassedFFTs      = [System.Collections.ArrayList]::new()
             $uniquePassedFFTs   = [System.Collections.ArrayList]::new()
@@ -4899,37 +5008,59 @@ try {
             Write-Verbose('Still available cores: ' + ($coreTestOrderArray -Join ', '))
 
 
-            # If the number of threads is more than 1
-            if ($settings.General.numberOfThreads -gt 1) {
-                for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
-                    # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
-                    $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
-                    $cpuNumbersArray += $cpuNumber
-                    $affinity        += [Int64] [Math]::Pow(2, $cpuNumber)
-                }
+            # If the processor has a different architecture between the cores
+            # E.g. performance cores with 2 threads and efficient cores with only 1 thread
+            if ($hasAsymmetricCoreThreads -and $coresWithOneThread.Contains($actualCoreNumber)) {
+                # All previous coresWithTwoThreads * 2 + all previous coresWithOneThread * 1
+                # We do assume that the cores with only one thread all appear after the cores with two threads
+                
+                #two: [0, 1, 2, 3, 4, 5]         -> [0,1 - 2,3 - 4,5 - 6,7 - 8,9 - 10,11]
+                #one: [6, 7, 8, 9]               -> [12, 13, 14, 15]
+                #core: 8
+                #index: 2
+                #cpu: (5+1) * 2 + 2 -> 12 + 2 -> 14
+
+                $cpuNumber        = ($coresWithTwoThreads[-1] + 1) * 2 + [Array]::indexOf($coresWithOneThread, $actualCoreNumber)
+                $cpuNumbersArray += $cpuNumber
+                $affinity         = [Int64] [Math]::Pow(2, $cpuNumber)
             }
 
-            # Only one thread
+
+            # All cores support the same amount of threads (either one or two)
             else {
-                # assignBothVirtualCoresForSingleThread is enabled, we want to use both virtual cores, but with only one thread
-                # The load should bounce back and forth between the two cores this way
-                # Hyperthreading needs to be enabled for this
-                if ($settings.General.assignBothVirtualCoresForSingleThread -and $isHyperthreadingEnabled) {
-                    Write-Verbose('assignBothVirtualCoresForSingleThread is enabled, choosing both virtual cores for the affinity')
-                    for ($currentThread = 0; $currentThread -lt 2; $currentThread++) {
+
+                # If the number of threads is more than 1
+                if ($settings.General.numberOfThreads -gt 1) {
+                    for ($currentThread = 0; $currentThread -lt $settings.General.numberOfThreads; $currentThread++) {
+                        # We don't care about Hyperthreading / SMT here, it needs to be enabled for 2 threads
                         $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
                         $cpuNumbersArray += $cpuNumber
                         $affinity        += [Int64] [Math]::Pow(2, $cpuNumber)
                     }
                 }
 
-                # Setting not active, only one core for the load thread
+                # Only one thread
                 else {
-                    # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
-                    # Otherwise, it's the same value
-                    $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
-                    $cpuNumbersArray += $cpuNumber
-                    $affinity         = [Int64] [Math]::Pow(2, $cpuNumber)
+                    # assignBothVirtualCoresForSingleThread is enabled, we want to use both virtual cores, but with only one thread
+                    # The load should bounce back and forth between the two cores this way
+                    # Hyperthreading needs to be enabled for this
+                    if ($settings.General.assignBothVirtualCoresForSingleThread -and $isHyperthreadingEnabled) {
+                        Write-Verbose('assignBothVirtualCoresForSingleThread is enabled, choosing both virtual cores for the affinity')
+                        for ($currentThread = 0; $currentThread -lt 2; $currentThread++) {
+                            $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
+                            $cpuNumbersArray += $cpuNumber
+                            $affinity        += [Int64] [Math]::Pow(2, $cpuNumber)
+                        }
+                    }
+
+                    # Setting not active, only one core for the load thread
+                    else {
+                        # If Hyperthreading / SMT is enabled, the tested CPU number is 0, 2, 4, etc
+                        # Otherwise, it's the same value
+                        $cpuNumber        = $actualCoreNumber * (1 + [Int] $isHyperthreadingEnabled)
+                        $cpuNumbersArray += $cpuNumber
+                        $affinity         = [Int64] [Math]::Pow(2, $cpuNumber)
+                    }
                 }
             }
 
@@ -5141,16 +5272,17 @@ try {
                 Write-Debug('')
                 Write-Debug($timestamp + ' - Tick ' + $checkNumber + ' of max ' + $cpuCheckIterations)
 
-                $nowDateTime = (Get-Date)
-                $difference  = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
+                $nowDateTime         = (Get-Date)
+                $difference          = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
+                $runtimeRemainingMax = [Math]::Round($difference.TotalSeconds)
 
-                Write-Debug('           Remaining max runtime: ' + [Math]::Round($difference.TotalSeconds) + 's')
+                Write-Debug('           Remaining max runtime: ' + $runtimeRemainingMax + 's')
 
                 # Make this the last iteration if the remaining time is close enough
                 # Also reduce the sleep time here by 1 second, we add this back after suspending the stress test program
-                if ($difference.TotalSeconds -le $tickInterval) {
+                if ($runtimeRemainingMax -le $tickInterval) {
                     $checkNumber = $cpuCheckIterations
-                    $waitTime    = [Math]::Max(0, $difference.TotalSeconds - 2) # -2 instead of -1 due to the additional wait time after the suspension
+                    $waitTime    = [Math]::Max(0, $runtimeRemainingMax - 2) # -2 instead of -1 due to the additional wait time after the suspension
                     Write-Debug('           The remaining run time (' + $waitTime + ') is less than the tick interval (' + $tickInterval + '), this will be the last interval')
                     Start-Sleep -Seconds $waitTime
                 }
@@ -5187,11 +5319,24 @@ try {
                 Start-Sleep -Seconds 1
 
 
+                # If we want to delay the first error check, do so, but keep in mind the remaining runtime (e.g. for very short runtimes)
                 if ($delayFirstErrorCheck -and $checkNumber -eq 1) {
+                    $nowDateTime         = (Get-Date)
+                    $difference          = New-TimeSpan -Start $nowDateTime -End $endDateThisCore
+                    $runtimeRemainingMax = [Math]::Round($difference.TotalSeconds)
+
+
                     $timestamp = Get-Date -format HH:mm:ss
                     Write-Debug('')
-                    Write-Debug($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + ', delaying...')
-                    Start-Sleep -Seconds $delayFirstErrorCheck
+
+                    if ($delayFirstErrorCheck -lt $runtimeRemainingMax) {
+                        Write-Debug($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + 's, delaying...')
+                        Start-Sleep -Seconds $delayFirstErrorCheck
+                    }
+                    else {
+                        Write-Debug($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + 's,')
+                        Write-Debug('           but the remaining runtime for this core is less (' + $runtimeRemainingMax + 's), so ignoring')
+                    }
                 }
 
 
@@ -5201,6 +5346,8 @@ try {
                     Get-NewLogfileEntries
                 }
                 
+
+                # PRIME95
                 # If the runtime per core is set to auto and we're running Prime95
                 # We need to check if all the FFT sizes have been tested
                 if ($useAutomaticRuntimePerCore -and $isPrime95) {
@@ -5441,6 +5588,9 @@ try {
                     }   # End :LoopCheckForAutomaticRuntime while ($true)
                 }   # End if ($useAutomaticRuntimePerCore -and $isPrime95)
 
+
+
+                # Y-CRUNCHER
                 # If the runtime per core is set to auto and we're running y-Cruncher with the logging functionality enabled
                 # We need to check if all the selected tests have run
                 # Note that the iterations in y-Cruncher may not reflect the iterations in CoreCycler if there has been an error in-between
@@ -5651,6 +5801,7 @@ try {
                         break
                     }   # End :LoopCheckForAutomaticRuntime while ($true)
                 }   # End if ($useAutomaticRuntimePerCore -and $isYCruncherWithLogging)
+
 
 
                 # Check if the process is still using enough CPU process power
@@ -5865,6 +6016,8 @@ try {
     Exit-Script
 }
 
+
+
 # This should execute even if CTRL+C is pressed
 # Although probably no output is generated for it anymore
 # Maybe the user wants to check the stress test program output after terminating the script
@@ -5931,5 +6084,3 @@ finally {
     # Show the final summary
     Show-FinalSummary
 }
-
-
