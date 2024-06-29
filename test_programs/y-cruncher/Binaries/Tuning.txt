@@ -26,12 +26,12 @@ This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 9 7950X
     CPU Frequency   :   stock (variable frequency)
-    Memory          :   64 GB DDR5 @ 4400 MHz (36-36-36-71)
+    Memory          :   128 GB DDR5 @ 4400 MHz (40-37-37-71)
 
     Cores           :   16
     Threads         :   32
-    Cache           :   (undisclosed)
-    Cache / Thread  :   (undisclosed)
+    Cache           :   80 MB
+    Cache / Thread  :   2.5 MB / Thread
 
 
 --------------------------------------------------------------------------------
@@ -86,7 +86,7 @@ This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 9 3950X
     CPU Frequency   :   stock (variable frequency)
-    Memory          :   128 GB DDR4 @ 3200 MHz (16-18-18-38)
+    Memory          :   128 GB DDR4 @ 3000 MHz (16-18-18-38)
 
     Cores           :   16
     Threads         :   32
@@ -215,8 +215,8 @@ Recommended For:
 This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 7 1800X
-    Frequency       :   3.8 GHz
-    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
+    Frequency       :   stock (variable frequency)
+    Memory          :   64 GB DDR4 @ 2866 MHz
 
     Cores           :   8
     Threads         :   16
@@ -270,14 +270,14 @@ Target Systems:
 
 Recommended For:
     - All Intel Haswell processors. Some AMD Carrizo systems may find this
-      binary to be faster than the "11-BD1 ~ Miyu" binary.
+      binary to be faster than the "12-BD2 ~ Miyu" binary.
 
 
 This binary was tuned on:
 
     Processor(s)    :   Intel Core i7 5960X
     Frequency       :   4.00 GHz
-    Memory          :   64 GB (8 x 8GB) DDR4 @ 2133 MHz (15-15-15-35)
+    Memory          :   64 GB (8 x 8GB) DDR4 @ 2400 MHz
 
     Cores           :   8
     Threads         :   16
@@ -287,18 +287,18 @@ This binary was tuned on:
 
 --------------------------------------------------------------------------------
 
-Binary: "11-BD1 ~ Miyu" (AMD Bulldozer)
+Binary: "12-BD2 ~ Miyu" (AMD Piledriver)
 
 
 Required Instructions:
-    x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA4, XOP
+    x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA3
 
 
 Target Systems:
     - AMD Piledriver
 
 Recommended For:
-    - The AMD Bulldozer family of processors
+    - AMD Piledriver, Steamroller, and Excavator
 
 
 This binary was tuned on:
@@ -331,9 +331,9 @@ Recommended For:
 
 This binary was tuned on:
 
-    Processor(s)    :   Intel Core i7 3630QM
+    Processor(s)    :   Intel Core i7 6820HK
     Frequency       :   3.20 GHz
-    Memory          :   8 GB DDR3 @ 1334 MHz (9-9-9-24)
+    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
 
     Cores           :   4
     Threads         :   8
@@ -363,17 +363,14 @@ Recommended For:
 
 This binary was tuned on:
 
-    Processor(s)    :   Intel Core i7 920
-    Frequency       :   3.34 GHz (3.50 GHz Turbo Boost)
-    QPI             :   6.00 GT/s
-    Uncore          :   2.84 GHz
-    Memory          :   12 GB (6 x 2GB) DDR3 @ 1335 MHz (9-9-9-25)
+    Processor(s)    :   Intel Core i7 6820HK
+    Frequency       :   3.20 GHz
+    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
 
     Cores           :   4
     Threads         :   8
     Cache           :   8 MB
     Cache / Thread  :   1 MB / thread
-
 
 This build will also run on Intel Penryn processors. (Intel Core 2 with SSE4.1.)
 
@@ -394,18 +391,8 @@ Recommended For:
     - All Intel Core 2 processors with SSE4.1.
 
 
-This binary was tuned on:
-
-    Processor(s)    :   2 x Intel Xeon X5482 Harpertown
-    Frequency       :   3.2 GHz
-    FSB             :   1600 MHz
-    Memory          :   64 GB (16 x 4GB) DDR2 @ 800 MHz (5-5-5-18)
-
-    Cores           :   8
-    Threads         :   8
-    Cache           :   24 MB
-    Cache / Thread  :   3 MB / thread
-
+This binary is no longer tuned as the computer it was intended for has since
+been retired.
 
 This build is no longer supported as of version 0.6.1.
 
@@ -426,16 +413,8 @@ Recommended For:
     - All x86-64 processors supporting SSE3 that are not already listed.
 
 
-This binary was tuned on:
-
-    Processor(s)    :   AMD Phenom X3 720 (4 core unlock)
-    Frequency       :   2.80 GHz
-    Memory          :   6 GB DDR3 @ 1333 MHz (9-9-9-25)
-
-    Cores           :   4
-    Threads         :   4
-    Cache           :   6 MB
-    Cache / Thread  :   1.5 MB / thread
+This binary is no longer tuned as the computer it was intended for has since
+been retired.
 
 
 --------------------------------------------------------------------------------
@@ -451,16 +430,8 @@ Recommended For:
     - All x86 processors supporting SSE3 that are not already listed.
 
 
-This binary was tuned on:
-
-    Processor(s)    :   AMD Phenom X3 720 (4 core unlock)
-    Frequency       :   2.80 GHz
-    Memory          :   6 GB DDR3 @ 1333 MHz (9-9-9-25)
-
-    Cores           :   4
-    Threads         :   4
-    Cache           :   6 MB
-    Cache / Thread  :   1.5 MB / thread
+This binary is no longer tuned as the computer it was intended for has since
+been retired.
 
 
 --------------------------------------------------------------------------------
@@ -476,16 +447,8 @@ Recommended For:
     - Legacy x86.
 
 
-This binary was tuned on:
-
-    Processor(s)    :   AMD Phenom X3 720 (4 core unlock)
-    Frequency       :   2.80 GHz
-    Memory          :   6 GB DDR3 @ 1333 MHz (9-9-9-25)
-
-    Cores           :   4
-    Threads         :   4
-    Cache           :   6 MB
-    Cache / Thread  :   1.5 MB / thread
+This binary is no longer tuned as the computer it was intended for has since
+been retired.
 
 
 --------------------------------------------------------------------------------

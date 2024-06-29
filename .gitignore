@@ -1,5 +1,6 @@
 config.ini
 *.git-credentials
+PSScriptAnalyzerSettings.psd1
 _tests/**
 logs/**
 test_programs/aida64/*

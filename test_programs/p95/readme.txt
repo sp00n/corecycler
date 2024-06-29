@@ -23,10 +23,7 @@ libcrypto*, libssl*	Libraries required by libcurl.
 whatsnew.txt	A list of new features in prime95.exe.
 stress.txt	A discussion of issues relating to stress testing a computer.
 undoc.txt	A list of undocumented and unsupported features.
-prime.txt	A file containing your preferences.  The menu choices
-		and dialog boxes are used to change your preferences.
-local.txt	Like prime.txt, this file contains more preferences.
-		The reason there are two files is discussed later.
+prime.txt	A file containing your preferences.  The menu choices and dialog boxes are used to change your preferences.
 worktodo.txt	A list of exponents the program will be factoring and/or Lucas-Lehmer testing.
 results.txt	Prime95.exe writes its results to this file.
 results.json.txt Prime95.exe writes results to this file in an easy-to-parse JSON format.
@@ -384,18 +381,11 @@ M11213 is prime! WV1: 579A579A
 INSTALLING ON SEVERAL COMPUTERS
 -------------------------------
 
-The obvious way is to download and install on each computer following the
-instructions above.  Use Test/Primenet to give each computer the same
-user id and different computer name.
+Download and install on each computer following the instructions above.
+Use Test/Primenet to give each computer the same user id and different computer name.
 
-Another way to do this is to first set up one computer.
-Next copy all the files to the second computer.  Delete the local.txt
-file and worktodo.txt files.  These files contain information that
-is specific to the first computer.  Start prime95/mprime on the second
-computer and use Test/Primenet to give the second computer a unique
-computer name.  Check the resource limits dialog box for any further
-needed changes.  Repeat this process for all the computers you wish to
-run prime95/mprime.
+Do not copy the installation from one computer to another computer.  There are
+settings in prime.txt that must be different on each computer.
 
 
 TEST MENU

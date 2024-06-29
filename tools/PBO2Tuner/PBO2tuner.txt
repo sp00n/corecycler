@@ -1,0 +1,25 @@
+PBO2 Tuner lets you set the CO values for your Ryzen CPU within Windows.
+You can also use it over the command line, by passing the CO values as arguments. It's also possible to set the various limits as well, the syntax is as following:
+"PBO2 tuner.exe" CO_Core0 CO_Core1 [...] CO_CoreMax PPT TDC EDC FMAX
+
+For example, to set the CO values for a 6 core processor:
+"PBO2 tuner.exe" -20 2 -15 -20 -19
+Note the minus sign for negative CO values.
+
+Or to also set the limits:
+"PBO2 tuner.exe" -20 2 -15 -20 -19 95 60 90 0
+You need to provide all of the four limits. "0" for a limit means to not change the current value.
+
+
+Also note that it may not work reliable for Ryzen 7000 processors yet.
+
+
+
+Source of this version:
+https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29337788
+(https://web.archive.org/web/20240614012145/https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/page-85?post_id=29337788#post-29337788)
+
+
+Explanation of the command line arguments:
+https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-28999750
+(https://web.archive.org/web/20240116223626/https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/page-45#post-28999750)

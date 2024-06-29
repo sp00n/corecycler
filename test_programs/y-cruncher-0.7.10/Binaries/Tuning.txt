@@ -1,0 +1,492 @@
+The binaries in this package have been tuned for different systems.
+
+http://www.numberworld.org/y-cruncher/internals/arch-optimizations.html
+
+
+--------------------------------------------------------------------------------
+
+Binary: "22-ZN4 ~ Kizuna" (AMD Zen 4)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+    AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI/VBMI2/GFNI)
+
+
+Target Systems:
+    - AMD Zen 4 Raphael
+
+Recommended For:
+    - AMD Zen 4 Raphael
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Ryzen 9 7950X
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   64 GB DDR5 @ 4400 MHz (36-36-36-71)
+
+    Cores           :   16
+    Threads         :   32
+    Cache           :   (undisclosed)
+    Cache / Thread  :   (undisclosed)
+
+
+--------------------------------------------------------------------------------
+
+Binary: "20-ZN3 ~ Yuzuki" (AMD Zen 3)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+
+
+Target Systems:
+    - AMD Zen 3 Vermeer
+
+Recommended For:
+    - AMD Zen 3 Vermeer
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Ryzen 6 5600X
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   128 GB DDR4 @ 2666 MHz (20-19-19-43)
+
+    Cores           :   6
+    Threads         :   12
+    Cache           :   32 MB
+    Cache / Thread  :   4 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "19-ZN2 ~ Kagari" (AMD Zen 2)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+
+
+Target Systems:
+    - AMD Zen 2 Matisse
+
+Recommended For:
+    - AMD Zen 2 Matisse
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Ryzen 9 3950X
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   128 GB DDR4 @ 3200 MHz (16-18-18-38)
+
+    Cores           :   16
+    Threads         :   32
+    Cache           :   64 MB
+    Cache / Thread  :   2 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "18-CNL ~ Shinoa" (Intel Cannon Lake)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+    AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI)
+
+
+Target Systems:
+    - Intel Cannon Lake
+    - Intel Ice Lake
+    - Intel Tiger Lake
+
+Recommended For:
+    - Intel Cannon Lake
+    - Intel Ice Lake
+    - Intel Tiger Lake
+    - Intel Alder Lake (only with AVX512)
+    - Intel Sapphire Rapids
+
+
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 11800H
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   64 GB DDR4 @ 3200 MHz
+
+    Cores           :   8
+    Threads         :   16
+    Cache           :   24 MB
+    Cache / Thread  :   1.5 MB / thread
+
+
+This binary was formerly turned for Cannon Lake 8121U, but has since been
+re-tuned for a higher volume processor.
+
+
+--------------------------------------------------------------------------------
+
+Binary: "17-SKX ~ Kotori" (Intel Skylake Purley)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+    AVX512-(F/CD/VL/BW/DQ)
+
+
+Target Systems:
+    - Intel Skylake X and Skylake Purley with 2 x 512-bit FMA.
+
+Recommended For:
+    - All Skylake X and Skylake Purley systems with AVX512.
+
+
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i9 7940X
+    CPU Frequency   :   4.6/4.0/3.6 GHz (all-core non-AVX/AVX/AVX512)
+    Cache Frequency :   2.8 GHz
+    Memory          :   128 GB DDR4 @ 3466 MHz (16-18-18-38)
+
+    Cores           :   14
+    Threads         :   28
+    Cache           :   14 MB
+    Cache / Thread  :   512 KB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "16-KNL" (Intel Knights Landing Xeon Phi)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+    AVX512-(F/CD)
+
+
+Target Systems:
+    - Intel Knights Landing Xeon Phi
+
+Recommended For:
+    - All Intel Xeon Phi with AVX512.
+
+
+This binary was tuned on:
+
+    This binary is untuned. It uses similar tuning parameters as 17-SKX.
+
+
+This build is no longer supported as of version 0.7.8.
+
+
+--------------------------------------------------------------------------------
+
+Binary: "17-ZN1 ~ Yukina" (AMD Zen)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+
+
+Target Systems:
+    - AMD Zen 1 Summit Ridge
+
+Recommended For:
+    - AMD Zen 1 Summit Ridge
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Ryzen 7 1800X
+    Frequency       :   3.8 GHz
+    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
+
+    Cores           :   8
+    Threads         :   16
+    Cache           :   16 MB
+    Cache / Thread  :   1 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "14-BDW ~ Kurumi" (Intel Broadwell)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+
+
+Target Systems:
+    - Intel Broadwell and Skylake
+
+Recommended For:
+    - All Intel Broadwell and Skylake desktop processors.
+
+
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 6820HK
+    Frequency       :   3.20 GHz
+    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
+
+    Cores           :   4
+    Threads         :   8
+    Cache           :   8 MB
+    Cache / Thread  :   1 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "13-HSW ~ Airi" (Intel Haswell)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+
+
+Target Systems:
+    - Intel Haswell
+
+Recommended For:
+    - All Intel Haswell processors. Some AMD Carrizo systems may find this
+      binary to be faster than the "11-BD1 ~ Miyu" binary.
+
+
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 5960X
+    Frequency       :   4.00 GHz
+    Memory          :   64 GB (8 x 8GB) DDR4 @ 2133 MHz (15-15-15-35)
+
+    Cores           :   8
+    Threads         :   16
+    Cache           :   20 MB
+    Cache / Thread  :   1 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "11-BD1 ~ Miyu" (AMD Bulldozer)
+
+
+Required Instructions:
+    x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA4, XOP
+
+
+Target Systems:
+    - AMD Piledriver
+
+Recommended For:
+    - The AMD Bulldozer family of processors
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD FX-8350
+    Frequency       :   4.00 GHz
+    Memory          :   32 GB (4 x 8GB) DDR3 @ 1333 MHz (11-11-11-28)
+
+    Cores           :   8 (4 modules)
+    Threads         :   8
+    Cache           :   8 MB
+    Cache / Thread  :   1 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "11-SNB ~ Hina" (Intel Sandy Bridge)
+
+
+Required Instructions:
+    x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX
+
+
+Target Systems:
+    - Intel Sandy Bridge
+
+Recommended For:
+    - All Intel Sandy/Ivy Bridge processors
+
+
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 3630QM
+    Frequency       :   3.20 GHz
+    Memory          :   8 GB DDR3 @ 1334 MHz (9-9-9-24)
+
+    Cores           :   4
+    Threads         :   8
+    Cache           :   8 MB
+    Cache / Thread  :   1 MB / thread
+
+
+This build will run on any processor supporting AVX instructions. But it is not
+recommended for the AMD Bulldozer family due to sub-optimal 256-bit AVX performance.
+
+
+--------------------------------------------------------------------------------
+
+Binary: "08-NHM ~ Ushio" (Intel Nehalem)
+
+
+Required Instructions:
+    x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
+
+
+Target Systems:
+    - Intel Nehalem
+
+Recommended For:
+    - All Intel Nehalem/Westmere processors
+
+
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 920
+    Frequency       :   3.34 GHz (3.50 GHz Turbo Boost)
+    QPI             :   6.00 GT/s
+    Uncore          :   2.84 GHz
+    Memory          :   12 GB (6 x 2GB) DDR3 @ 1335 MHz (9-9-9-25)
+
+    Cores           :   4
+    Threads         :   8
+    Cache           :   8 MB
+    Cache / Thread  :   1 MB / thread
+
+
+This build will also run on Intel Penryn processors. (Intel Core 2 with SSE4.1.)
+
+
+--------------------------------------------------------------------------------
+
+Binary: "07-PNR ~ Nagisa" (Intel Penryn)
+
+
+Required Instructions:
+    x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
+
+
+Target Systems:
+    - Intel Yorkfield (3 MB cache/thread)
+
+Recommended For:
+    - All Intel Core 2 processors with SSE4.1.
+
+
+This binary was tuned on:
+
+    Processor(s)    :   2 x Intel Xeon X5482 Harpertown
+    Frequency       :   3.2 GHz
+    FSB             :   1600 MHz
+    Memory          :   64 GB (16 x 4GB) DDR2 @ 800 MHz (5-5-5-18)
+
+    Cores           :   8
+    Threads         :   8
+    Cache           :   24 MB
+    Cache / Thread  :   3 MB / thread
+
+
+This build is no longer supported as of version 0.6.1.
+
+
+--------------------------------------------------------------------------------
+
+Binary: "05-A64 ~ Kasumi" (AMD Athlon 64)
+
+
+Required Instructions:
+    x64, SSE, SSE2, SSE3
+
+
+Target Systems:
+    - AMD K10
+
+Recommended For:
+    - All x86-64 processors supporting SSE3 that are not already listed.
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Phenom X3 720 (4 core unlock)
+    Frequency       :   2.80 GHz
+    Memory          :   6 GB DDR3 @ 1333 MHz (9-9-9-25)
+
+    Cores           :   4
+    Threads         :   4
+    Cache           :   6 MB
+    Cache / Thread  :   1.5 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "04-P4P" (Intel Pentium 4 Prescott)
+
+
+Required Instructions:
+    SSE, SSE2, SSE3
+
+
+Recommended For:
+    - All x86 processors supporting SSE3 that are not already listed.
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Phenom X3 720 (4 core unlock)
+    Frequency       :   2.80 GHz
+    Memory          :   6 GB DDR3 @ 1333 MHz (9-9-9-25)
+
+    Cores           :   4
+    Threads         :   4
+    Cache           :   6 MB
+    Cache / Thread  :   1.5 MB / thread
+
+
+--------------------------------------------------------------------------------
+
+Binary: "00-x86" (Legacy x86)
+
+
+Required Instructions:
+    x86/IA-32 since Pentium (BSWAP, CMPXCHG, CPUID, RDTSC, possibly others...)
+
+
+Recommended For:
+    - Legacy x86.
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Phenom X3 720 (4 core unlock)
+    Frequency       :   2.80 GHz
+    Memory          :   6 GB DDR3 @ 1333 MHz (9-9-9-25)
+
+    Cores           :   4
+    Threads         :   4
+    Cache           :   6 MB
+    Cache / Thread  :   1.5 MB / thread
+
+
+--------------------------------------------------------------------------------
+

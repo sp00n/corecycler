@@ -2,13 +2,13 @@ This file lists previously undocumented features available in the program.
 These features may change or be discontinued at any time.  Their use is
 totally unsupported.
 
-In prime.txt you can force the program to use different filenames for 6 files.
+In prime.txt you can force the program to use different filenames for 7 files.
 You can also change the working directory (identical to the -W command line
 argument).
 	prime.ini=your_filename
-	local.ini=your_filename
 	worktodo.ini=your_filename
 	prime.log=your_filename
+	screen.log=your_filename
 	prime.spl=your_filename
 	results.txt=your_filename
 	WorkingDir=your_directory_name
@@ -21,7 +21,7 @@ where setting is defined as
 At present, only Memory, MaxHighMemWorkers, PauseWhileRunning, LowMemWhileRunning,
 and PauseCheckInterval support this during/else syntax.  Also note you can
 no longer edit these options from the user interface.  To use this feature,
-you must manually edit the prime.txt/local.txt file.  An example in local.txt:
+you must manually edit the prime.txt file.  An example in prime.txt:
 	Memory=500 during 1-5/17:30-24:00,1-5/0:00-8:30,6-7/0:00-24:00 else 200
 The 1-5 and 6-7 refer to days of the week, with Monday=1 and Sunday=7.  The
 time portion refers to the hours of the day based on a 24-hour clock.
@@ -31,7 +31,7 @@ during the week from 5:30PM to 8:30AM and all day on weekends.  Otherwise
 (weekdays from 8:30AM to 5:30PM), the program can use only 200MB.
 
 There are some additional PRP proof controls that are not available in the
-Resource Limits dialog box.  In local.txt,
+Resource Limits dialog box.  In prime.txt,
 	PreallocateDisk=0 or 1		(default is 1)
 will control whether disk space to hold the PRP proof residues is
 allocated at the beginning of the PRP test to insure we do not run out
@@ -70,7 +70,7 @@ if temporary disk space resources, proof file size resources, and upload bandwid
 resources are this limited it is strongly recommended switching to less demanding
 work, such as double-checking.
 
-There are also some options for controlling certification work.  In local.txt, add
+There are also some options for controlling certification work.  In prime.txt, add
 	CertWorker=n
 	CertMinExponent=x
 	CertMaxExponent=y
@@ -145,11 +145,22 @@ Where n=1 for seconds with 3 digits of precision, n=2 for milliseconds
 with 1 digit of precision, n=3 for milliseconds with 2 digits of precision,
 n=4 for milliseconds with 3 digit of precision.
 
-You can change the formatting of date and time to the screen.  In prime.txt:
-	TimeStamp=n
-where n=0 turns output off, n=1 is the default date/time without seconds,
-n=2 is date/time with seconds, n=3 is time only without seconds, n=4 is
-time-only with seconds.
+You can change the formatting of date and time to the screen and logfiles.
+In prime.txt:
+	TimeStamp=n		(default is 1)
+	TimeStampUTC=x		(default is 0)
+	TimeStampFormat=s
+	LogTimeStamp=n		(default is 1)
+	LogTimeStampUTC=x	(default is 0)
+	LogTimeStampFormat=s
+Where x=0 is local time and x=1 is UTC time.  The default format (n=1) for
+screen output is Mon d hh:mm (e.g. Feb 8 12:34) and for logfiles is
+Day Mon dd hh:mm:ss yyyy (e.g. Thu Feb 08 12:34:56 2024).  Other n values
+are n=0 turns output off, n=2 is the default screen output with seconds,
+n=3 is time only without seconds, n=4 is time-only with seconds,
+n=5 is YYYY-MM-DD HH-MM, n=6 is YYYY-MM-DD HH:MM:SS, n=7 means use the
+TimeStampFormat=s or LogTimeStampFormat=s value as a format string for strftime.
+See https://en.cppreference.com/w/cpp/chrono/c/strftime for formatting details.
 
 You can have the timings that are output to the screen be cumulative
 (from program restart or start of a new exponent) rather than resetting
@@ -210,7 +221,7 @@ where n is the number of seconds to wait.  The default is 5 seconds.
 The program supports many different code paths for PRP/LL testing depending on
 the CPU type.  It also has a few different factoring code paths.  You can
 force the program to choose a specific code path by setting the proper
-combination of these settings in local.txt:
+combination of these settings in prime.txt:
 	CpuSupportsRDTSC=0 or 1
 	CpuSupportsCMOV=0 or 1
 	CpuSupportsPrefetch=0 or 1
@@ -228,7 +239,7 @@ to see if the CPU supports these features.
 The program also supports different code paths for LL testing on a Pentium 4
 based on the size of the L2 cache.  You can explicitly specify the L2 cache
 size although this shouldn't be necessary since the program uses the CPUID
-instruction to determine the L2 cache size.  In local.txt enter:
+instruction to determine the L2 cache size.  In prime.txt enter:
 	CpuL2CacheSize=128 or 256 or 512
 	CpuL2CacheLineSize=32 or 64 or 128
 	CpuL2SetAssociative=4 or 8
@@ -236,7 +247,7 @@ instruction to determine the L2 cache size.  In local.txt enter:
 The program automatically computes the number of CPU cores, hyperthreading, and speed.
 This information is used to calculate how much work to get.  In the unlikely event
 the program did not correctly figure out your CPU information, you can override
-the info in local.txt:
+the info in prime.txt:
 	NumCores=n
 	CoreXXXNumThreads=1 or 2
 	CoreXXXRanking=0 or 1
@@ -264,7 +275,7 @@ If n is 1, work will never be done out of order,  You will not get certification
 assignments.  If n is -1, only certification work will be done out of order.
 If n is 0, certification and early factoring will be done out of order.
 
-The program will restrict how many exponents can be added to worktodo.txt.
+The program will restrict how many exponents can be added to worktodo.txt to 15.
 To override this, change prime.txt:
 	MaxExponents=n
 
@@ -282,7 +293,30 @@ And P+1 can also override the B2 value in worktodo.txt.  Turn this feature off i
 prime.txt with:
 	Pplus1BestB2=0
 
-For P-1 stage 2 to accurately choose optimal B2 bounds as well as whether prime pairing
+You can increase the ECM B1 value assigned by the server using this prime.txt setting:
+	ECMBoundsMultiplier=n		(default is 1)
+Ordinarily a B1 value significantly larger than suggested is a little less efficient
+in advancing the ECM "T-level".  However, the program may be better able to put large
+amounts of memory to good use with larger B1 values.  WARNING: changing this setting
+in the middle of a set of ECM curves will delete the ECM save file.
+
+For P-1 and ECM you can increase the number of cores used in stage 2 vs. stage 1.
+In prime.txt, set:
+	Stage2ExtraThreads=n	(default is zero)
+This can be useful on machines with lots of cores.  For example, if you have a 16-core
+machine and want to do ECM on Mersenne numbers below M100000.  These numbers are so
+small that multi-threading in stage 1 is not possible.  Therefore, you want to run
+16 workers each doing ECM.  Stage 2 is most efficient if it uses all available memory.
+However, a single worker running stage 2 on one core cannot keep up with 16 cores
+running stage 1.  Suppose 4-threaded stage 2 can keep up with 13 workers running stage 1.
+Set up prime95 to run 13 workers each using one core.  Set Stage2ExtraThreads=3.
+The first worker to reach stage 2 will grab the 3 extra workers to quickly finish stage 2.
+Other workers reaching stage 2 during this time will wait for the first worker to finish stage 2.
+Eventually, the 13 workers will stagger such that there workers are not often idle.
+The three cores used only in stage 2 will be used most of the time.  This is not a
+completely optimal solution, but it can be very, very effective.
+
+For P-1 and ECM stage 2 to accurately choose optimal B2 bounds as well as whether prime pairing
 stage 2 is more appropriate than polynomial multiplication stage 2, the program must
 accurately estimate stage 2 vs. stage 1 runtime.  The default formula will not work for
 all current and future CPUs, cache, and memory configurations.  Hopefully, the default
@@ -290,12 +324,31 @@ formula is "good enough".  You can correct for errors in the program's default f
 with two adjustments in prime.txt:
 	Pm1PairRatioAdjust=n	(default is 1.0)
 	Pm1PolyRatioAdjust=n	(default is 1.0)
+	EcmPairRatioAdjust=n	(default is 1.0)
+	EcmPolyRatioAdjust=n	(default is 1.0)
 One adjustment is for stage 2 using prime pairing and the other is for stage 2 using
 polynomial multiplication.  When P-1 starts stage 2 the estimated stage 2 vs. stage 1
 runtime is output (example: "Estimated stage 2 vs. stage 1 runtime ratio: 1.034").
 Set Pm1____RatioAdjust to the actual ratio divided by the estimated ratio times the
 current RatioAdjust setting.  For example, if stage 1 took 5000 seconds and stage 2 took
 8000 seconds the actual ratio is 1.6, set the adjustment to 1.6 / 1.034 * 1.0 = 1.547.
+These settings are likely to be deprecated and replaced with the settings in the next
+paragraph.
+
+For P-1 and ECM stage 2 to accurately choose optimal B2 bounds as well as whether prime pairing
+stage 2 is more appropriate than polynomial multiplication stage 2, the program must
+accurately estimate stage 2 vs. stage 1 runtime.  The default formula will not work for
+all current and future CPUs, cache, and memory configurations.  The program auto-adjusts
+for estimated vs. observed runtimes.  Auto-correction can be disabled and set manually
+with these prime.txt settings:
+	Pm1Stage2AutoAdjust=0 or 1	(default is 1)
+	Pm1Stage2RatioAdjust=n		(default is 1.0)
+	EcmStage2AutoAdjust=0 or 1	(default is 1)
+	EcmStage2RatioAdjust=n		(default is 1.0)
+The AutoAdjust setting can be used to disable or enable the program auomatic adjustment
+of the Stage2RatioAdjust setting.  The Stage2RatioAdjust setting multiplies the program's
+default estimate of stage 2 runtime so that the estimate of stage 2 runtime vs. stage 1
+runtime is hopefully more accurate leading to more optimal B2 bounds selection.
 
 In P-1, P+1, and ECM stage 2 a pairing map is allocated for recording prime pairs.  The default
 maximum size for this map is 250MB.  Only very large B2 values need a map this large.
@@ -303,11 +356,28 @@ You can change the maximum map size with this poorly named prime.txt entry:
 	MaximumBitArraySize=n	(default is 250)
 Values from 1 to 2000 are supported.
 
-The ECM stage 1, the program examines several different Lucas-chains looking for the shortest.
-For ECM on very small numbers, it may be beneficial to reduce the search effort as the
-work saved is pretty small.  For ECM on larger numbers, it might pay to increase the search
-effort.  I have not studied the optimal search effort, so the current default of 7 is a
-complete guess.  To change the search effort, add this to prime.txt:
+For ECM stage 1, one can use either Edwards curves or Montgomery curves.  One can also
+specify whether to use Edwards stage 1 or Montgomery stage 1.  In prime.txt, add
+	MontgSigma=0 or 1	(default is 0 for most setttings of DictionaryMemory)
+	MontgStage1=0 or 1	(default is 0 for Edwards curves, 1 for Montgomery curves)
+Using Edwards stage 1 on a Montgomery curve makes little sense as the program will
+have to use convert the Montgomery curve to a twisted Edwards curve.  
+
+For Edwards ECM stage 1, you can control how much memory can be used.  In prime.txt, add
+	DictionaryMemory=n	(default is 256)
+where n is MB.
+
+For Edwards ECM stage 1, you can control which doubling algorithm to use.  In prime.txt, add
+	EdDblAlgo5=0 or 1	(default is 0)
+	EdDblAlgo6=0 or 1	(default is 1)
+There are 3 algorithms (4, 5, and 6).  Algorithm 4 and 6 are similar and unlikely to perform
+much differently.  I've seen cases where algorithm 5 is a little faster.
+
+For Montgomery ECM stage 1, the program examines several different Lucas-chains looking
+for the shortest.  For ECM on very small numbers, it may be beneficial to reduce the search
+effort as the work saved is pretty small.  For ECM on larger numbers, it might pay to increase
+the search effort.  I have not studied the optimal search effort, so the current default of 7 is
+a complete guess.  To change the search effort, add this to prime.txt:
 	PracSearch=n		(default is 7)
 Values from 1 to 50 are supported.
 
@@ -357,7 +427,7 @@ You can do "optimal" P-1 factoring of k*b^n+c by adding lines to worktodo.txt:
 	Pfactor=k,b,n,c,how_far_factored,num_primality_tests_saved
 For example, Pfactor=1,2,10000157,-1,64,2.0
 
-You can limit which exponents PrimeNet will assign to you.  In local.txt, add
+You can limit which exponents PrimeNet will assign to you.  In prime.txt, add
 	GetMinExponent=x
 	GetMaxExponent=y
 Assignments from PrimeNet will be on exponents between x and y.
@@ -475,7 +545,7 @@ compression gaining about 12%.
 LINUX/FREEBSD ONLY:  When mprime runs out of work to do, it normally loops waiting for the
 server to assign more work.  This prime.txt option can be used to have mprime exit
 when all workers runs out of work.  Note this probably only makes sense when UsePrimenet=0
-or when UsePrimenet=1 and NoMoreWork=1.
+or when UsePrimenet=1 and QuitGIMPS=1.
 	ExitWhenOutOfWork=n
 where n is the number of seconds to wait before exiting.  I recommend setting n to 86400 or
 higher to give mprime time to send the last results and upload proof files to the server.
@@ -505,30 +575,6 @@ by n bits.  If n is a positive number, the maximum bits per FFT word is reduced,
 reduces round off errors.  If n is a negative number, the maximum bits per FFT word is
 increased, which increases round off errors.  Values of n below -0.025 could be pretty
 dangerous.
-
-The program used to have soft FFT crossover points.  This feature has been disabled by
-default as the pre-computed hard FFT crossover points have improved.  You can re-enable
-soft crossovers by setting in prime.txt:
-	OldStyleSoftCrossover=1
-The soft crossovers have two adjustments in prime.txt:
-	SoftCrossover=n
-	SoftCrossoverAdjust=n
-The first setting controls which exponents are examined.  The default value
-is 0.2.  This means that an exponent that is 0.2% above or below an FFT
-crossover point are tested for the best FFT size to use.  A value of 0.0
-will turn off this soft FFT crossovers feature.  The second setting
-defaults to 0.000.  This controls how aggressive or conservative the program
-is in selecting the best FFT size.  The program normally uses the smaller
-FFT size if the average roundoff error is below a value in 0.241 to 0.243
-range.  If you set SoftCrossoverAdjust to say 0.003 then the program will
-use the smaller FFT size if the average roundoff error is below a value
-in 0.244 to 0.246 range.  This will generate more iterations that generate
-roundoff error above 0.40 warnings and a time loss returning to the previous
-save file.  It also increases the chance that a deadly roundoff error
-above 0.6 will occur.  On the plus side, using the smaller FFT size each
-iteration will be a bit quicker.  I wouldn't set this adjustment to more
-than 0.006. If you set SoftCrossoverAdjust to say -0.002, then the program
-will be more conservative and use the larger FFT size more often.
 
 Alexander Kruppa wrote some code that allows the output of ECM stage 1 to
 be passed to Paul Zimmermann's more efficient GMP-ECM stage 2.  This program
@@ -616,6 +662,13 @@ program only run stage 2 at night when more memory is available.  In
 prime.txt set:
 	OnlyRunStage2WithMaxMemory=1
 
+You can capture screen output in a screen.log file.  Add this line to prime.txt
+to change the default:
+	ScreenLog=n		(default 0)
+where 0 means no logging, 1 means log everything.  Alernatively, one can fine tune
+what is logged with any combination of 2 = log worker windows, 4 = log communication
+window, 8 = log main window, 16 = no prefix on output lines.
+
 You can control the maximum prime.log file size.  The default is 2MB.  Add
 this line to prime.txt to change the default:
 	MaxLogFileSize=n
@@ -690,16 +743,16 @@ automatic detection of hardware changes.  To do this, in prime.txt set
 Adding 32 to the MergeWindows value in prime.txt suppresses screen output
 of the "Comm thread", "Main thread", "Work thread" prefix.
 
-The Memory=n setting in local.txt refers to the total amount of memory the
+The Memory=n setting in prime.txt refers to the total amount of memory the
 program can use.  You can also put this in the [Worker #n] section to place
 a maximum amount of memory that one particular worker can use.
 
-You can set MaxHighMemWorkers=n in local.txt.  This tells the program how
+You can set MaxHighMemWorkers=n in prime.txt.  This tells the program how
 many workers are allowed to use lots of memory.  This occurs doing stage 2
 of P-1, P+1, or ECM.  Default is 1.
 
 You can set a threshold for what is considered lots of memory in MaxHighMemWorkers
-calculations.  In local.txt, set:
+calculations.  In prime.txt, set:
 	HighMemThreshold=n		(default is 250)
 The value n is in MB.
 
@@ -719,9 +772,9 @@ if similar issues occur in the future:
 	EnableSetAffinity=0 or 1	(default is 1)
 Set these options in prime.txt
 
-One can override the default affinity settings with the Affinity= option in local.txt.
-Suppose you want to change which logical CPUs the second worker window uses.  Here are some
-example lines you might add to the "[Worker #2]" section of local.txt (the logical CPUs use
+One can override the default affinity settings with the Affinity= option in prime.txt.
+Suppose you want to change which logical CPUs the second worker uses.  Here are some
+example lines you might add to the "[Worker #2]" section of prime.txt (the logical CPUs use
 the zero-based numbering scheme for PU# returned by hwloc which you can see in results.txt
 by doing a benchmark):
 	Affinity=3,6,9
@@ -738,7 +791,7 @@ Run main worker on logical CPUs #3, #5, #6, & #7, run aux thread on logical CPUs
 In the prime.txt file, the DaysBetweenCheckin value can be set to any value
 between 0.04 and 7.0.  Some SeventeenOrBust users want to send updates hourly.
 
-To attempt using 2MB pages under Windows and Linux, add this line to local.txt:
+To attempt using 2MB pages under Windows and Linux, add this line to prime.txt:
 	UseLargePages=1
 My experience has been maybe a 0.5% speed improvement, but sometimes I get worse timings.
 It may well be that any benefit is within the margin of error in obtaining accurate timings.
@@ -747,6 +800,17 @@ be slower to swap in Linux).  Thus, using this option could negatively impact th
 of other applications.  Also, wasted space at the end of each page (1MB on average) can reduce
 the number of temporaries that can be allocated in stage 2 of P-1/P+1/ECM, negating any benefits.
 In Windows you'll need to have the "Lock Pages in Memory" privilege to use this option.
+
+Multithreaded FFTs by default use mutexes/signals/events to coordinate threads.  When a thread
+runs out of work it relinquishes control of the thread to the OS.  Alternatively, prime95/mprime
+can use "spin loops" where the thread busy waits for other threads to finish up.  Many, including
+Linus Torvalds, believe spin waits in user space is evil.  Read up on the hazards of spin waits
+at https://www.realworldtech.com/forum/?threadid=189711&curpostid=189723 and elsewhere.
+That said, a system primarily dedicated to running prime95/mprime could see a minor benefit.
+In prime.txt, set
+	SpinWait=n		(default is 0)
+Setting n to one tells the worker's main thread to spin wait on helper threads to finish up.
+A setting above one also tells n-1 helper threads to spin wait on work to do (not recommended).
 
 JSON messages for all work types is new in version 29.6.  You can turn off JSON
 messages with this prime.txt option:

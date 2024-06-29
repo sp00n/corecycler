@@ -177,7 +177,7 @@ Component Stress Tester:
                      [algorithm]
 
     y-cruncher stress
-    y-cruncher stress -M:3.5G -D:300 -TL:3600 FFT VST
+    y-cruncher stress -M:3.5G -D:300 -TL:3600 FFT VT3
 
 Runs a stress test using the specified parameters. Unspecified parameters are
 left at their defaults. By default, all algorithms are enabled. Specifying any
@@ -185,8 +185,10 @@ algorithm disables the rest. Multiple algorithms can be specified.
 
 -D and -TL are measured in seconds.
 
-The valid values for [algorithm] are: BKT, BBP, SFT, FFT, N32, N64, HNT, VST, and C17
-The "C17" algorithm is not available on all processors.
+The valid values for [algorithm] are: BKT, BBP, SFT, SNT, SVT, FFT, N63, and VT3.
+
+The options N32, N64, HNT, VST and C17 are no longer supported.
+(N64 aliases to N63 and VST aliases to VT3)
 
 
 
@@ -239,10 +241,10 @@ listed above since that is the direction of the auto-correction dependencies.
 
 
     Parameter: {constant:[param]}
-    Examples:  pi, log:2, sqrt:3, custom:"filename"
+    Examples:  pi, log:3, sqrt:3, custom:"filename"
 
-    Valid Values: sqrt, phi, goldenratio, e, pi, log, apery, zeta(3),
-                  lemniscate, catalan, gamma, brent, custom
+    Valid Values: sqrt, phi, goldenratio, e, pi, log, lemniscate, apery,
+                  zeta(3), catalan, gamma, brent, custom
 
 --------------------
 
@@ -418,12 +420,12 @@ Min I/O Bytes (Bytes per Seek):
 Swap Mode Configuration:
 
     -swap:default
+    -swap:ram
     -swap:raid0 [path0] [path1] [path2] [etc...]
-    -swap:raid3 [path0] [path1] [path2] [etc...]
 
     -swap:default
-    -swap:raid0 c:/ d:/ e:/ f:/
-    -swap:raid3 c:/ d:/ e:/ f:/ "path with space"
+    -swap:ram
+    -swap:raid0 c:/ d:/ e:/ f:/ "path with space"
 
     If this option is used, it must be the last option. All arguments after it
     will be parsed as paths.

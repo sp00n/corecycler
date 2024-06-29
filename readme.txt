@@ -7,8 +7,11 @@ https://github.com/sp00n/corecycler
 
 WHAT?
 -----
-A stability test script for PBO & Curve Optimizer stability testing on AMD Ryzen processors.
-It probably also works on Intel, but I haven't tested that.
+A PowerShell script to test the stability for single core loads.
+Modern CPUs can adjust their CPU frequency depending on their load, and have mechanism that allow them to clock higher
+when only one or two cores are loaded ("boost" clock).
+With this script you can test the stability for each core, which helps you to validate if your Ryzen "PBO" resp.
+"Curve Optimizer" settings are actually stable. It also works to test Intel's "Active-Core" Turbo-Boost settings.
 
 
 
@@ -20,109 +23,93 @@ Double click the "Run CoreCycler.bat" file.
 
 DANGER!
 -------
-I do not take any responsibility if you damage your computer using this script! Temperatures with Prime95 can become 
-very high, especially if the cooling solution is suboptimal. And although Ryzen should automatically shut down if the 
-temperature becomes too high, it's really not advisable to let it come to this and you should try to stay below 90°C.
-Also, PBO technically voids the warranty of your CPU, so use it at your own risk!
+I do not take any responsibility if you damage your computer using this script! Temperatures while using a stress test
+can become very high, especially if the cooling solution is suboptimal. And although modern CPUs should automatically
+throttle or shut down if the temperature becomes too high, there's a certain risk of degradation for your chip if it's
+running at it max temperature for a prolonged period of time.
+Also, using PBO *technically* voids the warranty of a Ryzen CPU, so use it at your own risk!
 
 
 
 INCLUDED SOFTWARE
 -----------------
-The script itself is a PowerShell script, but it uses the included Prime95 version 30.8b17 to actually do the stress 
-testing. You can also move your own copy of Prime95 into the /test_programs/p95 directory if you want to be on the 
-safe side (good choice!).
-To download Prime95, go to the official site at https://www.mersenne.org/download/ (however, the 30.5 version used 
-here is at the time of writing only available through their forum).
+The script itself is a PowerShell script, but it uses other, inlcuded software to do the actual stress testing, for
+example Prime95 and y-Cruncher.
+You can also move your own copy of Prime95 into the /test_programs/p95 directory, and y-Cruncher into
+/test_programs/y-cruncher, if you want to be on the safe side (good choice!), or want to use a dedicated version.
+However be aware that both programs can change their settings from time to time, so if you include a version that has
+not been tested with CoreCycler, it may not work as intended or not even start at all.
 
-Beginning with version 0.8 it also supports Aida64 and y-Cruncher, however it does NOT include Aida64 by default.
-You need to download the >>>Portable Engineer<<< version yourself and extract into the /test_programs/aida64 folder. It 
-has to be the Portable Engineer version, because the regular "Extreme" edition doesn't support starting the stress test 
-from the command line.
-To download Aida64 Portable Engineer, go here: https://www.aida64.com/downloads
-You can use the trial version for up to 30 days, which should give you enough time to find your stable setting for PBO.
+To download Prime95, go to the official site: at https://www.mersenne.org/download/
+To download y-Cruncher, go to the official site at: http://www.numberworld.org/y-cruncher/#Download
 
-Y-Cruncher is included, and can be downloaded here: http://www.numberworld.org/y-cruncher/#Download
+CoreCycler also supports Aida64, which however is NOT directly included due to its license.
+You need to download the >>>Portable Engineer<<< version yourself and extract it into the /test_programs/aida64 folder.
+It has to be the Portable Engineer version, because the regular "Extreme" edition doesn't support starting the stress
+test from the command line.
+To download Aida64 Portable Engineer, go to the official site at: https://www.aida64.com/downloads
+You can use the trial version for up to 30 days, which should give you enough time to find your stable settings.
 
 
 
-ENGLISH
--------
-This little script will run Prime95 with only one worker thread and sets the affinity of the Prime95 process 
-alternating to each physical core, cycling through all of them. This way you can test the stability of your Curve 
-Optimizer setting for each core individually, much more thoroughly than e.g. with Cinebench or the Windows Repair, and 
-much easier than manually setting the affinity of the process via the Task Manager.
+DESCRIPTION
+-----------
+This script will run your selected stress test (Prime95, y-Cruncher, Aida64) with only one (or two) worker threads and
+sets the affinity of the stress test process alternating to each physical core, cycling through all of them. This way
+you can test the stability of your Curve Optimizer / Active-Core setting for each core individually, much more
+thoroughly than e.g. with Cinebench or the Windows Repair, and much easier than manually setting the affinity of the
+process via the Task Manager.
 It will still need a lot of time though. If, for example, you're after a 12h "prime-stable" setup which is common for 
 regular overclocks, you'd need to run this script for 12x12 = 144 hours on a 5900X with 12 physical cores, because 
 each core is tested individually, and so each core also needs to complete this 12 hour test individually. Respectively, 
 on a 5600X with its 6 physical cores this would be "only" 6x12 = 72 hours.
-Unfortunately such an all-core stress test with Prime95 is not effective for testing Curve Optimizer settings, because 
-the cores cannot boost as high if all of them are stres tested, and therefore you won't be able to detect instabilities 
-that occur at a higher clock speed. For example, with my CPU I was able to run a Prime95 all-core stress test for 
-24 hours with an additional Boost Override of +75 MHz and a Curve Optimizer setting of -30 on all cores. However, when 
-using this script, and with +0 MHz Boost Override, I needed to go down to -9 on one core to have it run stable (on the 
-other hand, another core was still happy with a -30 setting even in this case).
 
-When you start the script for the first time, it will copy the included config.default.ini to config.ini, in which you 
-then can change various settings, e.g. which mode Prime95 should run in (SSE, AVX, AVX2, CUSTOM, where SSE causes the 
-highest boost clock, because it's the lightest load on the processor of all the settings), how long an individual core 
-should be stressed for before it cycles to the next one, if certain cores should be ignored, etc. For each setting 
-there's also a description in the config.ini file.
+Unfortunately such an all-core stress test with Prime95 or other stress tests is not effective for testing single-core
+stability, because the cores cannot boost as high if all of them are stres tested, and therefore you won't be able to
+detect instabilities that only occur at a higher clock speed.
+For example, with my 5900X I was able to run a Prime95 all-core stress test for 24 hours with an additional Boost
+Override of +75 MHz and a Curve Optimizer setting of -30 on all cores. However, when using this script, and with +0 MHz
+Boost Override, I needed to go down to -9 on one core to have it run stable (on the other hand, another core was still
+happy with a -30 setting even in this case).
 
-As a starting point you could set the Curve Optimizer to e.g. -15 or -20 for each core and then wait and see which core 
-runs through fine and which throws an error. Then you could increase the setting for those that have thrown an error by 
-e.g. 2 or 3 points (e.g. from -15 to -13) and decrease those that were fine by 2 or 3 further into the negative (-15 to 
--17). Once you've crossed a certain point however there is no way around modifying the value by a single point up/down 
-and letting the script run for a long time to find the very last instabilities.
+When you start the script for the first time, it will generate a config.ini file, in which you can then change various
+settings, e.g. which mode the stress test program should run in (e.g. for Prime95 SSE, AVX, AVX2, CUSTOM, where SSE
+causes the highest boost clock, because it's the lightest load on the processor of all the settings), how long an
+individual core should be stressed for before it cycles to the next one, if certain cores should be ignored, etc.
+For each setting there's also a description in the config.ini file.
 
-By the way, it is intended that only one thread is stressed for each core if Hyperthreading / SMT is enabled, as the 
-boost clock is higher this way, compared to if both (virtual) threads would be stressed. However, there is a setting 
-in the config.ini to enable two threads as well.
+As a starting point for Ryzen systems you could set the Curve Optimizer to e.g. -15 or -20 for each core and then wait
+and see which core runs through fine and which throws an error. Then you could increase the setting for those that have
+thrown an error by e.g. 2 or 3 points (e.g. from -15 to -13) and decrease those that were fine by 2 or 3 further into
+the negative (-15 to -17). Once you've crossed a certain point however there is no way around modifying the value by a
+single point up/down  and letting the script run for a long time to find the very last instabilities.
 
+By the way, by default it is configured so that only one thread is stressed for each core if Hyperthreading / SMT is
+enabled, as the boost clock is higher this way, compared to if both (virtual) threads would be stressed. But there is a
+setting in the config.ini to enable testing with two threads as well.
 
-
-DEUTSCH
--------
-Mit diesem kleinen Script kann man die Einstellungen des Curve Optimizer für jeden einzelnen Kern seiner CPU auf
-Stabilität überprüfen. Das Script startet Prime95 mit einem Worker-Thread und setzt die "Affinity" von Prime95
-abwechselnd auf die einzelnen Kerne, d.h. es wird immer nur ein einziger Kern gleichzeitig belastet, wodurch sehr gut
-die Stabilität der Curve Optimizer Einstellung ausgetestet werden kann.
-Die bisherigen Stabilitätstests mit PBO und dem Curve Optimizer waren entweder nicht zuverlässig (Cinebench, 
-Windows Repair) oder mit sehr viel Arbeit verbunden (manuell die Affinity über den Task Manager setzen, warten, neu 
-setzen, etc) oder gleich beides. Mit diesem Script braucht man eigentlich nur noch Zeit - davon allerdings doch recht 
-viel. Da immer nur ein Kern gleichzeitig getestet werden kann, bräuchte man für einen 12 Stunden "Prime-stable" 
-Stabilitätstest, wie man ihn bei normalen Overclocks gerne macht, bereits 12x12 = 144 Stunden bei einem 5900X. Bei 
-einem 5600X mit seinen 6 physischen Kernen dann entsprechend "nur" 6x12 = 72 Stunden.
-Solch ein All-Core Test mit Prime95 ist leider nicht effektiv mit dem Curve Optimizer, da die Kerne dann nicht so hoch 
-takten können, und man so eventuelle Instabilitäten nicht erkennen kann. Bei meiner CPU konnte ich z.B. den Curve 
-Optimizer auf -30 auf allen Kernen und +75 MHz Boost stellen und damit problemlos 24 Stunden Prime95 durchlaufen lassen,
-während ich bei diesem Einzeltest dann bei +0 MHz Boost einen der Kerne nur noch mit -9 stabil laufen lassen konnte 
-(ein anderer dagegen lief auch beim Einzeltest noch mit -30 weiter).
-
-Beim ersten Start des Scripts wird automatisch eine config.ini angelegt (die config.default.ini wird kopiert). In 
-dieser kann man einige Parameter ändern, z.B. welcher Modus beim Testen ausgeführt wird (SSE, AVX, AVX2, CUSTOM, wobei 
-SSE den höchsten Takt produziert, da es die CPU am wenigsten belastet), wie lange ein einzelner Kern getestet werden 
-soll, bevor es zum nächsten geht, ob bestimmte Kerne ignoriert werden sollen, etc. Für jedes Setting ist in der Datei 
-auch eine Beschreibung vorhanden.
-
-Als Startpunkt am Anfang könnte man im Curve Optimizer jeden Kern auf z.B. auf -15 oder -20 setzen und dann schauen, 
-welcher Kern durchläuft und welcher davon einen Fehler wirft. Die Kerne mit Fehler könnte man dann z.B. um 2 oder 3 
-Punkte nach oben setzen (also z.B. von -15 auf -13), die fehlerfreien dagegen 2 oder 3 weiter ins Negative (-15 auf 
--17). Ab einem gewissen Punkt kommt man aber nicht daran vorbei, nur noch um einen Punkt nach oben/unten zu korrigieren 
-und das Tool sehr lange laufen zu lassen, um auch die letzten Instabilitäten herauszufiltern.
-
-Es ist übrigens beabsichtigt, dass bei aktiviertem Hyperthreading / SMT nur der erste Thread eines jeden Kerns belastet 
-wird, da dabei ein höherer Takt erreicht wird, wie wenn beide (virtuellen) Threads eines Kerns belastet würden. Man 
-kann in der config.ini allerdings auch die Anzahl der Threads auf 2 setzen, wenn man das möchte, dann werden beide 
-belastet.
 
 
 
 TROUBLESHOOTING & FAQ
 ---------------------
+Q: What does "Set to Core X (CPU Y)" (e.g. "Set to Core 6 (CPU 12)") mean?
+A: CoreCycler - as the name suggests - cycles through your cores and informs you on which core it is currently running.
+   When Hyperthreading / Simultaneous Multithreading (SMT) is enabled, each physical core contains two "virtual" CPUs,
+   effectively doubling the amount of CPUs available to you.
+   Since Cores and CPUs generally start with 0 (zero-based), as seen in the BIOS and in the Task Manager, CoreCycler
+   also uses this format. So "Core 0" means your first core, and "CPU 0" the first virtual CPU.
+   "Core 6 (CPU 12)" respectively means it's running on the 7th core (remember, zero-based!) and 13th virtual CPU.
+
+Q: The core I select in Ryzen Master isn't the same as here!
+A: Yes, Ryzen Master starts it's core numbering with 1. Only AMD knows why, it's not the industry standard.
+   In the BIOS the core numbering starts with a 0, in Windows Task Manager the CPU numbering starts with a 0, in Intel
+   Extreme Tuning Utility the numbering starts with 0, and therefore also in CoreCycler the numbering starts with a 0.
+   Blame AMD for breaking this naming convention.
+
 Q: My computer crashes when running this program!
-A: Very likely your Curve Optimizer setting is unstable. Change the settings to a higher resp. less negative value
-   (e.g. from -15 to -12) and try again.
+A: Very likely your Curve Optimizer or Turbo Boost setting is unstable. Change the settings to a higher resp. less
+   negative value (e.g. from -15 to -12) and try again, or lower your Boost Clock.
 
 Q: How long should I run this for?
 A: Basically as long as you can. If you aim for a "12h prime-stable setup", you'd need to run every single core for 
@@ -136,21 +123,28 @@ A: Short answer: all of them.
    all of the tests to make sure that you're really error free.
    Also switching from Prime95 to y-Cruncher or Aida64 produces different load scenarios, which can prove useful in 
    detecting instabilities.
+   For y-Cruncher, "04-P4P" and "19-ZN2 ~ Kagari" seem to produce the fastest results (even if "20-ZN3 ~ Yuzuki" is
+   described as being optimized for Ryzen 7000 / Zen4).
 
 Q: Why are you using SSE? AVX stresses the CPU much more!
-A: Yes, AVX/AVX2/AVX512 does stress the CPU more than the SSE mode. However, it is exactly this additional load on the core 
-   wich prevents the boost clock from reaching its maximum (because it is temperature and load dependent), and so you 
-   can't really detect these edge cases which eventually can cause an error sooner or later. So, while being somewhat 
-   counterintuitive, the SSE mode with its lighter load is actually the one that finds the most stability problems.
-   However, you can change the mode to AVX, AVX2 or AVX512 in the config.ini if you're happy with only AVX/AVX2/AVX512
-   stability.
+A: Yes, AVX/AVX2/AVX512 does stress the CPU more than the SSE mode. However, it is exactly this additional load on the
+   core wich prevents the boost clock from reaching its maximum (because it is temperature and load dependent), and so
+   you can't really detect these edge cases which eventually can cause an error sooner or later. So, while being
+   somewhat counterintuitive, the SSE mode with its lighter load is actually the one that can find stability problems,
+   which tests using AVX/AVX2 simply cannot.
+   On the other hand, not testing the AVX/AVX2 instructions will also not test the transistors associated with these
+   instructions, so you're not "fully" testing your chip. So you should indeed test both scenarios, light load / SEE
+   and heavy load with AVX/AVX2.
+   You can change the mode to SSE, AVX, AVX2 or AVX512 for Prime95 and Aida64 in the config.ini, and for y-Cruncher you
+   can select different test modes which require different instruction sets.
 
 Q: What settings can I change?
 A: The config.ini contains details and an explanation for each setting, so take a look there.
 
-Q: When starting the tool I only see a "FATAL ERROR: Could not access the Windows Performance Process Counter!" message!
-A: The tool requires the Windows Performance Process Counter (PerfProc) to work correctly. It may have been disabled, 
-   you can check this with either 
+Q: When starting the tool I see a "FATAL ERROR: Could not access the Windows Performance Process Counter!" message!
+A: For some stress test programs the script needs to check the CPU utilization to determine if here has been an error.
+   For this, the tool requires the Windows Performance Process Counter (PerfProc) to work correctly. It may have been
+   disabled, you can check this with either 
    lodctr.exe /q:PerfProc
    or with 
    reg.exe query HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\PerfProc\Performance /s
@@ -162,10 +156,10 @@ A: The tool requires the Windows Performance Process Counter (PerfProc) to work 
    I've also included a batch file in the /tools/ directory (enable_performance_counter.bat), which _should_ perform 
    all these actions for you, but no guarantees that it will actually work!
 
-Q: When starting the tool I only see a "FATAL ERROR: Could not get the localized Performance Process Counter name!" message!
+Q: When starting the tool I see a "FATAL ERROR: Could not get the localized Performance Process Counter name!" message!
 A: See above. You probably need to re-enable the Windows Performance Process Counter (PerfProc).
 
-Q: When starting the tool I only see a "FATAL ERROR: .NET could not be found or the version is too old!" message!
+Q: When starting the tool I see a "FATAL ERROR: .NET could not be found or the version is too old!" message!
 A: This tool requires the .NET Framework with at least version 3.5. You can download it here:
    https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10
 
@@ -190,13 +184,36 @@ This script is provided under the "CC BY-NC-SA" Creative Commons license. Or to 
 "This license lets others remix, adapt, and build upon your work non-commercially, as long as they credit you and 
 license their new creations under the identical terms."
 
+
+You are free to:
+   Share - copy and redistribute the material in any medium or format
+   Adapt - remix, transform, and build upon the material
+   The licensor cannot revoke these freedoms as long as you follow the license terms.
+
+Under the following terms:
+   - Attribution
+     You must give appropriate credit, provide a link to the license, and indicate if changes were made.
+     You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.
+   - NonCommercial
+     You may not use the material for commercial purposes.
+   - ShareAlike
+     If you remix, transform, or build upon the material, you must distribute your contributions under the same license
+     as the original.
+   - No additional restrictions
+     You may not apply legal terms or technological measures that legally restrict others from doing anything the
+     license permits.
+
+
+
 You can find the full license text here:
 https://creativecommons.org/licenses/by-nc-sa/4.0/
 https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
 
+And also in the included LICENSE file.
+
 
 So feel free to share it, modify it and adapt it to your needs, but if you find any bugs, errors or have improvement 
-ideas, please let me know at 
+ideas, please let me know at:
 
 https://github.com/sp00n/corecycler
 

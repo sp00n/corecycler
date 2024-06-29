@@ -1,3 +1,49 @@
+New features in Version 30.19 of prime95.exe
+--------------------------------------------
+
+1) Edwards ECM curves.  Given a reasonable amount of memory, Edwards ECM curves are roughly
+   10% faster than Montgomery ECM curves used in all earlier prime95 versions.
+2) Added support for running ECM stage 2 given a resume file from GMP-ECM.  Especially useful
+   when GMP-ECM uses a GPU to run ECM stage 1.  Syntax for worktodo entries are:
+	ECMSTAGE2=k,b,n,c,filename[,B2-or-zero][,skip_curves][,num_curves][,"known-factors"]
+	ECMSTAGE2N=filename[,B2-or-zero][,skip_curves][,num_curves][,"known-factors"]
+3) New timestamp options in undoc.txt.
+4) Manual communication menu choice will also start proof uploads.
+5) From the Test/Primenet... dialog box, turning on Use Primenet will bring up the Test/Worker
+   Windows... dialog box to allow changing work preferences prior to contacting the PrimeNet server.
+6) The P-1 and ECM stage 2 vs. stage 1 runtime estimate used for optimal B2 calculations is now
+   compared to the actual so that future estimates will hopefully more accurate.
+7) Advanced/Test now creates a PRP worktodo.txt entry for large exponents.
+
+New features in Version 30.18 of prime95.exe
+--------------------------------------------
+
+1) Faster generic mod.  This is more useful for programs like PFGW than prime95.
+
+New features in Version 30.16 - 30.17 of prime95.exe
+----------------------------------------------------
+
+1) Smaller executable.  Many SSE2 FFTs optimized for CPUs made before 2010 were removed.
+   These CPUs will still be able to run all FFT sizes, but 30.15 might have a more efficient
+   implementation available.
+
+New features in Version 30.11 - 30.15 of prime95.exe
+----------------------------------------------------
+
+1) Settings are no longer stored in local.txt.  Settings are automatically moved to prime.txt.
+   In addition, settings within prime.txt are now organized into several sections for
+   enhanced readability.
+
+New features in Version 30.9 - 30.10 of prime95.exe
+---------------------------------------------------
+
+1) ECM stage 2 using fast polynomial multiplication similar to the GMP-ECM program.  If lots
+   of memory is available for stage 2 this implementation will be substantially faster.
+2) Proof files start uploading within a minute of sending a PRP result to the server.
+   Previously it could take up to an hour for proof uploading to begin.
+3) Worktodo.add files are now processed without stopping all workers.
+4) Settings from local.txt have been moved to prime.txt.  Settings in prime.txt grouped for clarity.
+
 New features in Version 30.8 of prime95.exe
 -------------------------------------------
 
@@ -391,7 +437,7 @@ New features in Version 25.8 of prime95.exe
     GUIDs to be erroneously regenerated.  You may need to suffer through
     one more regenerated GUID before the fix takes effect. 
 7)  A bug where some low memory situations on a multi-core machine resulted
-    in one or more worker threads sat idle has been fixed.
+    in one or more workers sat idle has been fixed.
 8)  A crash bug doing 61 and 62 bit trial factoring on Pentium CPUs that
     do not support the CMOV instruction was fixed.  On these same CPUs
     a bug was fixed when factors smaller than 2^60 was found.
@@ -406,7 +452,7 @@ New features in Version 25.7 of prime95.exe
 4)  Ability to stop and start individual workers added.
 5)  DayMemory and NightMemory in local.txt replaced with a single Memory
     setting.
-6)  Memory can be set for each worker thread.
+6)  Memory can be set for each worker.
 7)  Scheme to distribute available memory among workers needing a lot of
     memory has been completely revamped.
 8)  MaxHighMemWorkers replaces delayStage2Workers option.

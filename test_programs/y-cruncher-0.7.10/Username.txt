@@ -1,0 +1,16 @@
+﻿#
+#   This file is used to specify a name, username, email, etc... that you would
+#   like to appear in the validation certificates that y-cruncher will create.
+#   This is used for identification purposes.
+#
+#   Examples:
+#               Johnny Sun   (Serotoninn)
+#               Haruhi Suzumiya   (涼宮ハルヒ)
+#
+#
+#   Note the following rules:
+#       1.  Only printable characters are allowed. (i.e. No control characters)
+#       2.  This file needs to be saved as either UTF-8 or UTF-16 with byte order mark.
+#
+
+Username:   None Specified - You can edit this in "Username.txt".
