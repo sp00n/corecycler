@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.5.0
+    0.9.5.1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -22,7 +22,7 @@ Set-StrictMode -Version 3.0
 
 
 # Our current version
-$version = '0.9.5.0'
+$version = '0.9.5.1'
 
 
 # Set the window title
@@ -2699,7 +2699,7 @@ function Import-Settings {
     $settingsToLowercase = @('stressTestProgram', 'coreTestOrder', 'memory', 'modeToUseForSuspension')
 
     # Check if the file exists
-    if ($filePathOrDefault -ne 'DEFAULT' -and !(Test-Path $filePathOrDefault -PathType leaf)) {
+    if ($filePathOrDefault -ne 'DEFAULT' -and !(Test-Path $filePathOrDefault -PathType Leaf)) {
         Exit-WithFatalError -text ('Could not find ' + $filePathOrDefault + '!')
     }
 
@@ -2892,10 +2892,10 @@ function Get-Settings {
 
 
     # If no config.ini file exists, copy the default values to the config.ini
-    if (!(Test-Path $configUserPath -PathType leaf)) {
+    if (!(Test-Path $configUserPath -PathType Leaf)) {
         [System.IO.File]::WriteAllLines($configUserPath, $DEFAULT_SETTINGS)
 
-        if (!(Test-Path $configUserPath -PathType leaf)) {
+        if (!(Test-Path $configUserPath -PathType Leaf)) {
             Exit-WithFatalError -text 'Could not create the config.ini file!'
         }
     }
@@ -2916,7 +2916,7 @@ function Get-Settings {
     catch {
         Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
 
-        if (!(Test-Path $configDefaultPath -PathType leaf)) {
+        if (!(Test-Path $configDefaultPath -PathType Leaf)) {
             Exit-WithFatalError -text 'Neither config.ini nor config.default.ini found!'
         }
 
@@ -3660,7 +3660,7 @@ function Test-Prime95 {
     Write-Verbose('Checking if prime95.exe exists at:')
     Write-Verbose($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt'])
 
-    if (!(Test-Path ($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt']) -PathType leaf)) {
+    if (!(Test-Path ($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt']) -PathType Leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Prime95!') Red
         Write-ColorText('Make sure to download and extract Prime95 into the following directory:') Red
         Write-ColorText($stressTestPrograms[$p95Type]['absoluteInstallPath']) Yellow
@@ -4117,7 +4117,7 @@ function Initialize-Prime95 {
         $null = New-Item $configFile1 -ItemType File -Force
 
         # Check if the file exists
-        if (!(Test-Path $configFile1 -PathType leaf)) {
+        if (!(Test-Path $configFile1 -PathType Leaf)) {
             Exit-WithFatalError -text ('Could not create the config file at ' + $configFile1 + '!')
         }
     }
@@ -4131,7 +4131,7 @@ function Initialize-Prime95 {
         $null = New-Item $configFile1 -ItemType File -Force
 
         # Check if the file exists
-        if (!(Test-Path $configFile1 -PathType leaf)) {
+        if (!(Test-Path $configFile1 -PathType Leaf)) {
             Exit-WithFatalError -text ('Could not create the config file at ' + $configFile1 + '!')
         }
 
@@ -4139,7 +4139,7 @@ function Initialize-Prime95 {
         $null = New-Item $configFile2 -ItemType File -Force
 
         # Check if the file exists
-        if (!(Test-Path $configFile2 -PathType leaf)) {
+        if (!(Test-Path $configFile2 -PathType Leaf)) {
             Exit-WithFatalError -text ('Could not create the config file at ' + $configFile2 + '!')
         }
     }
@@ -4277,7 +4277,7 @@ function Initialize-Prime95 {
     [System.IO.File]::WriteAllLines($configFile1, $output1)
 
     # Check if the file exists
-    if (!(Test-Path $configFile1 -PathType leaf)) {
+    if (!(Test-Path $configFile1 -PathType Leaf)) {
         Exit-WithFatalError -text ('Could not create the config file at ' + $configFile1 + '!')
     }
 
@@ -4287,7 +4287,7 @@ function Initialize-Prime95 {
         [System.IO.File]::WriteAllLines($configFile2, $output2)
 
         # Check if the file exists
-        if (!(Test-Path $configFile2 -PathType leaf)) {
+        if (!(Test-Path $configFile2 -PathType Leaf)) {
             Exit-WithFatalError -text ('Could not create the config file at ' + $configFile2 + '!')
         }
     }
@@ -4391,7 +4391,7 @@ function Close-Prime95 {
         }
         else {
             # The process may be suspended
-            $null = Resume-Process $windowProcess $true
+            $null = Resume-Process -process $windowProcess -ignoreError $true
 
             Write-Verbose('Trying to gracefully close Prime95')
             Write-Debug('The window process main window handle: ' + $windowProcessMainWindowHandle)
@@ -4467,7 +4467,7 @@ function Initialize-Aida64 {
     Write-Verbose('Checking if aida64.exe exists at:')
     Write-Verbose($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt'])
 
-    if (!(Test-Path ($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt']) -PathType leaf)) {
+    if (!(Test-Path ($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt']) -PathType Leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Aida64!') Red
         Write-ColorText('Make sure to download and extract the PORTABLE ENGINEER(!) version of Aida64 into the following directory:') Red
         Write-ColorText($stressTestPrograms['aida64']['absoluteInstallPath']) Yellow
@@ -4491,7 +4491,7 @@ function Initialize-Aida64 {
     $pathManifest = $stressTestPrograms['aida64']['processPath'] + '\aida64.exe.manifest'
     $pathBackup   = $stressTestPrograms['aida64']['processPath'] + '\aida64.exe.manifest.bak'
 
-    if ((Test-Path $pathManifest -PathType leaf)) {
+    if ((Test-Path $pathManifest -PathType Leaf)) {
         Write-Verbose('Trying to rename the aida64.exe.manifest file so that we can start AIDA64 as a regular user')
 
         if (!(Move-Item -Path $pathManifest -Destination $pathBackup -PassThru)) {
@@ -4514,7 +4514,7 @@ function Initialize-Aida64 {
     $null = New-Item $configFile1 -ItemType File -Force
 
     # Check if the file exists
-    if (!(Test-Path $configFile1 -PathType leaf)) {
+    if (!(Test-Path $configFile1 -PathType Leaf)) {
         Exit-WithFatalError -text ('Could not create the config file at ' + $configFile1 + '!')
     }
 
@@ -4638,7 +4638,7 @@ function Initialize-Aida64 {
     [System.IO.File]::WriteAllLines($configFile1, $output1)
 
     # Check if the file exists
-    if (!(Test-Path $configFile1 -PathType leaf)) {
+    if (!(Test-Path $configFile1 -PathType Leaf)) {
         Exit-WithFatalError -text ('Could not create the config file at ' + $configFile1 + '!')
     }
 
@@ -4646,7 +4646,7 @@ function Initialize-Aida64 {
     [System.IO.File]::WriteAllLines($configFile2, $output2)
 
     # Check if the file exists
-    if (!(Test-Path $configFile2 -PathType leaf)) {
+    if (!(Test-Path $configFile2 -PathType Leaf)) {
         Exit-WithFatalError -text ('Could not create the config file at ' + $configFile2 + '!')
     }
 }
@@ -4874,7 +4874,7 @@ function Close-Aida64 {
 
         # The process may be suspended
         if ($thisStressTestProcess) {
-            $null = Resume-Process $thisStressTestProcess $true
+            $null = Resume-Process -process $thisStressTestProcess -ignoreError $true
         }
         else {
             Write-Verbose('The Aida64 adstress test process id is set, but no stress test process was found!')
@@ -4949,7 +4949,7 @@ function Close-Aida64 {
             else {
                 # The process may be suspended
                 Write-Verbose('The process may be suspended, resuming')
-                $null = Resume-Process $windowProcess $true
+                $null = Resume-Process -process $windowProcess -ignoreError $true
 
                 Write-Verbose('Sending the close message to the main window')
 
@@ -5059,7 +5059,7 @@ function Initialize-yCruncher {
     Write-Verbose('Checking if ' + $binaryToRun + ' exists at:')
     Write-Verbose($binaryWithPathToRun)
 
-    if (!(Test-Path ($binaryWithPathToRun) -PathType leaf)) {
+    if (!(Test-Path ($binaryWithPathToRun) -PathType Leaf)) {
         Write-ColorText('FATAL ERROR: Could not find y-Cruncher!') Red
         Write-ColorText('             Trying to run "' + $binaryWithPathToRun + '"') Red
         Write-ColorText('Make sure to download and extract y-Cruncher into the following directory:') Red
@@ -5143,7 +5143,7 @@ function Initialize-yCruncher {
     [System.IO.File]::WriteAllLines($configFile, $configEntries)
 
     # Check if the file exists
-    if (!(Test-Path $configFile -PathType leaf)) {
+    if (!(Test-Path $configFile -PathType Leaf)) {
         Exit-WithFatalError -text ('Could not create the config file at ' + $configFile + '!')
     }
 }
@@ -5283,7 +5283,7 @@ function Close-yCruncher {
         else {
             # The process may be suspended (only if the wrapper is NOT being used)
             if (!$isYCruncherWithLogging) {
-                $null = Resume-Process $windowProcess $true
+                $null = Resume-Process -process $windowProcess -ignoreError $true
 
                 Write-Verbose('Trying to gracefully close y-Cruncher')
             }
@@ -7100,9 +7100,9 @@ if ($PSScriptRoot -Match '[^\x00-\x7F]') {
 
 
 # Check if .NET is installed
-$hasDotNet3_5 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v3.5' -ErrorAction Ignore).Install
-$hasDotNet4_0 = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4.0\Client' -ErrorAction Ignore).Install
-$hasDotNet4_x = [Int](Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Ignore).Install
+$hasDotNet3_5 = (($dotNetEntry3_5 = Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v3.5' -ErrorAction Ignore)        -and ($dotNetEntry3_5 | Get-Member Install) -and $dotNetEntry3_5.Install -eq 1)
+$hasDotNet4_0 = (($dotNetEntry4_0 = Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4.0\Client' -ErrorAction Ignore) -and ($dotNetEntry4_0 | Get-Member Install) -and $dotNetEntry4_0.Install -eq 1)
+$hasDotNet4_x = (($dotNetEntry4_x = Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Ignore)     -and ($dotNetEntry4_x | Get-Member Install) -and $dotNetEntry4_x.Install -eq 1)
 
 if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
     Write-Host
@@ -7864,7 +7864,7 @@ try {
     }
 
     # Remove ignored cores
-    [System.Collections.ArrayList] $coresToTest = $coresToTest | Where-Object { $_ -notin $settings.General.coresToIgnore }
+    [System.Collections.ArrayList] $coresToTest = @($coresToTest | Where-Object { $_ -notin $settings.General.coresToIgnore })
 
     Write-Verbose('All cores that could be tested:')
     Write-Verbose($allCores -Join ', ')
@@ -8420,7 +8420,7 @@ try {
                     $timestamp = Get-Date -Format HH:mm:ss
                     Write-Debug($timestamp + ' - Resuming the stress test process')
 
-                    $resumed = Resume-Process $stressTestProcess
+                    $resumed = Resume-Process -process $stressTestProcess
                     Write-Debug('           Resumed: ' + $resumed)
                 }
 
@@ -9406,9 +9406,9 @@ finally {
             Write-Verbose('Checking if the process is still using CPU power')
 
             # CPU(s): The amount of processor time that the process has used on all processors, in seconds.
-            $firstCpuValue = $stressTestProcess.UserProcessorTime.TotalSeconds
+            $firstCpuValue = $checkProcess.UserProcessorTime.TotalSeconds
             Start-Sleep -Milliseconds 500
-            $secondCpuValue = $stressTestProcess.UserProcessorTime.TotalSeconds
+            $secondCpuValue = $checkProcess.UserProcessorTime.TotalSeconds
 
             $diffCpuValue = $secondCpuValue - $firstCpuValue
 
@@ -9422,6 +9422,42 @@ finally {
                 Close-StressTestProgram
 
                 Write-ColorText('Please check if the selected stress test program "' + $selectedStressTestProgram + '" is still running!') Yellow
+            }
+            else {
+                # Maybe the process was suspended?
+                Write-Debug('The stress test program isn''t using enough CPU power, maybe it''s suspended')
+
+                $suspendedThreads = @($checkProcess.Threads | Select-Object -Property ThreadState, WaitReason | Where-Object -FilterScript { $_.ThreadState -eq 'Wait' -and $_.WaitReason -eq 'Suspended' })
+
+                Write-Debug('$checkProcess.Threads.Count: ' + $checkProcess.Threads.Count)
+                Write-Debug('$suspendedThreads.Count:     ' + $suspendedThreads.Count)
+
+                if ($checkProcess.Threads.Count -eq $suspendedThreads.Count) {
+                    Write-Debug('Yeah, the threads seems to be suspended, trying to resume')
+                    
+                    $null = Resume-Process -process $checkProcess -ignoreError $true
+
+                    $firstCpuValue = $checkProcess.UserProcessorTime.TotalSeconds
+                    Start-Sleep -Milliseconds 500
+                    $secondCpuValue = $checkProcess.UserProcessorTime.TotalSeconds
+
+                    $diffCpuValue = $secondCpuValue - $firstCpuValue
+
+                    Write-Debug('First CPU Value:  ' + $firstCpuValue)
+                    Write-Debug('Second CPU Value: ' + $secondCpuValue)
+                    Write-Debug('Difference:       ' + $diffCpuValue)
+
+                    if ($diffCpuValue -gt 0.2) {
+                        Write-Verbose('The stress test program is still using enough CPU power, so we can try to close it')
+                        Write-Text('           Trying to close the stress test program...')
+                        Close-StressTestProgram
+
+                        Write-ColorText('Please check if the selected stress test program "' + $selectedStressTestProgram + '" is still running!') Yellow
+                    }
+                    else {
+                        Write-Debug('We tried to resume, it didn''t change anything')
+                    }
+                }
             }
         }
         else {
