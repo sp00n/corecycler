@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.5.1
+    0.9.5.2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -22,7 +22,7 @@ Set-StrictMode -Version 3.0
 
 
 # Our current version
-$version = '0.9.5.1'
+$version = '0.9.5.2'
 
 
 # Set the window title
