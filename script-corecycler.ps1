@@ -6720,18 +6720,16 @@ function Add-AppEventLogSource {
     # But we only care about the "Application" Event Log, which shouldn't need admin rights, and it is *very* unlikely
     # that "CoreCycler" is used as a source there, so just parse the exception message to determine our next steps
     # It will not throw an exeption if the source was found in "Application"
-    catch {
-        $sourceNotFound = $_.Exception -Match 'The source was not found'
+    catch [System.Security.SecurityException] {
+        # We assume that every SecurityException is due to not being able to search the "Security" part of the Event Log
+        Write-Debug('Expected exception found, the Event Log Source "CoreCycler" does not exist yet (#2)')
+        $askToAddEventLog = $true
+    }
 
-        # Some other exception happened
-        if (!$sourceNotFound) {
-            Write-Debug('There was an unexpected exception when trying to get the Event Log Source!')
-            throw $_
-        }
-        else {
-            Write-Debug('Expected exception found, the Event Log Source "CoreCycler" does not exist yet (#2)')
-            $askToAddEventLog = $true
-        }
+    # Any other exception should be something else, so throw it
+    catch {
+        Write-Debug('There was an unexpected exception when trying to get the Event Log Source!')
+        throw $_
     }
 
 
@@ -9434,7 +9432,7 @@ finally {
 
                 if ($checkProcess.Threads.Count -eq $suspendedThreads.Count) {
                     Write-Debug('Yeah, the threads seems to be suspended, trying to resume')
-                    
+
                     $null = Resume-Process -process $checkProcess -ignoreError $true
 
                     $firstCpuValue = $checkProcess.UserProcessorTime.TotalSeconds
