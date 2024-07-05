@@ -34,14 +34,16 @@ Also, using PBO *technically* voids the warranty of a Ryzen CPU, so use it at yo
 INCLUDED SOFTWARE
 -----------------
 The script itself is a PowerShell script, but it uses other, inlcuded software to do the actual stress testing, for
-example Prime95 and y-Cruncher.
-You can also move your own copy of Prime95 into the /test_programs/p95 directory, and y-Cruncher into
-/test_programs/y-cruncher, if you want to be on the safe side (good choice!), or want to use a dedicated version.
-However be aware that both programs can change their settings from time to time, so if you include a version that has
-not been tested with CoreCycler, it may not work as intended or not even start at all.
+example Prime95, y-Cruncher and Linpack Xtreme.
+You can also move your own copy of the stress test programs in to the respective folders in the /test_programs/
+directory (e.g. /test_programs/p95 for Prime95, /test_programs/y-cruncher for y-Cruncher, etc).
+For example if you want to be on the safe side (good choice!) or want to use a dedicated version.
+However be aware that the stress test programs can change their settings from time to time, so if you include a version
+that has not been tested with CoreCycler, it may not work as intended or not even start at all.
 
 To download Prime95, go to the official site: at https://www.mersenne.org/download/
 To download y-Cruncher, go to the official site at: http://www.numberworld.org/y-cruncher/#Download
+To download Linpack Xtreme, go to the official site at: https://www.ngohq.com/linpack-xtreme.html
 
 CoreCycler also supports Aida64, which however is NOT directly included due to its license.
 You need to download the >>>Portable Engineer<<< version yourself and extract it into the /test_programs/aida64 folder.
@@ -218,7 +220,32 @@ ideas, please let me know at:
 https://github.com/sp00n/corecycler
 
 
+
 The licenses of all included programs remain unaffected by this and retain their original, included license!
+- Prime95
+  https://www.mersenne.org/legal/
+
+- y-Cruncher
+  http://www.numberworld.org/y-cruncher/license.html
+
+- Linpack Xtreme
+  https://www.ngohq.com/linpack-xtreme.html
+
+- BoostTester
+  https://github.com/jedi95/BoostTester
+
+- BoostTesterMannix
+  https://github.com/mann1x/BoostTesterMannix?tab=Unlicense-1-ov-file
+
+- CoreTunerX
+  https://github.com/CXWorld/CoreTunerX?tab=License-1-ov-file
+
+- PBO2Tuner
+  https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29337788
+
+- HWMonitor
+  https://www.cpuid.com/softwares/hwmonitor.html
+
 
 
 Happy testing!
