@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.5.2
+    0.9.5.3Linpack
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -17,16 +17,20 @@
 #>
 
 
+# Our current version
+$version = '0.9.5.3Linpack'
+
+
 # This defines the strict mode
 Set-StrictMode -Version 3.0
 
 
-# Our current version
-$version = '0.9.5.2'
+# We want to use UTF-8 if possible when generating files, not UFT-16
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
 
 
 # Set the window title
-$host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' starting')
+$Host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' starting')
 
 
 
@@ -97,6 +101,7 @@ $isAida64                      = $false
 $isYCruncher                   = $false
 $isYCruncherOld                = $false
 $isYCruncherWithLogging        = $false
+$isLinpackXtreme               = $false
 $showPrime95NewWarning         = $false
 $cpuCheckIterations            = 0
 $runtimeRemaining              = 0
@@ -107,7 +112,11 @@ $numTestedCores                = 0
 $testedCoresArray              = @{}
 
 
-# Processor related variables
+# Processor and system related variables
+#$totalMemory                 = 0
+$freeMemory                  = 0
+$processor                   = $null
+$isIntelProcessor            = $false
 $numLogicalCores             = 0
 $numPhysCores                = 0
 $numProcessorGroups          = 1
@@ -124,7 +133,7 @@ $useWindowsPerformanceCountersForCpuUtilizationDefault = 0
 $enableCpuFrequencyCheckDefault                        = 0
 $tickIntervalDefault                                   = 10
 $delayFirstErrorCheckDefault                           = 0
-$stressTestProgramPriorityDefault                      = 'High'
+$stressTestProgramPriorityDefault                      = 'Normal'
 $stressTestProgramWindowToForegroundDefault            = 0
 $suspensionTimeDefault                                 = 1000
 $modeToUseForSuspensionDefault                         = 'Threads'
@@ -158,13 +167,15 @@ $DEFAULT_SETTINGS = @"
 # - AIDA64
 # - YCRUNCHER
 # - YCRUNCHER_OLD
-# You can change the test mode for each program in the relavant [sections] below.
+# - LINPACKXTREME
+# You can change the test mode and options for each stress test program in the respective [section] further down
 # Note: For AIDA64, you need to manually download and extract the portable ENGINEER version and put it
 #       in the /test_programs/aida64/ folder
 #       AIDA64 is somewhat sketchy as well
 # Note: There are two versions of y-Cruncher included, which you can select with either "YCRUNCHER" or "YCRUNCHER_OLD"
 #       The "old" version uses the binaries and test algorithms that were available before version 0.8 of y-Cruncher
 #       See the comments in the [yCruncher] section for a more detailed description
+#
 # Default: PRIME95
 stressTestProgram = PRIME95
 
@@ -177,13 +188,15 @@ stressTestProgram = PRIME95
 #           1.5m = 1.5 minutes = 90 seconds
 #
 # Automatic runtime:
-# You can also set it to "auto", in which case it will perform one full run of all the FFT sizes in the selected
-# Prime95 preset for each core, and when that is finished, it continues to the next core and starts again
+# You can also set it to "auto", in which case it will perform one "full" run for each core
+# For Prime95, it will wait until all of the FFT sizes in the selected preset have been tested and
+# will then continues to the next core and start again
 # For y-Cruncher the "auto" setting will wait until all selected tests have been finished for a core
 # and will then continue to the next core
-# For Aida64 the "auto" setting will default to 10 Minutes per core
+# If logging has been disabled for y-Cruncher, it will fall back to 10 minutes per core
+# For Aida64 the "auto" setting will default to 10 minutes per core
 #
-# Below are some examples of the runtime for one iteration for the various tests on my 5900X with one thread
+# Below are some examples of the runtime for one iteration of Prime95 for the various tests on my 5900X with one thread
 # The first iteration is also usually the fastest one
 # Selecting two threads usually takes *much* longer than one thread for one iteration in Prime95
 # - Prime95 "Smallest":     4K to   21K - [SSE] ~3-4 Minutes   <|> [AVX] ~8-9 Minutes    <|> [AVX2] ~8-10 Minutes
@@ -194,7 +207,7 @@ stressTestProgram = PRIME95
 # - Prime95 "Moderate":  1344K to 4096K - [SSE] ~7-15 Minutes  <|> [AVX] ~17-30 Minutes  <|> [AVX2] ~17-33 Minutes
 # - Prime95 "Heavy":        4K to 1344K - [SSE] ~15-28 Minutes <|> [AVX] ~43-68 Minutes  <|> [AVX2] ~47-73 Minutes
 # - Prime95 "HeavyShort":   4K to  160K - [SSE] ~6-8 Minutes   <|> [AVX] ~22-24 Minutes  <|> [AVX2] ~23-25 Minutes
-# - y-Cruncher: ~10 Minutes
+#
 # Default: 6m
 runtimePerCore = 6m
 
@@ -204,6 +217,7 @@ runtimePerCore = 6m
 # Setting this to 1 will periodically suspend the stress test program, wait for a bit, and then resume it
 # You should see the CPU load and clock speed drop significantly while the program is suspended and rise back up again
 # Note: This will increase the runtime of the various stress tests as seen in the "runtimePerCore" setting by roughly 10%
+#
 # Default: 1
 suspendPeriodically = 1
 
@@ -228,6 +242,7 @@ coreTestOrder = Default
 
 # Skip a core that has thrown an error in the following iterations
 # If set to 0, this will test a core in the next iterations even if has thrown an error before
+#
 # Default: 1
 skipCoreOnError = 1
 
@@ -235,6 +250,7 @@ skipCoreOnError = 1
 # Stop the whole testing process if an error occurred
 # If set to 0 (default), the stress test programm will be restarted when an error
 # occurs and the core that caused the error will be skipped in the next iteration
+#
 # Default: 0
 stopOnError = 0
 
@@ -244,21 +260,24 @@ stopOnError = 0
 # If Hyperthreading / SMT is disabled, this will automatically be set to 1
 # Currently there's no automatic way to determine which core has thrown an error
 # Setting this to 1 causes higher boost clock speed (due to less heat)
+#
 # Default: 1
 # Maximum: 2
 numberOfThreads = 1
 
 
-# Use only one thread for load generation, but assign the affinity to both virtual (logical) cores
-# This way the Windows Scheduler should bounce the load back and forth between the two virtual cores
+# Use only one thread for load generation, but assign this thread to both virtual (logical) cores
+# This way the Windows Scheduler or the internal CPU scheduler will choose which of both virtual CPU is used
 # This may lead to additional stress situation otherwise not possible
 # This setting has no effect if Hyperthreading / SMT is disabled or if numberOfThreads = 2
+#
 # Default: 0
 assignBothVirtualCoresForSingleThread = 0
 
 
 # The max number of iterations
 # High values are basically unlimited (good for testing over night)
+#
 # Default: 10000
 maxIterations = 10000
 
@@ -266,6 +285,7 @@ maxIterations = 10000
 # Ignore certain cores
 # Comma separated list of cores that will not be tested
 # The enumeration of cores starts with 0
+#
 # Example: coresToIgnore = 0, 1, 2
 # Default: (empty)
 coresToIgnore =
@@ -273,6 +293,7 @@ coresToIgnore =
 
 # Restart the stress test process when a new core is selected
 # This means each core will perform the same sequence of tests during the stress test
+# This setting is best combined with runtimePerCore = auto
 # Note: The monitor doesn't seem to turn off when this setting is enabled
 #
 # Important note:
@@ -284,30 +305,38 @@ coresToIgnore =
 # For example the "Huge"/SSE preset has 19 FFT entries, and tests on my 5900X showed that it roughly takes 13-19 Minutes
 # until all FFT sizes have been tested. The "Large"/SSE seems to take between 18 and 22 Minutes.
 # I've included the measured times in the comment for the "runtimePerCore" setting above.
+# This is why setting runtimePerCore = auto is beneficial when using this setting, to make sure every test is performed
+# for every core.
 #
-# If this setting is disabled, there's a relatively high chance that each core will eventually pass through all of the
-# FFT sizes since Prime95 doesn't stop between the cores and so it evens out after time.
+# If this setting is disabled, a new core will very likely start with a different test / FFT size than the previous one.
+# For longer testing periods (e.g. over night), the tested FFT sizes / algorithms will even out eventually, but if you
+# want to make sure that each core is tested in exactly the same way, you should enable this setting.
 #
 # Default: 0
 restartTestProgramForEachCore = 0
 
 
 # Set a delay between the cores
-# If the "restartTestProgramForEachCore" flag is set, this setting will define the amount of seconds between the end of the
-# run of one core and the start of another
+# If the "restartTestProgramForEachCore" flag is set, this setting will define the amount of seconds between the end of
+# the run of one core and the start of another
 # If "restartTestProgramForEachCore" is 0, this setting has no effect
+# Using this setting may help your CPU to cool down a little between cores, which could result in slightly higher
+# core clocks at the start of the test (which could help in identifying instabilities)
+#
 # Default: 15
 delayBetweenCores = 15
 
 
 # Beep on a core error
 # Play a beep when a core has thrown an error
+#
 # Default: 1
 beepOnError = 1
 
 
 # Flash on a core error
 # Flash the window/icon in the taskbar when a core has thrown an error
+#
 # Default: 1
 flashOnError = 1
 
@@ -317,6 +346,7 @@ flashOnError = 1
 # These WHEA errors do not necessarily cause or show up together with a stress test error, but are indicative
 # of an unstable overclock/undervolt
 # A stable system should not produce any WHEA errors/warnings
+#
 # Default: 0
 lookForWheaErrors = 0
 
@@ -327,11 +357,12 @@ lookForWheaErrors = 0
 [Prime95]
 
 # The test modes for Prime95
-# SSE:    lightest load on the processor, lowest temperatures, highest boost clock
-# AVX:    medium load on the processor, medium temperatures, medium boost clock
-# AVX2:   heavy load on the processor, highest temperatures, lowest boost clock
-# AVX512: only available for certain CPUs (Ryzen 7000, some Intel Alder Lake, etc)
-# CUSTOM: you can define your own settings for Prime. See the "customs" section further below
+# SSE       Lightest load on the processor, lowest temperatures, highest boost clock
+# AVX       Medium load on the processor, medium temperatures, medium boost clock
+# AVX2      Heavy load on the processor, highest temperatures, lowest boost clock
+# AVX512    Only available for certain CPUs (Ryzen 7000, some Intel Alder Lake, etc)
+# CUSTOM    You can define your own settings for Prime. See the "customs" section further below
+#
 # Default: SSE
 mode = SSE
 
@@ -339,14 +370,14 @@ mode = SSE
 # The FFT size preset to test for Prime95
 # These are basically the presets as present in Prime95, plus an additional few
 # Note: If "mode" is set to "CUSTOM", this setting will be ignored
-# Smallest:     4K to   21K - Prime95 preset text: "tests L1/L2 caches, high power/heat/CPU stress"
-# Small:       36K to  248K - Prime95 preset text: "tests L1/L2/L3 caches, maximum power/heat/CPU stress"
-# Large:      426K to 8192K - Prime95 preset text: "stresses memory controller and RAM" (although dedicated memory stress testing is disabled here by default!)
-# Huge:      8960K to   MAX - anything beginning at 8960K up to the highest FFT size (32768K for SSE/AVX, 51200K for AVX2, 65536K for AVX512)
-# All:          4K to   MAX - 4K to up to the highest FFT size (32768K for SSE/AVX, 51200K for AVX2, 65536K for AVX512)
-# Moderate:  1344K to 4096K - special preset, recommended in the "Curve Optimizer Guide Ryzen 5000"
-# Heavy:        4K to 1344K - special preset, recommended in the "Curve Optimizer Guide Ryzen 5000"
-# HeavyShort:   4K to  160K - special preset, recommended in the "Curve Optimizer Guide Ryzen 5000"
+# Smallest         4K to   21K - Prime95 preset text: "tests L1/L2 caches, high power/heat/CPU stress"
+# Small           36K to  248K - Prime95 preset text: "tests L1/L2/L3 caches, maximum power/heat/CPU stress"
+# Large          426K to 8192K - Prime95 preset text: "stresses memory controller and RAM" (although dedicated memory stress testing is disabled here by default!)
+# Huge          8960K to   MAX - Anything beginning at 8960K up to the highest FFT size (32768K for SSE/AVX, 51200K for AVX2, 65536K for AVX512)
+# All              4K to   MAX - 4K to up to the highest FFT size (32768K for SSE/AVX, 51200K for AVX2, 65536K for AVX512)
+# Moderate      1344K to 4096K - special preset, recommended in the "Curve Optimizer Guide Ryzen 5000"
+# Heavy            4K to 1344K - special preset, recommended in the "Curve Optimizer Guide Ryzen 5000"
+# HeavyShort       4K to  160K - special preset, recommended in the "Curve Optimizer Guide Ryzen 5000"
 #
 # You can also define you own range by entering two FFT sizes joined by a hyphen, e.g 36-1344
 #
@@ -412,7 +443,6 @@ FFTSize = Huge
 # with the least used instruction sets for low loads, you would need to switch to "YCRUNCHER_OLD" as the stress test
 # Also note that if you use "YCRUNCHER_OLD", you will also need to adapt the "tests" setting, as the old version uses different names
 #
-#
 # Default: 04-P4P
 mode = 04-P4P
 
@@ -429,30 +459,13 @@ mode = 04-P4P
 # N63 - Classic NTT (v2)        AVX2 Integer      ---|------
 # VT3 - Vector Transform (v3)   AVX2 Float        ----|-----
 #
-#
-# For the old version of y-Cruncher ("YCRUNCHER_OLD" selected as the stress test), there is a different set of tests available:
-# Tag - Test Name               Component        CPU------Mem
-# BKT - Basecase + Karatsuba    Scalar Integer    -|--------
-# BBP - BBP Digit Extraction    Floating-Point    |---------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# SFT - Small In-Cache FFT      Floating-Point    -|--------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# FFT - Fast Fourier Transform  Floating-Point    ---------|    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# N32 - Classic NTT (32-bit)    Scalar Integer    -----|----    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# N64 - Classic NTT (64-bit)    Scalar Integer    ---|------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# HNT - Hybrid NTT              Mixed Workload    -----|----
-# VST - Vector Transform        Floating-Point    ------|---    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# C17 - Code 17 Experiment      AVX2/512 Mixed    ---|------    depending on the selected mode uses AVX2 or AVX512
-#
-# Important:
-# "C17" (Code 17 Experiment) will only work with a AVX2 and AVX512 workload (so with mode "13-HSW ~ Airi" and above)
-#
 # Use a comma separated list
-# Default for "YCRUNCHER_OLD": BKT, BBP, SFT, FFT, N32, N64, HNT, VST
 # Default: BKT, BBP, SFT, SNT, SVT, FFT, N63, VT3
 tests = BKT, BBP, SFT, SNT, SVT, FFT, N63, VT3
 
 
-# For the old version of y-Cruncher ("YCRUNCHER_OLD" selected as the stress test), there is a different set
-# of tests available:
+# Set the test algorithms to run for the "old" version of y-Cruncher ("YCRUNCHER_OLD" selected as the stress test)
+# This older version (v0.7.10.9513) has a different set of tests to choose from
 # Tag - Test Name               Component        CPU------Mem
 # BKT - Basecase + Karatsuba    Scalar Integer    -|--------
 # BBP - BBP Digit Extraction    Floating-Point    |---------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
@@ -482,8 +495,9 @@ testDuration = 60
 
 # Memory allocation for y-Cruncher
 # This allows you to customize the allocated memory for y-Cruncher
-# Set the value in bytes (e.g. 1 GiB = 1073741824)
-# The default value uses 12.8 MiB for one resp. 25.3 MiB for two threads
+# Set the value in bytes or use a "short" notation like e.g. "64MB"
+# The default setting uses 13.4 MB (13418572 bytes, 12.8 MiB) for one resp. 26.7 MB (26567600 bytes, 25.3 MiB) for two threads
+# Note the difference between "MB" (1000 kilobyte = 1000*1000 byte) and "MiB" (1024 kibibyte = 1024*1024 byte)
 #
 # Default: Default
 memory = Default
@@ -513,12 +527,14 @@ enableYCruncherLoggingWrapper = 1
 # FPU:   Starts Aida64 with the "FPU" stress test
 # RAM:   Starts Aida64 with the "Memory" stress test
 # You can also combine multiple stress tests like so: CACHE,CPU,FPU
+#
 # Default: CACHE
 mode = CACHE
 
 
 # Use AVX for Aida64
 # This enables or disables the usage of AVX instructions during Aida64's stress tests
+#
 # Default: 0
 useAVX = 0
 
@@ -526,8 +542,68 @@ useAVX = 0
 # The maximum memory allocation for Aida64
 # Sets the maximum memory usage during the "RAM" stress test in percent
 # Note: Setting this too high can cause your Windows to slow down to a crawl!
+#
 # Default: 90
 maxMemory = 90
+
+
+
+
+# Linpack Xtreme specific settings
+[LinpackXtreme]
+
+# The test mode for Linpack Xtreme
+# You can choose between five settings:
+# SLOWEST
+# SLOW
+# MEDIUM
+# FAST
+# FASTEST
+# These settings define how fast one iteration will be completed (how many GFlops you'll see and the time it takes)
+# It should also affect which instruction set is being used, e.g. FASTEST should enable AVX2, while FAST should
+# use AVX
+# I'm not entirely sure what instructions the other settings use exactly, but I did see a difference in the runtime
+# and GFlops for these settings
+# Here are some examples (not comparable to anything else, since determined with a custom overclock/undervolt setting):
+#             Ryzen 5900X 1 Thread         Intel 14900KF 1 Thread
+#             GFlops    Time    Temp       GFlops    Time    Temp
+# SLOWEST     ~21       ~126s   ~67°C      ~28       ~96s    ~64°C
+# SLOW        ~25       ~105s   ~71°C      ~28       ~94s    ~65°C
+# MEDIUM      ~27       ~99s    ~71°C      ~30       ~89s    ~66°C
+# FAST        ~45       ~59s    ~75°C      ~51       ~52s    ~66°C
+# FASTEST     ~66       ~40s    ~76°C      ~78       ~34s    ~69°C
+#
+# As you can see, the setting has a more pronounced effect on AMD CPUs, but Intel CPUs are affected as well, just not
+# as much on the slower settings
+# This setting makes use of an undocumentented environment variable (MKL_DEBUG_CPU_TYPE) for Intel's MKL library
+# (Math Kernel Library), which is interally used by Linpack Xtreme
+#
+# Default: MEDIUM
+mode = MEDIUM
+
+
+# Memory allocation for Linpack Xtreme
+# Set the amount of memory to use with Linpack Xtreme
+# Enter the value either as a string like 500MB, 2GB, 4GB, etc
+# Or as a raw value in bytes, e.g. 250000000 (which would equal "250MB")
+# Note the difference between "MB" (1000 kilobyte = 1000*1000 byte) and "MiB" (1024 kibibyte = 1024*1024 byte)
+# Also be aware that the memory size directly influences the time it takes to run one test, here are some examples:
+# Setting    Sample runtime    Sample runtime
+#               with MEDIUM      with FASTEST
+# 100MB                  1s              0.5s
+# 250MB                  4s                2s
+# 500MB                 12s                5s
+# 750MB                 23s                9s
+# 1GB                   35s               14s
+# 2GB                   99s               40s    (2GB is the smallest memory size you can choose in standalone Linpack Xtreme)
+# 4GB                  287s              117s
+# 6GB                  534s              216s
+# 30GB         unknown, >1h        not tested    (I aborted after over an hour)
+# Also note that choosing more memory doesn't necessarily help in finding CPU related problems
+# It may help identifying RAM or IMC (Internal Memory Controller) related issues
+#
+# Default: 2GB
+memory = 2GB
 
 
 
@@ -538,6 +614,7 @@ maxMemory = 90
 # The name of the log file
 # The "mode" parameter, the selected stress test program and test mode, as well as the start date & time will be
 # added to the name, with a .log file ending
+#
 # Default: CoreCycler
 name = CoreCycler
 
@@ -548,6 +625,7 @@ name = CoreCycler
 # 2: Write even more information to the log file (debug)
 # 3: Also display the verbose messages in the terminal
 # 4: Also display the debug messages in the terminal
+#
 # Default: 2
 logLevel = 2
 
@@ -561,6 +639,7 @@ logLevel = 2
 # Adding this Source will require Administrator rights (once), but after it has been added, no additional rights
 # are required
 # The entries can be found in the Windows Logs/Application section of the Event Viewer
+#
 # Default: 1
 useWindowsEventLog = 1
 
@@ -571,6 +650,7 @@ useWindowsEventLog = 1
 # Note that some drives have an additional internal write cache, which is NOT affected by this setting
 # Also note that this will not work for all drives/volumes, e.g. if you run the script from a VeraCrypt volume,
 # this setting will have no effect
+#
 # Default: 0
 flushDiskWriteCache = 0
 
@@ -631,7 +711,7 @@ TortureTime = 1
 # Be aware that enabling the Windows Performance Counters may introduce other issues though, see the
 # corresponding setting for an explanation.
 #
-# Default: 0
+# Default: $disableCpuUtilizationCheckDefault
 disableCpuUtilizationCheck = $disableCpuUtilizationCheckDefault
 
 
@@ -641,7 +721,7 @@ disableCpuUtilizationCheck = $disableCpuUtilizationCheckDefault
 # reasons. Please see the readme.txt and the /tools/enable_performance_counter.bat file for a possible way
 # to fix these issues. There's no guarantee that it works though.
 #
-# Default: 0
+# Default: $useWindowsPerformanceCountersForCpuUtilizationDefault
 useWindowsPerformanceCountersForCpuUtilization = $useWindowsPerformanceCountersForCpuUtilizationDefault
 
 
@@ -658,7 +738,7 @@ useWindowsPerformanceCountersForCpuUtilization = $useWindowsPerformanceCountersF
 # They can become corrupted, please see the readme.txt and the /tools/enable_performance_counter.bat file for a possible way
 # to fix these issues. There's no guarantee that it works though.
 #
-# Default: 0
+# Default: $enableCpuFrequencyCheckDefault
 enableCpuFrequencyCheck = $enableCpuFrequencyCheckDefault
 
 
@@ -672,7 +752,7 @@ enableCpuFrequencyCheck = $enableCpuFrequencyCheckDefault
 # This basically would mean "disableCpuUtilizationCheck = 1" and "suspendPeriodically = 0"
 # Not entirely though, as the last check before changing a core is not affected
 #
-# Default: 10
+# Default: $tickIntervalDefault
 tickInterval = $tickIntervalDefault
 
 
@@ -683,7 +763,7 @@ tickInterval = $tickIntervalDefault
 # so setting this value might resolve this issue
 # Don't set this value too high in relation to your "runTimePerCore" though
 #
-# Default: 0
+# Default: $delayFirstErrorCheckDefault
 delayFirstErrorCheck = $delayFirstErrorCheckDefault
 
 
@@ -702,7 +782,7 @@ delayFirstErrorCheck = $delayFirstErrorCheckDefault
 # High
 # RealTime
 #
-# Default: High
+# Default: $stressTestProgramPriorityDefault
 stressTestProgramPriority = $stressTestProgramPriorityDefault
 
 
@@ -712,13 +792,13 @@ stressTestProgramPriority = $stressTestProgramPriorityDefault
 # If disabled (default), the window will either be minimized to the tray (Prime95) or be moveed to the background,
 # without stealing focus of the currently opened window (y-Cruncher)
 #
-# Default: 0
+# Default: $stressTestProgramWindowToForegroundDefault
 stressTestProgramWindowToForeground = $stressTestProgramWindowToForegroundDefault
 
 
 # Debug setting to control the amount of milliseconds the stress test program is being suspended
 #
-# Default: 1000
+# Default: $suspensionTimeDefault
 suspensionTime = $suspensionTimeDefault
 
 
@@ -730,7 +810,7 @@ suspensionTime = $suspensionTimeDefault
 # There's no clear benefit to either of these settings, but if there's a problem with one of these settings,
 # the other one may work better
 #
-# Default: Threads
+# Default: $modeToUseForSuspensionDefault
 modeToUseForSuspension = $modeToUseForSuspensionDefault
 "@
 
@@ -921,12 +1001,45 @@ $stressTestPrograms = @{
             '' # Depends on the selected modeYCruncher
         )
     }
+
+
+    # Linpack Xtreme
+    'linpackxtreme' = @{
+        'displayName'         = 'Linpack Xtreme'
+        'processName'         = '' # Depends on the processor architecture (AMD/Intel)
+        'processNameExt'      = 'exe'
+        'processNameForLoad'  = '' # Depends on the processor architecture (AMD/Intel)
+        'processPath'         = 'test_programs\LinpackXtreme\binaries\x64'
+        'installPath'         = 'test_programs\LinpackXtreme'
+        'configName'          = 'linpack.ini'
+        'requiresCpuCheck'    = $false
+        'configFilePath'      = $null
+        'absolutePath'        = $null
+        'absoluteInstallPath' = $null
+        'fullPathToExe'       = $null
+        'fullPathToLoadExe'   = $null
+        #'command'             = 'cmd /C powershell.exe -Command "$env:OMP_NUM_THREADS = 1; $env:RESIDUALCHECK = 1; $env:MKL_DEBUG_CPU_TYPE = 4; $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; E:\_Overclock\LinpackXtreme\binaries\x64\linpack_amd64.exe ''E:\_Overclock\LinpackXtreme\linpack_2gb_10000iterations.ini'' | Tee-Object -FilePath ''E:\_Overclock\CoreCycler\_tests\linpack_log.txt''"'
+        'command'             = 'cmd /C start /MIN "Linpack Xtreme" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack Xtreme''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %RESIDUALCHECK% %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; [IO.File]::WriteAllLines(''%logFilePath%'', (Get-Date -Format HH:mm:ss)); "%fullPathToLoadExe%" ''%configFilePath%'' | Tee-Object -FilePath ''%logFilePath%'' -Append"'
+        'windowBehaviour'     = 6
+        'testModes'           = @(
+            'SLOWEST',
+            'SLOW',
+            'MEDIUM',
+            'FAST',
+            'FASTEST'
+        )
+        'availableTests'      = @()
+        'defaultTests'        = @()
+        'windowNames'         = @(
+            '^Linpack Xtreme$'
+        )
+    }
 }
 
 
 # Programs where both the main window and the stress test are the same process
 $stressTestProgramsWithSameProcess = @(
-    'prime95', 'prime95_dev', 'ycruncher', 'ycruncher_old'
+    'prime95', 'prime95_dev', 'ycruncher', 'ycruncher_old', 'linpackxtreme'
 )
 
 
@@ -962,15 +1075,21 @@ $counterNames = @{
 }
 
 
+# The amount of memory in the system
+#$totalMemory = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum  # This is returned in Bytes
+$freeMemory  = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB                     # This is returned in KB, so we multiply it
+
+
 # The number of physical and logical cores
 # This also includes hyperthreading resp. SMT (Simultaneous Multi-Threading)
 # We currently only test the first core for each hyperthreaded "package",
-# so e.g. only 12 cores for a 24 threaded Ryzen 5900x
+# so e.g. only 12 cores for a 24 threaded Ryzen 5900X
 # If you disable hyperthreading / SMT, both values should be the same
 # Newer Intel processors have a mixed layout, where some cores only support 1 thread
-$processor       = Get-CimInstance -ClassName Win32_Processor
-$numLogicalCores = $($processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
-$numPhysCores    = $($processor | Measure-Object -Property NumberOfCores -Sum).Sum
+$processor        = Get-CimInstance -ClassName Win32_Processor
+$isIntelProcessor = ($processor.Manufacturer -eq 'GenuineIntel')
+$numLogicalCores  = $($processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+$numPhysCores     = $($processor | Measure-Object -Property NumberOfCores -Sum).Sum
 
 
 # Set the flag if Hyperthreading / SMT is enabled or not
@@ -1018,16 +1137,16 @@ if ($hasMoreThan64Cores) {
 
 # If we haven't got a parentMainWindowHandle, look through the window titles
 if ($parentMainWindowHandle -eq [System.IntPtr]::Zero) {
-    $oldWindowTitle  = $host.UI.RawUI.WindowTitle
+    $oldWindowTitle  = $Host.UI.RawUI.WindowTitle
     $tempWindowTitle = $oldWindowTitle + ' - ' + $scriptProcessId
 
-    $host.UI.RawUI.WindowTitle = $tempWindowTitle
+    $Host.UI.RawUI.WindowTitle = $tempWindowTitle
 
     $parentProcess = Get-Process | Where-Object {
         $_.MainWindowTitle -Match ('^' + $tempWindowTitle + '$')
     }
 
-    $host.UI.RawUI.WindowTitle = $oldWindowTitle
+    $Host.UI.RawUI.WindowTitle = $oldWindowTitle
 
     if ($parentProcess) {
         $parentProcessId = $parentProcess.Id
@@ -1840,6 +1959,57 @@ function Exit-WithFatalError {
 
 <#
 .DESCRIPTION
+    Get a value in bytes from a string value
+    The string may contain "tb", "gb", "mb", "kb" and/or "b" as an abbreviation (SI notation, multiplier 1000)
+    It can also contain "tib", "gib", "mib" and "kib" (multiplier 1024)
+.PARAMETER string
+    [String] The string to convert
+.OUTPUTS
+    [UInt64] The string converted to bytes
+#>
+function Get-ByteValueFromString {
+    param(
+        [Parameter(Mandatory=$true)] [String] $string
+    )
+
+    [UInt64] $finalValue = 0
+    $null = $string -Match '(?-i)((?<tb>\d+(\.\d+)*)\s*tb)*\s*((?<gb>\d+(\.\d+)*)\s*gb)*\s*((?<mb>\d+(\.\d+)*)\s*mb)*\s*((?<kb>\d+(\.\d+)*)\s*kb)*\s*((?<tib>\d+(\.\d+)*)\s*tib)*\s*((?<gib>\d+(\.\d+)*)\s*gib)*\s*((?<mib>\d+(\.\d+)*)\s*mib)*\s*((?<kib>\d+(\.\d+)*)\s*kib)*\s*((?<b>\d+(\.\d+)*)\s*b)*'
+
+    Write-Debug('Convert to bytes from string:        ' + $string)
+
+    # Is it using the short notation, or is it a raw value?
+    $isShortNotation = ($Matches['tb'] -or $Matches['gb'] -or $Matches['mb'] -or $Matches['kb'] -or $Matches['tib'] -or $Matches['gib'] -or $Matches['mib'] -or $Matches['kib'] -or $Matches['b'])
+
+    # Parse the values
+    if ($isShortNotation) {
+        [UInt64] $byteValueSi  = [UInt64] $Matches['tb']  * [Math]::Pow(1000, 4) + [UInt64] $Matches['gb']  * [Math]::Pow(1000, 3) + [UInt64] $Matches['mb']  * [Math]::Pow(1000, 2) + [UInt64] $Matches['kb']  * 1000
+        [UInt64] $byteValueIec = [UInt64] $Matches['tib'] * [Math]::Pow(1024, 4) + [UInt64] $Matches['gib'] * [Math]::Pow(1024, 3) + [UInt64] $Matches['mib'] * [Math]::Pow(1024, 2) + [UInt64] $Matches['kib'] * 1024
+        [UInt64] $byteValue    = [UInt64] $Matches['b']
+        [UInt64] $finalValue   = $byteValueSi + $byteValueIec + $byteValue
+
+        Write-Debug('Byte value from SI notation  (1000): ' + $byteValueSi)
+        Write-Debug('Byte value from IEC notation (1024): ' + $byteValueIec)
+        Write-Debug('Single byte value:                   ' + $byteValue)
+    }
+
+    # No short notation, treat it as a raw byte value
+    else {
+        $null = $string -Match '\d+'
+
+        if ($Matches[0]) {
+            [UInt64] $finalValue = $Matches[0]
+        }
+    }
+
+    Write-Debug('Converted to final byte value:       ' + $finalValue)
+
+    return $finalValue
+}
+
+
+
+<#
+.DESCRIPTION
     Final summary when exiting the script
 .PARAMETER ReturnText
     [Switch] (optional) If set, will only return a the text, not using the Write-X functions
@@ -1856,16 +2026,16 @@ function Show-FinalSummary {
     $differenceTotal = New-TimeSpan -Start $scriptStartDate -End $scriptEndDate
     $runtimeArray    = @()
 
-    if ( $differenceTotal.Days -gt 0 ) {
+    if ($differenceTotal.Days -gt 0) {
         $runtimeArray += ($differenceTotal.Days.ToString() + ' days')
     }
-    if ( $differenceTotal.Hours -gt 0 ) {
+    if ($differenceTotal.Hours -gt 0) {
         $runtimeArray += ($differenceTotal.Hours.ToString().PadLeft(2, '0') + ' hours')
     }
-    if ( $differenceTotal.Minutes -gt 0 ) {
+    if ($differenceTotal.Minutes -gt 0) {
         $runtimeArray += ($differenceTotal.Minutes.ToString().PadLeft(2, '0') + ' minutes')
     }
-    if ( $differenceTotal.Seconds -gt 0 ) {
+    if ($differenceTotal.Seconds -gt 0) {
         $runtimeArray += ($differenceTotal.Seconds.ToString().PadLeft(2, '0') + ' seconds')
     }
 
@@ -1902,7 +2072,7 @@ function Show-FinalSummary {
         if ($numCoresWithError -gt 0) {
             $coresWithErrorString = (($coresWithError | Sort-Object | Get-Unique) -Join ', ')
 
-            if ( $numCoresWithError -eq 1 ) {
+            if ($numCoresWithError -eq 1) {
                 $returnString += ('The following core has thrown an error: ') + [Environment]::NewLine
             }
             else {
@@ -1962,7 +2132,7 @@ function Show-FinalSummary {
         # Display the cores with a WHEA error
         if ($settings.General.lookForWheaErrors -gt 0) {
             if ($numCoresWithWheaError -gt 0) {
-                if ( $numCoresWithWheaError -eq 1 ) {
+                if ($numCoresWithWheaError -eq 1) {
                     $returnString += ('There has been a WHEA error while testing:') + [Environment]::NewLine
                 }
                 else {
@@ -2007,7 +2177,7 @@ function Show-FinalSummary {
     if ($numCoresWithError -gt 0) {
         $coresWithErrorString = (($coresWithError | Sort-Object | Get-Unique) -Join ', ')
 
-        if ( $numCoresWithError -eq 1 ) {
+        if ($numCoresWithError -eq 1) {
             Write-ColorText('The following core has thrown an error: ') Cyan
         }
         else {
@@ -2067,7 +2237,7 @@ function Show-FinalSummary {
     # Display the cores with a WHEA error
     if ($settings.General.lookForWheaErrors -gt 0) {
         if ($numCoresWithWheaError -gt 0) {
-            if ( $numCoresWithWheaError -eq 1 ) {
+            if ($numCoresWithWheaError -eq 1) {
                 Write-ColorText('There has been a WHEA error while testing: ') Cyan
             }
             else {
@@ -2121,7 +2291,7 @@ function Get-PerformanceCounterLocalName {
     $queryResult = $type::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref] $BufferSize)
 
     # 0 = ERROR_SUCCESS
-    if ( $queryResult -eq 0 ) {
+    if ($queryResult -eq 0) {
         $Buffer.ToString().Substring(0, $BufferSize-1)
     }
     else {
@@ -2967,6 +3137,7 @@ function Get-Settings {
     $Script:isYCruncher               = $(if ($settings.General.stressTestProgram -eq 'ycruncher') { $true } else { $false })
     $Script:isYCruncherOld            = $(if ($settings.General.stressTestProgram -eq 'ycruncher_old') { $true } else { $false })
     $Script:isYCruncherWithLogging    = $(if (($isYCruncher -or $isYCruncherOld) -and $settings.yCruncher.enableYCruncherLoggingWrapper) { $true } else { $false })
+    $Script:isLinpackXtreme           = $(if ($settings.General.stressTestProgram -eq 'linpackxtreme') { $true } else { $false })
 
 
     # Set the general "mode" setting
@@ -2978,6 +3149,9 @@ function Get-Settings {
     }
     elseif ($isYCruncher -or $isYCruncherOld) {
         $settings.mode = $settings.yCruncher.mode.ToUpperInvariant()
+    }
+    elseif ($isLinpackXtreme) {
+        $settings.mode = $settings.LinpackXtreme.mode.ToUpperInvariant()
     }
 
 
@@ -3001,6 +3175,26 @@ function Get-Settings {
         else {
             $Script:stressTestPrograms[$settings.General.stressTestProgram]['windowNames']    = @('^.*' + $yCruncherBinary + '\.exe$')
         }
+    }
+
+
+    # Select the binary for Linpack Xtreme, depending on the installed processor
+    # Linpack Xtreme is started via powershell, so that we can both see the output and create a log file
+    if ($isLinpackXtreme) {
+        # Linpack Xtreme uses two different executables, one for Intel and one for AMD (resp. the rest)
+        # The internet says that the linpack library checks for "GenuineIntel", so let's do that as well
+        # linpack_amd64 or linpack_intel64
+        if ($isIntelProcessor) {
+            $linpackXtremeBinary = 'linpack_intel64'
+        }
+        else {
+            $linpackXtremeBinary = 'linpack_amd64'
+        }
+
+        $Script:stressTestPrograms[$settings.General.stressTestProgram]['processName']        = 'powershell'
+        $Script:stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] = $linpackXtremeBinary
+        $Script:stressTestPrograms[$settings.General.stressTestProgram]['fullPathToExe']      = $stressTestPrograms[$settings.General.stressTestProgram]['absolutePath'] + $linpackXtremeBinary
+        $Script:stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe']  = $stressTestPrograms[$settings.General.stressTestProgram]['absolutePath'] + $linpackXtremeBinary
     }
 
 
@@ -3091,7 +3285,7 @@ function Get-FormattedRuntimePerCoreString {
     )
 
     if ($seconds.ToString().ToLowerInvariant() -eq 'auto') {
-        if ($isAida64) {
+        if ($isAida64 -or $isLinpackXtreme) {
             $returnString = [Math]::Round($runtimePerCore/60, 2).ToString() + ' minutes (Auto-Mode)'
         }
         elseif (($isYCruncher -or $isYCruncherOld) -and !$isYCruncherWithLogging) {
@@ -3108,20 +3302,20 @@ function Get-FormattedRuntimePerCoreString {
     $runtimePerCoreStringArray = @()
     $timeSpan = [TimeSpan]::FromSeconds($seconds)
 
-    if ( $timeSpan.Hours -ge 1 ) {
+    if ($timeSpan.Hours -ge 1) {
         $thisString = [String] $timeSpan.Hours + ' hour'
 
-        if ( $timeSpan.Hours -gt 1 ) {
+        if ($timeSpan.Hours -gt 1) {
             $thisString += 's'
         }
 
         $runtimePerCoreStringArray += $thisString
     }
 
-    if ( $timeSpan.Minutes -ge 1 ) {
+    if ($timeSpan.Minutes -ge 1) {
         $thisString = [String] $timeSpan.Minutes + ' minute'
 
-        if ( $timeSpan.Minutes -gt 1 ) {
+        if ($timeSpan.Minutes -gt 1) {
             $thisString += 's'
         }
 
@@ -3129,10 +3323,10 @@ function Get-FormattedRuntimePerCoreString {
     }
 
 
-    if ( $timeSpan.Seconds -ge 1 ) {
+    if ($timeSpan.Seconds -ge 1) {
         $thisString = [String] $timeSpan.Seconds + ' second'
 
-        if ( $timeSpan.Seconds -gt 1 ) {
+        if ($timeSpan.Seconds -gt 1) {
             $thisString += 's'
         }
 
@@ -3406,29 +3600,104 @@ function Get-StressTestProcessInformation {
     # Select the correct one
     $searchForProcess = ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
 
-    Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
-
     # If we're running the wrapper for y-Cruncher to capture the output, we need to check the commandline
     if ($isYCruncherWithLogging) {
         Write-Verbose('enableYCruncherLoggingWrapper has been set, special handling')
 
         $searchForProcess = '*"' + $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '"*'
+
+        Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
+
         $filteredWindowObj = $windowObj | Where-Object {
             $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.ProcessId)" | Select-Object CommandLine).CommandLine
             $hasMatch = $commandLine -like $searchForProcess
 
-            Write-Verbose(' - ProcessId:        ' + $_.ProcessId)
-            Write-Verbose('   searchForProcess: ' + $searchForProcess)
-            Write-Verbose('   CommandLine:      ' + $commandLine)
-            Write-Verbose('   hasMatch:         ' + $hasMatch)
+            Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
+            Write-Verbose('   searchForProcess:  ' + $searchForProcess)
+            Write-Verbose('   CommandLine:       ' + $commandLine)
+            Write-Verbose('   hasMatch:          ' + $hasMatch)
 
             # Return true if the window was identified successfully, so that filteredWindowObj will be the current object
             return $hasMatch
         }
     }
 
+    # Also for Linpack Xtreme we need to check the command line
+    elseif ($isLinpackXtreme) {
+        Write-Verbose('Linpack Xtreme has been selected, special handling')
+
+        $searchForProcess = '*"' + $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '"*'
+
+        Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
+
+        $filteredWindowObj = $windowObj | Where-Object {
+            $cimProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($_.ProcessId)"
+            $commandLine = ($cimProcess | Select-Object CommandLine).CommandLine
+            $hasMatch = $commandLine -like $searchForProcess
+
+            Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
+            Write-Verbose('   searchForProcess:  ' + $searchForProcess)
+            Write-Verbose('   CommandLine:       ' + $commandLine)
+            Write-Verbose('   hasMatch:          ' + $hasMatch)
+
+            # Return true if the window was identified successfully, so that filteredWindowObj will be the current object
+            return $hasMatch
+        }
+
+        # We haven't found the window for the stress test. It may be buried inside the Windows Terminal
+        # If Windows Terminal is installed and the default, we cannot search for the window name directly, as Windows Terminal is hijacking it
+        # I.e. the WindowsTerminal.exe will be the found window, and not the powershell.exe that's running inside it
+        # Therefore, search through all the processes that have the original windowObj as their parent and search their command line
+        # There's apparently no way to get this window by its name then
+        # Search for the executable and select it's parent window instead
+        if (!$filteredWindowObj) {
+            Write-Debug('Couldn''t find the window process, it may be buried inside the Windows Terminal')
+            Write-Debug('Looking for the stress test process instead...')
+
+            # Look for any instances of that process that are run from the CoreCycler directory
+            # Need to escape the backslashes
+            $searchForProcessWql = ($stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']).Replace('\', '\\')
+
+            Write-Debug('Looking for: "' + $searchForProcessWql + '"')
+
+            $cimStressTestProcesses = Get-CimInstance Win32_Process -Filter "ExecutablePath = '$searchForProcessWql'"
+
+            # This should really be just one process now, with one parent process
+            # Also, we have our stress test process now, and wouldn't need to get it again below, but oh well
+            #foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
+            foreach ($currentProcess in $cimStressTestProcesses) {
+                $parentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($currentProcess.ParentProcessId)"
+
+                # We need to filter our main windows again for this found process, otherwise we won't have WinTitle, MainWindowHandle, etc
+                $filteredWindowObj = [GetWindows.Main]::GetWindows() | Where-Object {
+                    $hasMatch = $_.ProcessId -eq $parentProcess.ProcessId
+
+                    if ($hasMatch) {
+                        Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
+                        Write-Verbose('   WinTitle:          ' + $_.WinTitle)
+                        Write-Verbose('   MainWindowHandle:  ' + $_.MainWindowHandle)
+                        Write-Verbose('   Process Path:      ' + $_.ProcessPath)
+                        Write-Verbose('   hasMatch:          ' + $hasMatch)
+                    }
+
+                    return $hasMatch
+                }
+
+                # Break if the window was identified successfully, so that filteredWindowObj will be the current process object
+                if ($filteredWindowObj) {
+                    break
+                }
+            }
+
+            Write-Debug('The window obj we found by searching for the parent:')
+            Write-Debug($filteredWindowObj | Format-Table | Out-String)
+        }
+    }
+
     # Regular y-Cruncher or other stress test programs
     else {
+        Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
+
         $filteredWindowObj = $windowObj | Where-Object {
             #(Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -Match $searchForProcess
             $_.ProcessPath -Match $searchForProcess
@@ -4069,7 +4338,7 @@ function Initialize-Prime95 {
 
 
         # The max size cannot be smaller then the min size
-        if ( $Script:maxFFTSize -lt $Script:minFFTSize ) {
+        if ($Script:maxFFTSize -lt $Script:minFFTSize) {
             Write-Verbose('The maximum FFT size cannot be smaller than the mimimum size, setting it to the same value')
             Write-Verbose('-> ' + $Script:maxFFTSize/1024 + 'K to ' + $Script:minFFTSize/1024 + 'K')
             $Script:maxFFTSize = $Script:minFFTSize
@@ -5074,6 +5343,28 @@ function Initialize-yCruncher {
     $configFile    = $stressTestPrograms[$settings.General.stressTestProgram]['configFilePath']
     $selectedTests = $settings.yCruncher.tests
 
+    # If the parameter is provided, use it, instead use the setting value
+    $numberOfThreads = $(if ($overrideNumberOfThreads -gt 0) { $overrideNumberOfThreads } else { $settings.General.numberOfThreads })
+
+    # Check the memory
+    $memorySizeString = $settings.yCruncher.memory
+
+    if ($memorySizeString -eq 'default' ) {
+        $memory = $(if ($numberOfThreads -gt 1) { 26567600 } else { 13418572 })
+    }
+    else {
+        $memory = Get-ByteValueFromString -string $memorySizeString
+    }
+
+
+    # Too much memory!
+    if ($memory -gt $freeMemory) {
+        $errorText  = 'You have selected too much memory!'
+        $errorText += [Environment]::NewLine + '             Selected Memory: ' + [Math]::Round($memory / 1GB, 1)     + ' GB (' + $memory     + ' bytes) ("memory = ' + $memorySizeString + '")'
+        $errorText += [Environment]::NewLine + '             Free Memory:     ' + [Math]::Round($freeMemory / 1GB, 1) + ' GB (' + $freeMemory + ' bytes)'
+        Exit-WithFatalError -text $errorText
+    }
+
 
     # The "C17" test only works with "13-HSW ~ Airi" and above
     # Let's use the first two digits to determine this (so 00 to 22)
@@ -5085,27 +5376,18 @@ function Initialize-yCruncher {
         }
     }
 
+
     # TODO
     # Check if any of the new tests have a mimimum requirement
 
     $coresLine      = '        LogicalCores : [2]'
-    $memoryLine     = '        TotalMemory : 13418572'
+    $memoryLine     = '        TotalMemory : ' + $memory
     $stopOnError    = '        StopOnError : "true"'
     $secondsPerTest = 60
 
 
-    # If the parameter is provided, use it, instead use the setting value
-    $numberOfThreads = $(if ($overrideNumberOfThreads -gt 0) { $overrideNumberOfThreads } else { $settings.General.numberOfThreads })
-
-
     if ($numberOfThreads -gt 1) {
         $coresLine  = '        LogicalCores : [2 3]'
-        $memoryLine = '        TotalMemory : 26567600'
-    }
-
-    # The allocated memory
-    if ($settings.yCruncher.memory -ne 'default') {
-        $memoryLine = '        TotalMemory : ' + $settings.yCruncher.memory
     }
 
     # Stop on error or not
@@ -5185,7 +5467,7 @@ function Start-yCruncher {
     # Therefore we're now using "cmd /C start" to be able to set a window title...
 
     $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
-    $command         = $(if ($stressTestProgramWindowToForeground) { $command.replace('/MIN ', '') } else { $command })   # Remove the /MIN so that the window isn't placed in the background
+    $command         = $(if ($stressTestProgramWindowToForeground) { $command.Replace('/MIN ', '') } else { $command })   # Remove the /MIN so that the window isn't placed in the background
     $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
     $windowBehaviour = $(if ($stressTestProgramWindowToForeground) { 1 } else { $windowBehaviour })
 
@@ -5359,6 +5641,341 @@ function Close-yCruncher {
 
 <#
 .DESCRIPTION
+    Create the Linpack Xtreme config file
+    Also inserts the correct environment variables into the command string
+.PARAMETER overrideNumberOfThreads
+    [Int] If this is set, use this value instead of $settings.General.numberOfThreads
+.OUTPUTS
+    [Void]
+#>
+function Initialize-LinpackXtreme {
+    param(
+        [Parameter(Mandatory=$false)] $overrideNumberOfThreads
+    )
+
+    Write-Debug('Initializing Linpack Xtreme')
+
+    $fullPathToExe = $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe']
+    $binaryToRun = $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']
+    $binaryWithPathToRun = $fullPathToExe + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']
+
+
+    # Check if the selected binary exists
+    Write-Verbose('Checking if ' + $binaryToRun + ' exists at:')
+    Write-Verbose($binaryWithPathToRun)
+
+    if (!(Test-Path ($binaryWithPathToRun) -PathType Leaf)) {
+        Write-ColorText('FATAL ERROR: Could not find Linpack Xtreme!') Red
+        Write-ColorText('             Trying to run "' + $binaryWithPathToRun + '"') Red
+        Write-ColorText('Make sure to download and extract Linpack Xtreme into the following directory:') Red
+        Write-ColorText($stressTestPrograms[$settings.General.stressTestProgram]['absoluteInstallPath']) Yellow
+        Write-Text ''
+        Write-ColorText('You can download Linpack Xtreme from:') Red
+        Write-ColorText('https://www.ngohq.com/linpack-xtreme.html') Cyan
+        Exit-WithFatalError
+    }
+
+    $configFile = $stressTestPrograms[$settings.General.stressTestProgram]['configFilePath']
+
+    # The memory sizes
+    # Problem Size = sqrt(GB * 1000 * 1000 * 1000 / 8)
+    # http://web.archive.org/web/20240303214716/https://www.netlib.org/utk/people/JackDongarra/faq-linpack.html#_For_HPL_What_problem%20size%20N%20should%20
+    # The values in Linpack Xtreme don't quite match this formula though
+    # sqrt(      100 * 1000 * 1000 / 8) =  3535.5
+    # sqrt(      250 * 1000 * 1000 / 8) =  5590.2
+    # sqrt(      500 * 1000 * 1000 / 8) =  7905.7
+    # sqrt(      750 * 1000 * 1000 / 8) =  9682.5
+    # sqrt( 1 * 1000 * 1000 * 1000 / 8) = 11180.3
+    # sqrt( 2 * 1000 * 1000 * 1000 / 8) = 15811.4  vs  15825  ->  15825/15811.4= 1.00086013888713206927
+    # sqrt( 4 * 1000 * 1000 * 1000 / 8) = 22360.7  vs  22611  ->  22611/22360.7= 1.01119374617073705206
+    # sqrt( 6 * 1000 * 1000 * 1000 / 8) = 27386.1  vs  27818  ->  27818/27386.1= 1.01577077422488050507
+    # sqrt( 8 * 1000 * 1000 * 1000 / 8) = 31622.8  vs  32209  ->  32209/31622.8= 1.01853725792782422809
+    # sqrt(10 * 1000 * 1000 * 1000 / 8) = 35355.3  vs  35000  ->  35000/35355.3= 0.98995058732354130781
+    # sqrt(14 * 1000 * 1000 * 1000 / 8) = 41833.0  vs  42789  ->  42789/41833.0= 1.02285277173523295006
+    # sqrt(30 * 1000 * 1000 * 1000 / 8) = 61237.2  vs  62897  ->  62897/61237.2= 1.02710443978496730745
+    #
+    #  Preset    Problem Size    Working Set    Paged Memory Size    Runtime (5)    Runtime (3)
+    #  100MB      3535             122884096      138047488             0.5s          1.1s
+    #  250MB      5590             278528000      293904384             1.8s          4.4s
+    #  500MB      7905             528187392      544448512             5.1s         12.4s
+    #  750MB      9682             778194944      794996736             9.3s         22.8s
+    #  1GB       11180            1027702784     1045536768            14.3s         34.8s
+    #            15811            2027700224     2047574016            39.9s
+    #  2GB*      15825            2031202304     2051129344            40.1s         98.8s
+    #  4GB*      22611            4117999616     4141985792           117s          287s
+    #  6GB*      27818            6218633216     6246969344           216s          534s
+    #  8GB*      32209            8325988352     8358510592
+    # 10GB*      35000            9826689024     9862184960
+    # 14GB*      42789           14673854464    14719131648
+    # 30GB*      62897           31677247488    31754022912                         >1h
+    # * = original preset
+
+    # Calculate the problem size from the provided memory string
+    # Problem Size = sqrt(MB * 1000 * 1000 / 8)
+    # Problem Size = sqrt(GB * 1000 * 1000 * 1000 / 8)
+    # Problem Size = sqrt(TB * 1000 * 1000 * 1000 * 1000 / 8)
+    $memorySizeString = $settings.LinpackXtreme.memory.ToLowerInvariant()
+
+    # Also, let's hard code the problem sizes that are already defined in Linpack Xtreme
+    # Calculating these ourselves would result in slightly different values
+    # But let's keep these values to be consistent with the standalone version of Linpack Xtreme
+    $hardCodedProblemSizes = @{
+        '2GB'  = 15825
+        '4GB'  = 22611
+        '6GB'  = 27818
+        '8GB'  = 32209
+        '10GB' = 35000
+        '14GB' = 42789
+        '30GB' = 62897
+    }
+
+    # The default value
+    $problemSize = $hardCodedProblemSizes['2GB']
+
+    # Get the memory size in bytes
+    [UInt64] $memory = Get-ByteValueFromString -string $memorySizeString
+
+    # Check for a hardcoded value
+    $gbValue = ($memory / [Math]::Pow(1000, 3)).ToString() + 'GB'
+
+    if ($hardCodedProblemSizes[$gbValue]) {
+        $problemSize = $hardCodedProblemSizes[$gbValue]
+        Write-Debug('Found a hardcoded problem size: "' + $memorySizeString + '" -> ' + $gbValue + ' -> ' + $problemSize)
+    }
+
+    # For any other memory value, calculate the problem size ourself
+    else {
+        $problemSize = [Math]::Floor([Math]::Sqrt($memory / 8))
+        Write-Debug('Calculated the problem size: "' + $memorySizeString + '" -> ' + $memory + ' -> ' + $problemSize)
+    }
+
+    Write-Debug('Selected Memory: ' + [Math]::Round($memory / 1GB, 1)     + ' GB (' + $memory     + ' bytes) ("memory = ' + $memorySizeString + '")')
+    Write-Debug('Free Memory:     ' + [Math]::Round($freeMemory / 1GB, 1) + ' GB (' + $freeMemory + ' bytes)')
+    Write-Debug('The final problem size:   ' + $problemSize)
+
+    if ($problemSize -lt 1) {
+        $errorText  = 'The Linpack Xtreme memory size is too small or the problem size could not be calculated!'
+        $errorText += [Environment]::NewLine + '             (memory = "' + $memorySizeString + '", problem size = ' + $problemSize + ')'
+        Exit-WithFatalError -text $errorText
+    }
+
+    # Too much memory!
+    if ($memory -gt $freeMemory) {
+        $errorText  = 'You have selected too much memory!'
+        $errorText += [Environment]::NewLine + '             Selected Memory: ' + [Math]::Round($memory / 1GB, 1)     + ' GB (' + $memory     + ' bytes) ("memory = ' + $memorySizeString + '")'
+        $errorText += [Environment]::NewLine + '             Free Memory:     ' + [Math]::Round($freeMemory / 1GB, 1) + ' GB (' + $freeMemory + ' bytes)'
+        Exit-WithFatalError -text $errorText
+    }
+
+
+    $configEntries = @(
+        'Linpack data file'
+        'Linpack Xtreme v1.1.5 by Regeneration (64-bit)'
+        '1'             # Unknown
+        $problemSize    # The problem size, calculated from the memory size
+        $problemSize    # Yeah, add it twice
+        '999999'        # Number of iterations. Not sure if there's an upper limit
+        '4'             # Unknown
+    )
+
+    [System.IO.File]::WriteAllLines($configFile, $configEntries)
+
+    # Check if the file exists
+    if (!(Test-Path $configFile -PathType Leaf)) {
+        Exit-WithFatalError -text ('Could not create the config file at ' + $configFile + '!')
+    }
+
+    Write-Debug('Also modifying the startup command, because Linpack Xtreme requires an')
+    Write-Debug('environment variable for the number of threads')
+
+    # Generate the command line
+    # Linpack Xtreme uses environment variables to set the number of threads
+    # If we're restarting the program, the %OMP_NUM_THREADS% variable has already been replaced
+    # So also search for the already replaced strings
+    $data = @{
+        '%OMP_NUM_THREADS%'            = 1
+        '\$env:OMP_NUM_THREADS = \d+;' = 1
+    }
+
+    # If the parameter to override the number of threads is provided, use it, otherwise use the setting value
+    $numberOfThreads = $(if ($overrideNumberOfThreads -gt 0) { $overrideNumberOfThreads } else { $settings.General.numberOfThreads })
+    $data['%OMP_NUM_THREADS%'] = $numberOfThreads
+    $data['\$env:OMP_NUM_THREADS = \d+;'] = [String]::Format('$env:OMP_NUM_THREADS = {0};', $numberOfThreads)
+
+    $command = $stressTestPrograms['linpackxtreme']['command']
+
+    foreach ($key in $data.Keys) {
+        # -Replace uses regex, .Replace() doesn't
+        $command = $command -Replace $key, $data[$key]
+    }
+
+    $Script:stressTestPrograms['linpackxtreme']['command'] = $command
+}
+
+
+
+<#
+.DESCRIPTION
+    Open Linpack Xtreme and set global script variables
+.PARAMETER overrideNumberOfThreads
+    [Int] If this is set, use this value instead of $settings.General.numberOfThreads for the expected number of threads
+.OUTPUTS
+    [Void]
+#>
+function Start-LinpackXtreme {
+    param(
+        [Parameter(Mandatory=$false)] $overrideNumberOfThreads
+    )
+
+    Write-Verbose('Starting Linpack Xtreme')
+
+    $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
+    $command         = $(if ($stressTestProgramWindowToForeground) { $command.Replace('/MIN ', '') } else { $command })   # Remove the /MIN so that the window isn't placed in the background
+    $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
+    $windowBehaviour = $(if ($stressTestProgramWindowToForeground) { 1 } else { $windowBehaviour })
+
+    Write-Debug('Trying to start the stress test with the command:')
+    Write-Debug($command)
+
+    # We're using Powershell to open the binary, since we can use the Tee-Object command to copy the output to a log file
+    $processId = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
+
+
+    # This might be necessary to correctly read the process. Or not
+    Start-Sleep -Milliseconds 500
+
+    # Get the main window and stress test processes, as well as the main window handle
+    # This also works for windows minimized to the tray
+    Get-StressTestProcessInformation $true $overrideNumberOfThreads
+
+    # This is to find the exact counter path, as you might have multiple processes with the same name
+    if ($enablePerformanceCounters) {
+        try {
+            # Start a background job to get around the cached Get-Counter value
+            $Script:processCounterPathId = Start-Job -ScriptBlock {
+                $counterPathName = $args[0].'FullName'
+                $processId = $args[1]
+                ((Get-Counter $counterPathName -ErrorAction Ignore).CounterSamples | Where-Object { $_.RawValue -eq $processId }).Path
+            } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
+
+            if (!$processCounterPathId) {
+                Exit-WithFatalError -text ('Could not find the counter path for the y-Cruncher instance!')
+            }
+
+            $Script:processCounterPathTime = $processCounterPathId -Replace $counterNames['SearchString'], $counterNames['ReplaceString']
+
+            Write-Verbose('The Performance Process Counter Path for the ID:')
+            Write-Verbose($processCounterPathId)
+            Write-Verbose('The Performance Process Counter Path for the Time:')
+            Write-Verbose($processCounterPathTime)
+        }
+        catch {
+            Write-Debug('Could not query the process path')
+            Write-Debug('Error: ' + $_)
+        }
+    }
+}
+
+
+
+<#
+.DESCRIPTION
+    Close Linpack Xtreme
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
+function Close-LinpackXtreme {
+    Write-Verbose('Trying to close Linpack Xtreme')
+
+
+    # If there is no windowProcessMainWindowHandle id
+    # Try to get it
+    if (!$windowProcessMainWindowHandle) {
+        Get-StressTestProcessInformation $false -1   # Don't exit the script when the process or threads are not found
+    }
+
+    # If we now have a windowProcessMainWindowHandle, try to close the window
+    if ($windowProcessMainWindowHandle) {
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
+
+        if (!$windowProcess) {
+            Write-Verbose('The window process wasn''t found, no need to close it')
+        }
+        else {
+            # Is the stress test process still running?
+            $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
+
+            # If yes, the process may be suspended
+            if ($stressTestProcess) {
+                $null = Resume-Process -process $stressTestProcess -ignoreError $true
+            }
+
+
+            Write-Verbose('Trying to gracefully close Linpack Xtreme')
+            Write-Debug('The window process main window handle: ' + $windowProcessMainWindowHandle)
+
+            # Send the message to close the main window
+            # The window may still be blocked from the stress test process being closed, so repeat if necessary
+            try {
+                for ($i = 1; $i -le 5; $i++) {
+                    Write-Debug('Try ' + $i)
+                    [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+
+                    # We've send the close request, let's wait a second for it to actually exit
+                    if ($windowProcess -and !$windowProcess.HasExited) {
+                        $timestamp = Get-Date -Format HH:mm:ss
+                        Write-Verbose($timestamp + ' - Sent the close message, waiting for Linpack Xtreme to exit')
+                        $null = $windowProcess.WaitForExit(1000)
+                    }
+
+                    $hasExited = $windowProcess.HasExited
+                    Write-Verbose('         - ... has exited: ' + $hasExited)
+
+                    if ($windowProcess.HasExited) {
+                        Write-Verbose('The main window has exited')
+
+                        # But is the process still there?
+                        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
+
+                        if (!$windowProcess) {
+                            Write-Verbose('The main window has truly exited')
+                            break
+                        }
+                        else {
+                            Write-Verbose('The main window is still there, trying again')
+                        }
+                    }
+                }
+            }
+            catch {
+                Write-Verbose('Could not gracefully close Linpack Xtreme, proceeding to kill the process')
+                Write-Debug('Error: ' + $_)
+            }
+        }
+    }
+
+
+    # If the window is still here at this point, just kill the process
+    $windowProcess = Get-Process $processName -ErrorAction Ignore
+
+    if ($windowProcess) {
+        Write-Verbose('Could not gracefully close Linpack Xtreme, killing the process')
+
+        #'The process is still there, killing it'
+        # Unfortunately this will leave any tray icons behind
+        Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
+    }
+    else {
+        Write-Verbose('Linpack Xtreme closed')
+    }
+}
+
+
+
+<#
+.DESCRIPTION
     Initialize the selected stress test program
 .PARAMETER overrideNumberOfThreads
     [Int] If this is set, use this value instead of $settings.General.numberOfThreads
@@ -5382,6 +5999,9 @@ function Initialize-StressTestProgram {
     }
     elseif ($isYCruncher -or $isYCruncherOld) {
         Initialize-yCruncher $overrideNumberOfThreads
+    }
+    elseif ($isLinpackXtreme) {
+        Initialize-LinpackXtreme $overrideNumberOfThreads
     }
     else {
         Exit-WithFatalError -text 'No stress test program selected!'
@@ -5418,6 +6038,9 @@ function Start-StressTestProgram {
     elseif ($isYCruncher -or $isYCruncherOld) {
         Start-yCruncher $overrideNumberOfThreads
     }
+    elseif ($isLinpackXtreme) {
+        Start-LinpackXtreme $overrideNumberOfThreads
+    }
     else {
         Exit-WithFatalError -text 'No stress test program selected!'
     }
@@ -5448,6 +6071,9 @@ function Close-StressTestProgram {
     }
     elseif ($isYCruncher -or $isYCruncherOld) {
         Close-yCruncher
+    }
+    elseif ($isLinpackXtreme) {
+        Close-LinpackXtreme
     }
     else {
         Exit-WithFatalError -text 'No stress test program selected!'
@@ -5486,6 +6112,8 @@ function Test-StressTestProgrammIsRunning {
     # What type of error occurred (PROCESSMISSING, CALCULATIONERROR, CPULOAD)
     $errorType = $null
 
+    Write-Debug($timestamp + ' - Checking for stress test errors')
+
 
     # 1. The process doesn't exist anymore, immediate error
     if (!$checkProcess) {
@@ -5494,53 +6122,86 @@ function Test-StressTestProgrammIsRunning {
     }
 
 
-    # 2. If using Prime95, parse the results.txt file and look for an error message
-    # y-Cruncher produces no log file
-    if (!$stressTestError -and $isPrime95) {
+    # 2. Parse the log file if it exists and look for an error
+    if (!$stressTestError) {
 
-        # Look for a line with an "error" string in the new log entries
-        $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' } | Select-Object -Last 1
+        # If using Prime95, parse the results.txt file and look for an error message
+        if ($isPrime95) {
+            Write-Debug('           Checking the new Prime95 log entries...')
 
-        # Found the "error" string
-        if ($errorResults) {
-            # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-            $stressTestError = $errorResults.Line
-            $errorType = 'CALCULATIONERROR'
+            # Look for a line with an "error" string in the new log entries
+            $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' } | Select-Object -Last 1
 
-            Write-Verbose($timestamp)
-            Write-Verbose('Found an error in the new entries of the results.txt!')
+            # Found the "error" string
+            if ($errorResults) {
+                # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                $stressTestError = $errorResults.Line
+                $errorType = 'CALCULATIONERROR'
+
+                Write-Verbose($timestamp)
+                Write-Verbose('Found an error in the new entries of the results.txt!')
+            }
         }
-    }
 
 
-    # 2a. But we can use a wrapper to capture the output for yCruncher!
-    if (!$stressTestError -and $isYCruncherWithLogging) {
-        # The messages y-Cruncher displays:
-        # Exception Encountered: XYZ
-        #
-        # <ERROR MESSAGE>
-        # <May have multiple lines>
-        #
-        #
-        # Error(s) encountered on logical core X
-        #
-        # Failed  Test Speed <...>
-        # Errors encountered. Stopping test...
+        # We can use a wrapper to capture the output for yCruncher
+        elseif ($isYCruncherWithLogging) {
+            Write-Debug('           Checking the new y-Cruncher log entries...')
 
-        # Look for a line with an "error" string in the new log entries
-        $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
+            # The messages y-Cruncher displays:
+            # Exception Encountered: XYZ
+            #
+            # <ERROR MESSAGE>
+            # <May have multiple lines>
+            #
+            #
+            # Error(s) encountered on logical core X
+            #
+            # Failed  Test Speed <...>
+            # Errors encountered. Stopping test...
 
-        # Found the "error" string
-        if ($errorResults) {
-            # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-            $stressTestError = $errorResults.Line
-            $errorType = 'CALCULATIONERROR'
+            # Look for a line with an "error" string in the new log entries
+            $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
 
-            Write-Verbose($timestamp)
-            Write-Verbose('Found an error in the new entries of the y-Cruncher output!')
+            # Found the "error" string
+            if ($errorResults) {
+                # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                $stressTestError = $errorResults.Line
+                $errorType = 'CALCULATIONERROR'
 
-            # For y-Cruncher, remove the core number, since it doesn't represent the actual core being tested
-            $stressTestError = $stressTestError -Replace '\s*\d+\.', ''
+                Write-Verbose($timestamp)
+                Write-Verbose('Found an error in the new entries of the y-Cruncher output!')
+
+                # For y-Cruncher, remove the core number, since it doesn't represent the actual core being tested
+                $stressTestError = $stressTestError -Replace '\s*\d+\.', ''
+            }
+        }
+
+
+        # Linpack Xtreme also has a log file, created by Powershell's Tee-Object
+        elseif ($isLinpackXtreme) {
+            Write-Debug('           Checking the new Linpack Xtreme log entries...')
+
+            Write-Debug('           The new log file entries to check:')
+            $newLogEntries | ForEach-Object {
+                Write-Debug('           [Line ' + $_.LineNumber + '] ' + $_.Line)
+            }
+
+            # Look for a line with a "fail" string in the new log entries
+            $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
+
+            Write-Debug('           errorResults:')
+            Write-Debug('           ' + $(if ($errorResults) { $errorResults } else { 'null' }))
+
+            # Found the "fail" string
+            if ($errorResults) {
+                # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                $stressTestError = $errorResults.Line
+                $errorType = 'CALCULATIONERROR'
+
+                Write-Verbose($timestamp)
+                Write-Verbose('Found an error in the new entries of the Linpack Xtreme output!')
+            }
         }
     }
 
@@ -5601,11 +6262,24 @@ function Test-StressTestProgrammIsRunning {
 
 
                 # For y-Cruncher with logging enabled
-                if ($isYCruncherWithLogging) {
+                elseif ($isYCruncherWithLogging) {
                     # Look for a line with an "error" string in the new log entries
                     $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
 
                     # Found the "error" string
+                    if ($errorResults) {
+                        # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                        $stressTestError = $errorResults.Line
+                        $errorType = 'CALCULATIONERROR'
+                    }
+                }
+
+                # For Linpack Xtreme
+                elseif ($isLinpackXtreme) {
+                    # Look for a line with a "fail" string in the new log entries
+                    $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
+
+                    # Found the "fail" string
                     if ($errorResults) {
                         # We don't need to check for a false alarm anymore, as we're already checking only new log entries
                         $stressTestError = $errorResults.Line
@@ -5687,11 +6361,24 @@ function Test-StressTestProgrammIsRunning {
 
 
                 # For y-Cruncher with logging enabled
-                if ($isYCruncherWithLogging) {
+                elseif ($isYCruncherWithLogging) {
                     # Look for a line with an "error" string in the new log entries
                     $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
 
                     # Found the "error" string
+                    if ($errorResults) {
+                        # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                        $stressTestError = $errorResults.Line
+                        $errorType = 'CALCULATIONERROR'
+                    }
+                }
+
+                # For Linpack Xtreme
+                elseif ($isLinpackXtreme) {
+                    # Look for a line with a "fail" string in the new log entries
+                    $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
+
+                    # Found the "fail" string
                     if ($errorResults) {
                         # We don't need to check for a false alarm anymore, as we're already checking only new log entries
                         $stressTestError = $errorResults.Line
@@ -5827,9 +6514,9 @@ function Test-StressTestProgrammIsRunning {
         $cpuNumberString = (($cpuNumbersArray | Sort-Object) -Join ' or ')
 
 
-        # If running Prime95 or y-Cruncher with logging wrapper, and if we haven't already found a log entry,
+        # If running a stress with logging capabilities, and if we haven't already found a log entry,
         # make one additional check if the log file now has an error entry
-        if (($isPrime95 -or $isYCruncherWithLogging) -and $errorType -ne 'CALCULATIONERROR') {
+        if (($isPrime95 -or $isYCruncherWithLogging -or $isLinpackXtreme) -and $errorType -ne 'CALCULATIONERROR') {
             $timestamp = Get-Date -Format HH:mm:ss
 
             Write-Verbose($timestamp + ' - The stress test program has a log file, trying to look for an error message in the log')
@@ -5841,10 +6528,16 @@ function Test-StressTestProgrammIsRunning {
                 $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' } | Select-Object -Last 1
             }
 
-            # y-Cruncher: Look for error(s)
+            # y-Cruncher: Look for "error(s)"
             elseif ($isYCruncherWithLogging) {
                 $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
             }
+
+            # Linpack Xtreme: Look for "fail"
+            elseif ($isLinpackXtreme) {
+                $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
+            }
+
 
             # Found the "error" string
             if ($errorResults) {
@@ -6151,6 +6844,31 @@ function Test-StressTestProgrammIsRunning {
         # y-Cruncher without the wrapper
         elseif ($isYCruncher -or $isYCruncherOld) {
             Write-Verbose('The stress test program is y-Cruncher, no detailed error detection available')
+        }
+
+
+        # Linpack Xtreme
+        elseif ($isLinpackXtreme) {
+            Write-Verbose('The stress test program is Linpack Xtreme, no additional error details available')
+
+            # Look for the line the error message appears in
+            $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
+
+            if ($errorResults) {
+                Write-ColorText('ERROR: The line with the error:') Magenta
+                Write-ColorText($errorResults.Line) Magenta
+            }
+
+            # Get the last 10 rows
+            $lastTenRows = $allLogEntries | Select-Object -Last 10
+
+            Write-Verbose('The last 10 entries of the output:')
+            $lastTenRows | ForEach-Object -Begin {
+                $index = $allLogEntries.Count - 10
+            } -Process {
+                Write-Verbose('- [Line ' + $index + '] ' + $_)
+                $index++
+            }
         }
 
 
@@ -7197,8 +7915,8 @@ try {
                 Write-Verbose(('ID of "' + $_ + '": ').PadRight(43, ' ') + $(if ($counterNameIds[$_]) { $counterNameIds[$_] } else { 'NOT FOUND!' }))
             }
 
-            foreach ( $performanceCounterName in $englishCounterNames ) {
-                if ( !$counterNameIds[$performanceCounterName] -or $counterNameIds[$performanceCounterName] -eq 0 ) {
+            foreach ($performanceCounterName in $englishCounterNames) {
+                if (!$counterNameIds[$performanceCounterName] -or $counterNameIds[$performanceCounterName] -eq 0) {
                     Throw 'Could not get the ID for the Performance Counter Name "' + $performanceCounterName + '" from the registry!'
                 }
 
@@ -7319,10 +8037,12 @@ try {
 
         $command = $stressTestPrograms[$testProgram.Name]['command']
 
-        # Special behaviour if the custom logging wrapper for y-Cruncher is activated
+
+        # Special handling if the custom logging wrapper for y-Cruncher is activated
         if (($testProgram.Name -eq 'ycruncher' -or $testProgram.Name -eq 'ycruncher_old') -and $isYCruncherWithLogging) {
             $stressTestPrograms[$testProgram.Name]['fullPathToLoadExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processNameForLoad']
 
+            # Use the command for logging, not the regular command
             $command = $stressTestPrograms[$testProgram.Name]['commandWithLogging']
 
             $Script:stressTestLogFileName = 'yCruncher_' + $scriptStartDateTime + '_mode_' + $settings.mode + '.txt'
@@ -7334,8 +8054,67 @@ try {
             $data.add('%logFilePath%', $stressTestLogFilePath)
         }
 
+        # Special handling for Linpack Xtreme
+        if ($testProgram.Name -eq 'linpackxtreme') {
+            $stressTestPrograms[$testProgram.Name]['fullPathToLoadExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processNameForLoad']
+
+            $Script:stressTestLogFileName = 'LinpackXtreme_' + $settings.LinpackXtreme.mode.ToUpperInvariant() + '_' + $scriptStartDateTime + '.txt'
+            $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+
+            $data['%fileName%'] = ($testProgram.Value['processNameForLoad'] + '.' + $testProgram.Value['processNameExt'])
+            $data.add('%fullPathToLoadExe%', $testProgram.Value['fullPathToLoadExe'] + '.' + $testProgram.Value['processNameExt'])
+            $data.add('%logFilePath%', $stressTestLogFilePath)
+
+
+            # Some other environment variables also need to be set, depending on if we're running on AMD or Intel
+            # AMD:
+            # RESIDUALCHECK = 1
+            # MKL_DEBUG_CPU_TYPE = 4
+            # Intel:
+            # RESIDUALCHECK not set at all
+            # MKL_DEBUG_CPU_TYPE not set at all
+            # Maybe we can influence which instructions to use by setting MKL_DEBUG_CPU_TYPE?
+            # At least when set to 0 (instead of completely removing it), the GFlops dropped significantly on a 14900KF
+            #                             Ryzen 5900X                  Intel 14900KF
+            #                             GFlops    Time    Temp       GFlops    Time    Temp
+            # MKL_DEBUG_CPU_TYPE missing  crash                        ~78       ~34s    ~69°C
+            # MKL_DEBUG_CPU_TYPE = 0      crash                        ~28       ~96s    ~64°C
+            # MKL_DEBUG_CPU_TYPE = 1      ~21       ~126s   ~67°C      ~30       ~87s    ~66°C (when set to only CPU 1: Intel MKL ERROR: CPU 1 is not supported)
+            # MKL_DEBUG_CPU_TYPE = 2      ~25       ~105s   ~71°C      ~28       ~94s    ~65°C
+            # MKL_DEBUG_CPU_TYPE = 3      ~27       ~99s    ~71°C      ~30       ~89s    ~66°C
+            # MKL_DEBUG_CPU_TYPE = 4      ~45       ~59s    ~75°C      ~51       ~52s    ~66°C
+            # MKL_DEBUG_CPU_TYPE = 5      ~66       ~40s    ~76°C      ~78       ~34s    ~69°C
+            #
+            #            AMD    INTEL
+            # SLOWEST    1      0
+            # SLOW       2      2
+            # MEDIUM     3      3
+            # FAST       4      4
+            # FASTEST    5      5
+
+            # Set the MKL_DEBUG_CPU_TYPE depending on the mode and the processor type
+            $MKL_DEBUG_CPU_TYPES = @{
+                'SLOWEST' = @{ 'amd' = 1; 'intel' = 0 }
+                'SLOW'    = @{ 'amd' = 2; 'intel' = 2 }
+                'MEDIUM'  = @{ 'amd' = 3; 'intel' = 3 }
+                'FAST'    = @{ 'amd' = 4; 'intel' = 4 }
+                'FASTEST' = @{ 'amd' = 5; 'intel' = 5 }
+            }
+
+            $processorType = $(if ($isIntelProcessor) { 'intel' } else { 'amd' })
+
+            $data.add('%MKL_DEBUG_CPU_TYPE%', '$env:MKL_DEBUG_CPU_TYPE = ' + $MKL_DEBUG_CPU_TYPES[$settings.LinpackXtreme.mode.ToUpperInvariant()][$processorType] + ';')
+
+
+            # Don't set RESIDUALCHECK for either processor type (I think, it was set to 1 for AMD)
+            $data.add('%RESIDUALCHECK%', '')
+        }
+
+
+
+        # Replace the variables in the command to start the stress test
         foreach ($key in $data.Keys) {
-            $command = $command.replace($key, $data[$key])
+            $command = $command.Replace($key, $data[$key])
         }
 
         $stressTestPrograms[$testProgram.Name]['command'] = $command
@@ -7421,16 +8200,10 @@ try {
 
     # It may be set to "auto"
     if ($settings.General.runtimePerCore.ToString().ToLowerInvariant() -eq 'auto') {
-        # For Prime95, we're setting the runtimePerCore to 24 hours as a temporary value
-        # For Aida64 and y-Cruncher, we're using 10 minutes
-        if ($isPrime95) {
-            $runtimePerCore = 24 * 60 * 60  # 24 hours as a temporary value
-            $useAutomaticRuntimePerCore = $true
-        }
-        elseif ($isAida64) {
-            $runtimePerCore = 10 * 60
-        }
-        elseif ($isYCruncherWithLogging) {
+        # For Prime95 and y-Cruncher with logging wrapper, we're setting the runtimePerCore to 24 hours as a temporary value
+        # For y-Cruncher without logging, we're trying to estimate based on the selected/available tests
+        # For Aida64 and Linpack Xtreme, we're using 10 minutes
+        if ($isPrime95 -or $isYCruncherWithLogging) {
             $runtimePerCore = 24 * 60 * 60  # 24 hours as a temporary value
             $useAutomaticRuntimePerCore = $true
         }
@@ -7438,6 +8211,10 @@ try {
         elseif ($isYCruncher -or $isYCruncherOld) {
             # Selected tests * duration of test + time in suspension + buffer
             $runtimePerCore = Get-EstimatedYCruncherRuntimePerCore
+        }
+        # Otherwise we're just using 10 minutes
+        else {
+            $runtimePerCore = 10 * 60
         }
     }
 
@@ -7587,6 +8364,18 @@ try {
     # Display some initial information
     Write-ColorText('Stress test program: .................. ' + $selectedStressTestProgram.ToUpperInvariant()) Cyan
     Write-ColorText('Selected test mode: ................... ' + $settings.mode.ToUpperInvariant()) Cyan
+
+    if ($isPrime95 -and $settings.mode -ne 'CUSTOM') {
+        Write-ColorText('Selected FFT size: .................... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
+    }
+    if ($isYCruncher -or $isYCruncherOld) {
+        Write-ColorText('Selected y-Cruncher tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
+        Write-ColorText('Duration per test: .................... ' + ($settings.yCruncher.testDuration)) Cyan
+    }
+    if ($isLinpackXtreme) {
+        Write-ColorText('Memory size: .......................... ' + ($settings.LinpackXtreme.memory.ToUpperInvariant())) Cyan
+    }
+
     Write-ColorText('Detected processor: ................... ' + $processor.Name) Cyan
     Write-ColorText('Logical/Physical cores: ............... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
     Write-ColorText('Hyperthreading / SMT is: .............. ' + ($(if ($isHyperthreadingEnabled) { 'ENABLED' } else { 'DISABLED' }))) Cyan
@@ -7611,7 +8400,7 @@ try {
 
     if ($settings.mode -eq 'CUSTOM') {
         Write-ColorText('') Cyan
-        Write-ColorText('Custom settings:') Cyan
+        Write-ColorText('Custom Prime95 settings:') Cyan
         Write-ColorText('--------------------------------------------------------------------------------') Cyan
         Write-ColorText('CpuSupportsAVX    = ' + $settings.Custom.CpuSupportsAVX) Cyan
         Write-ColorText('CpuSupportsAVX2   = ' + $settings.Custom.CpuSupportsAVX2) Cyan
@@ -7622,16 +8411,6 @@ try {
         Write-ColorText('TortureMem        = ' + $settings.Custom.TortureMem) Cyan
         Write-ColorText('TortureTime       = ' + $settings.Custom.TortureTime) Cyan
     }
-    else {
-        if ($isPrime95) {
-            Write-ColorText('Selected FFT size: .................... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
-        }
-        if ($isYCruncher -or $isYCruncherOld) {
-            Write-ColorText('Selected y-Cruncher tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
-            Write-ColorText('Duration per test: .................... ' + ($settings.yCruncher.testDuration)) Cyan
-        }
-    }
-
 
     Write-ColorText('') Cyan
     Write-ColorText('--------------------------------------------------------------------------------') Cyan
@@ -7640,10 +8419,10 @@ try {
     # Display the log file location(s)
     Write-ColorText('The log files for this run are stored in:') Cyan
     Write-ColorText($logFilePathAbsolute) Cyan
-    Write-ColorText((' - CoreCycler:').PadRight(17, ' ') + $logFileName) Cyan
+    Write-ColorText((' - CoreCycler:').PadRight(19, ' ') + $logFileName) Cyan
 
     if ($stressTestLogFileName) {
-        Write-ColorText((' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ':').PadRight(17, ' ') + $stressTestLogFileName) Cyan
+        Write-ColorText((' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ':').PadRight(19, ' ') + $stressTestLogFileName) Cyan
     }
 
     Write-ColorText('--------------------------------------------------------------------------------') Cyan
@@ -7787,7 +8566,7 @@ try {
         $infoString += $logFilePathAbsolute + $logFileName + [Environment]::NewLine
 
         if ($stressTestLogFileName) {
-            $infoString += $logFilePathAbsolute + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ': ' + $stressTestLogFileName + [Environment]::NewLine
+            $infoString += $logFilePathAbsolute + $stressTestLogFileName + [Environment]::NewLine
         }
 
         $infoString += [Environment]::NewLine
@@ -8166,8 +8945,8 @@ try {
 
                 # If we've set to use two threads and the processor has cores that don't support two threads, set the config file accordingly before starting the stress test process
                 if ($settings.General.numberOfThreads -gt 1 -and $hasAsymmetricCoreThreads) {
-                    Write-Debug('The processor has cores that don''t support two threads,')
-                    Write-Debug('modifying the stress test config file accordingly before restarting')
+                    Write-Debug('The processor has cores that don''t support two threads')
+                    Write-Debug('Modifying the stress test config file accordingly before restarting')
 
                     $overrideNumberOfThreads = $(if ($coreSupportsOnly1T) { 1 } else { 2 })
 
@@ -8270,7 +9049,7 @@ try {
 
 
             # Change the title
-            $host.ui.RawUI.WindowTitle = 'CoreCycler: Core ' + $actualCoreNumber
+            $Host.ui.RawUI.WindowTitle = 'CoreCycler: Core ' + $actualCoreNumber
 
 
             # Set the process priority
@@ -8340,7 +9119,7 @@ try {
             # Get the current progress (core, iteration, total runtime)
             $totalRuntimeArray = @()
 
-            if ( $coreStartDifference.Days -gt 0 ) {
+            if ($coreStartDifference.Days -gt 0) {
                 $totalRuntimeArray += ($coreStartDifference.Days.ToString() + 'd')
             }
 
@@ -8452,13 +9231,14 @@ try {
 
                 # For Prime95, try to get the new log file entries
                 # Also for y-Cruncher with the logging wrapper
+                # Also for Linpack Xtreme
                 # This sets the following variables:
                 # - $previousFileSize -> [Int] The current file size of the log file (to check if it was updated since then)
                 # - $lastFilePosition -> [Int] The position of the pointer within the log file
                 # - $lineCounter      -> [Int] On which line of the log file we are
                 # - $allLogEntries    -> [Array] All log entries
                 # - $newLogEntries    -> [Array] All new log entries
-                if ($isPrime95 -or $isYCruncherWithLogging) {
+                if ($isPrime95 -or $isYCruncherWithLogging -or $isLinpackXtreme) {
                     Get-NewLogfileEntries
                 }
 
@@ -8760,7 +9540,7 @@ try {
                             $differenceCore   = New-TimeSpan -Start $startDateThisCore -End $endDateThisCore
                             $runtimeArrayCore = @()
 
-                            if ( $differenceCore.Days -gt 0 ) {
+                            if ($differenceCore.Days -gt 0) {
                                 $runtimeArrayCore += ($differenceCore.Days.ToString() + 'd')
                             }
 
@@ -8992,7 +9772,7 @@ try {
                             $differenceCore   = New-TimeSpan -Start $startDateThisCore -End $endDateThisCore
                             $runtimeArrayCore = @()
 
-                            if ( $differenceCore.Days -gt 0 ) {
+                            if ($differenceCore.Days -gt 0) {
                                 $runtimeArrayCore += ($differenceCore.Days.ToString() + 'd')
                             }
 
@@ -9188,7 +9968,7 @@ try {
             $differenceCore   = New-TimeSpan -Start $startDateThisCore -End $endDateThisCore
             $runtimeArrayCore = @()
 
-            if ( $differenceCore.Days -gt 0 ) {
+            if ($differenceCore.Days -gt 0) {
                 $runtimeArrayCore += ($differenceCore.Days.ToString() + 'd')
             }
 
@@ -9227,7 +10007,7 @@ try {
                 $coreWithTwoDigitsHasError = $false
 
                 foreach ($entry in $coresWithErrorsCounter.GetEnumerator()) {
-                    if ( $entry.Name -gt 9 -and $entry.Value -gt 0) {
+                    if ($entry.Name -gt 9 -and $entry.Value -gt 0) {
                         $coreWithTwoDigitsHasError = $true
                         break
                     }
@@ -9360,7 +10140,7 @@ finally {
 
 
     # Set the window title
-    $host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' terminating')
+    $Host.UI.RawUI.WindowTitle = ('CoreCycler ' + $version + ' terminating')
 
     Write-ColorText($timestamp + ' - Terminating the script...') Red
 
