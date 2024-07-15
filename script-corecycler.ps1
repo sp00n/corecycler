@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.5.2
+    0.9.5.3
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -22,7 +22,7 @@ Set-StrictMode -Version 3.0
 
 
 # Our current version
-$version = '0.9.5.2'
+$version = '0.9.5.3'
 
 
 # Set the window title
@@ -2782,8 +2782,21 @@ function Import-Settings {
                 }
 
                 # The possible y-Cruncher test values
+                # Depends on the version of y-Cruncher the user has selected
+                # Hopefully we already have the [General] section parsed
                 $possibleTests = $stressTestPrograms.ycruncher.availableTests
                 $selectedTests = @()
+
+                if ($ini['General']['stressTestProgram']) {
+                    if ($ini['General']['stressTestProgram'] -eq 'ycruncher_old') {
+                        $possibleTests = $stressTestPrograms.ycruncher_old.availableTests
+                    }
+                }
+
+                # The setting is not available yet, merge both available tests
+                else {
+                    $possibleTests = @($possibleTests + $stressTestPrograms.ycruncher_old.availableTests) | Sort-Object | Get-Unique
+                }
 
                 # Filter for only the possible test values
                 $thisSetting | ForEach-Object {
@@ -5060,11 +5073,26 @@ function Initialize-yCruncher {
     Write-Verbose($binaryWithPathToRun)
 
     if (!(Test-Path ($binaryWithPathToRun) -PathType Leaf)) {
+        # Add a special error message if trying to run 00-x86 for the newer y-Cruncher versions
+        if (!$isYCruncherOld -and $binaryToRun -eq '00-x86.exe') {
+            Write-ColorText('FATAL ERROR: Invalid "mode" setting detected!') Red
+            Write-ColorText('Trying to run "00-x86", but y-Cruncher doesn''t support this anymore!') Red
+            Write-ColorText('To be able to use "00-x86", you will need to select "YCRUNCHER_OLD" as the stress test.') Red
+            Write-ColorText('The newer versions of y-Cruncher do not support this mode anymore.') Red
+            Write-ColorText('The new minimum "mode" is now "04-P4P" instead.') Red
+            Write-Text('')
+            Write-ColorText('You will also need to adjust the "tests" setting accordingly, as these have changed as well.') Red
+            Write-ColorText('See the comments in the config file for a more detailed explanation.') Red
+            Exit-WithFatalError
+        }
+
+
+        # Regular error, when a binary wasn't found
         Write-ColorText('FATAL ERROR: Could not find y-Cruncher!') Red
         Write-ColorText('             Trying to run "' + $binaryWithPathToRun + '"') Red
         Write-ColorText('Make sure to download and extract y-Cruncher into the following directory:') Red
         Write-ColorText($stressTestPrograms[$settings.General.stressTestProgram]['absoluteInstallPath']) Yellow
-        Write-Text ''
+        Write-Text('')
         Write-ColorText('You can download y-Cruncher from:') Red
         Write-ColorText('http://www.numberworld.org/y-cruncher/#Download') Cyan
         Exit-WithFatalError
