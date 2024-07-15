@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.5.3Linpack
+    0.9.6.0alpha1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one core and cycles through
     all the cores to test the stability of a Curve Optimizer setting
@@ -18,7 +18,7 @@
 
 
 # Our current version
-$version = '0.9.5.3Linpack'
+$version = '0.9.6.0alpha1'
 
 
 # This defines the strict mode
@@ -45,12 +45,20 @@ $parentProcessId               = (Get-CimInstance Win32_Process -Filter "Process
 $parentMainWindowHandle        = (Get-Process -Id $parentProcessId).MainWindowHandle
 $scriptStartDate               = Get-Date
 $scriptStartDateTime           = Get-Date -Format yyyy-MM-dd_HH-mm-ss
+$configsPath                   = 'configs'
+$configsPathAbsolute           = $PSScriptRoot + '\' + $configsPath + '\'
+$configDefaultPath             = $configsPathAbsolute + 'default.config.ini'
+$configUserPath                = $PSScriptRoot + '\config.ini'
 $logFilePath                   = 'logs'
 $logFilePathAbsolute           = $PSScriptRoot + '\' + $logFilePath + '\'
 $logFileName                   = 'CoreCycler_' + $scriptStartDateTime + '.log'
 $logFileFullPath               = $logFilePathAbsolute + $logFileName
 $helpersPathAbsolute           = $PSScriptRoot + '\helpers\'
 $scriptDriveLetter             = $PSScriptRoot[0]
+$updateCheckUrl                = 'https://api.github.com/repos/sp00n/corecycler/releases'
+$updateCheckFile               = $PSScriptRoot + '\.updatecheck'
+$updateCheckResult             = @{}
+$showUpdateAvailableMessage    = $false
 $settings                      = $null
 $canUseWindowsEventLog         = $false
 $storedWheaError               = $null
@@ -156,10 +164,30 @@ $canUseFlushToDisk                                     = $false
 
 
 
-# The default settings for the config.ini (resp. config.default.ini)
+# The default settings for the config.ini (resp. default.config.ini)
 $DEFAULT_SETTINGS = @"
+# Config file for CoreCycler
+# You can always find the default config file in configs\default.config.ini as a reference
+
+
+
+
 # General settings
 [General]
+
+# Use a predefined config file instead of this one
+# If this value is set, it will use the content from the file provided, overwriting all settings further below
+# (which means that if you use this setting, you can safely remove all other settings in the "main" config.ini file)
+# If this value is empty or invalid, the other settings from this file will apply
+#
+# It's useful for quickly switching between various configs, and you can find some predefined config files in the "configs" directory
+# The setting uses a relative path from the location where this file is located in
+# Example:
+# useConfigFile = configs\quick-initial-test.yCruncher.config.ini
+#
+# Default: (empty)
+useConfigFile =
+
 
 # The program to perform the actual stress test
 # The following programs are available:
@@ -347,8 +375,8 @@ flashOnError = 1
 # of an unstable overclock/undervolt
 # A stable system should not produce any WHEA errors/warnings
 #
-# Default: 0
-lookForWheaErrors = 0
+# Default: 1
+lookForWheaErrors = 1
 
 
 
@@ -657,6 +685,23 @@ flushDiskWriteCache = 0
 
 
 
+# Settings for updates
+[Update]
+
+# Enable the update check
+#
+# Default: 1
+enableUpdateCheck = 1
+
+
+# The frequency of the check, in hours
+#
+# Default: 24
+updateCheckFrequency = 24
+
+
+
+
 # Custom settings for Prime95
 [Custom]
 
@@ -664,14 +709,18 @@ flushDiskWriteCache = 0
 # (and also if you want to set AVX2 below)
 CpuSupportsAVX = 0
 
+
 # This needs to be set to 1 for AVX2 mode
 CpuSupportsAVX2 = 0
+
 
 # This also needs to be set to 1 for AVX2 mode on Ryzen
 CpuSupportsFMA3 = 0
 
+
 # This needs to be set to 1 for AVX512 mode
 CpuSupportsAVX512 = 0
+
 
 # The minimum FFT size to test
 # Value for "Smallest FFT":   4
@@ -679,15 +728,18 @@ CpuSupportsAVX512 = 0
 # Value for "Large FFT":    426
 MinTortureFFT = 4
 
+
 # The maximum FFT size to test
 # Value for "Smallest FFT":   21
 # Value for "Small FFT":     248
 # Value for "Large FFT":    8192
 MaxTortureFFT = 8192
 
+
 # The amount of memory to use in MB
 # 0 = In-Place
 TortureMem = 0
+
 
 # The max amount of minutes for each FFT size during the stress test
 # Note: It may be much less than one minute, basically it seems to be "one run or one minute, whichever is less"
@@ -1011,15 +1063,14 @@ $stressTestPrograms = @{
         'processNameForLoad'  = '' # Depends on the processor architecture (AMD/Intel)
         'processPath'         = 'test_programs\LinpackXtreme\binaries\x64'
         'installPath'         = 'test_programs\LinpackXtreme'
-        'configName'          = 'linpack.ini'
+        'configName'          = 'stressTest.ini'
         'requiresCpuCheck'    = $false
         'configFilePath'      = $null
         'absolutePath'        = $null
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
         'fullPathToLoadExe'   = $null
-        #'command'             = 'cmd /C powershell.exe -Command "$env:OMP_NUM_THREADS = 1; $env:RESIDUALCHECK = 1; $env:MKL_DEBUG_CPU_TYPE = 4; $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; E:\_Overclock\LinpackXtreme\binaries\x64\linpack_amd64.exe ''E:\_Overclock\LinpackXtreme\linpack_2gb_10000iterations.ini'' | Tee-Object -FilePath ''E:\_Overclock\CoreCycler\_tests\linpack_log.txt''"'
-        'command'             = 'cmd /C start /MIN "Linpack Xtreme" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack Xtreme''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %RESIDUALCHECK% %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; [IO.File]::WriteAllLines(''%logFilePath%'', (Get-Date -Format HH:mm:ss)); "%fullPathToLoadExe%" ''%configFilePath%'' | Tee-Object -FilePath ''%logFilePath%'' -Append"'
+        'command'             = 'cmd /C start /MIN "Linpack Xtreme CoreCycler" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack Xtreme CoreCycler''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %RESIDUALCHECK% %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; $logFilePath = ''%logFilePath%''; if ( !([IO.File]::Exists($logFilePath)) ) { [IO.File]::WriteAllLines($logFilePath, (Get-Date -Format HH:mm:ss)) }; "%fullPathToLoadExe%" ''%configFilePath%'' | Tee-Object -FilePath $logFilePath -Append"'
         'windowBehaviour'     = 6
         'testModes'           = @(
             'SLOWEST',
@@ -1031,6 +1082,7 @@ $stressTestPrograms = @{
         'availableTests'      = @()
         'defaultTests'        = @()
         'windowNames'         = @(
+            '^Linpack Xtreme CoreCycler$'
             '^Linpack Xtreme$'
         )
     }
@@ -1072,66 +1124,6 @@ $counterNames = @{
     #'Processor Information'   = ''
     #'% Processor Performance' = ''
     #'% Processor Utility'     = ''
-}
-
-
-# The amount of memory in the system
-#$totalMemory = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum  # This is returned in Bytes
-$freeMemory  = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB                     # This is returned in KB, so we multiply it
-
-
-# The number of physical and logical cores
-# This also includes hyperthreading resp. SMT (Simultaneous Multi-Threading)
-# We currently only test the first core for each hyperthreaded "package",
-# so e.g. only 12 cores for a 24 threaded Ryzen 5900X
-# If you disable hyperthreading / SMT, both values should be the same
-# Newer Intel processors have a mixed layout, where some cores only support 1 thread
-$processor        = Get-CimInstance -ClassName Win32_Processor
-$isIntelProcessor = ($processor.Manufacturer -eq 'GenuineIntel')
-$numLogicalCores  = $($processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
-$numPhysCores     = $($processor | Measure-Object -Property NumberOfCores -Sum).Sum
-
-
-# Set the flag if Hyperthreading / SMT is enabled or not
-$isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
-
-
-# Set the flag if we have an asymmetric thread loadout, e.g. on a 12th or 13th generation Intel system
-# Where the Performance cores have 2 threads, but the Efficient cores have only 1
-$hasAsymmetricCoreThreads = ($isHyperthreadingEnabled -and ($numLogicalCores -lt $numPhysCores*2))
-
-
-# Get the cores with 2 threads and those with only 1
-$coresWithTwoThreads = @(0..($numPhysCores-1))
-$coresWithOneThread  = @()
-
-if ($hasAsymmetricCoreThreads) {
-    $numTheoreticalLogicalCores    = $numPhysCores * 2
-    $numCoresWithoutHyperthreading = $numTheoreticalLogicalCores - $numLogicalCores
-    $numCoresWithHyperthreading    = $numPhysCores - $numCoresWithoutHyperthreading
-
-    if ($numCoresWithoutHyperthreading -gt 0) {
-        $coresWithTwoThreads = @(0..($numCoresWithHyperthreading-1))
-        $coresWithOneThread  = @($numCoresWithHyperthreading..($numCoresWithoutHyperthreading+$numCoresWithHyperthreading-1))
-    }
-}
-
-
-# Check if we have more than 64 logical cores, in which case we need a special treatment for setting the affinity
-# We cannot use the default .ProcessorAffinity property then, we need to use SetThreadGroupAffinity
-$hasMoreThan64Cores = ($numLogicalCores -gt 64)
-
-
-# Calculate the number of Processor Groups
-# We assume that the first group is filled up to 64 and all remaining CPUs are then put in the second (or third, etc) group
-# TODO: Note that this is not always the case, for multi-socket mainboards the cores seem to be evenly split across the groups
-#       Although I don't expect a multi-socket system being used with CoreCycler
-if ($hasMoreThan64Cores) {
-    $numProcessorGroups = [Math]::ceiling(($numLogicalCores / 64))
-
-    if ($numLogicalCores % 64 -ne 0) {
-        $numCpusInLastProcessorGroup = $numLogicalCores % 64
-    }
 }
 
 
@@ -2010,6 +2002,96 @@ function Get-ByteValueFromString {
 
 <#
 .DESCRIPTION
+    Get the problem size value for Linpack
+    Problem size = sqrt(memory in bytes / 8), ceiled to the next integer
+    No AVX:   divisible by 8 but not by 16
+    With AVX: divisible by 16 but not 32
+    From the xhelp.lpk file:
+    [...] the number of equations (divisible by 8 but not by 16, or divisible by 16 but not 32 for Intel(R) AVX processors).
+.PARAMETER memoryBytes
+    [UInt64] The memory in bytes
+.PARAMETER usesAvx
+    [Bool] Uses different formulas depending on AVX or not
+.OUTPUTS
+    [UInt64] The problem size
+#>
+function Get-LinpackProblemSize {
+    param(
+        [Parameter(Mandatory=$true)] [UInt64] $memoryBytes,
+        [Parameter(Mandatory=$true)] [Bool] $usesAvx
+    )
+
+    # Uses AVX:    divisible by 16 but not 32
+    # Uses no AVX: divisible by 8 but not by 16
+    $divisorShouldMatch    = $(if ($usesAvx) { 16 } else { 8 })
+    $divisorShouldNotMatch = $(if ($usesAvx) { 32 } else { 16 })
+
+    [UInt64] $problemSize = [Math]::Floor([Math]::Sqrt($memory / 8))
+
+    Write-Debug('Initial problem size: ' + $problemSize)
+
+    while ($problemSize -gt 0) {
+        Write-Debug('Checking problem size: ' + $problemSize)
+        Write-Debug(' - Should be 0:     ' + $problemSize + ' % ' + $divisorShouldMatch    + ' = ' + ($problemSize % $divisorShouldMatch))
+        Write-Debug(' - Should not be 0: ' + $problemSize + ' % ' + $divisorShouldNotMatch + ' = ' + ($problemSize % $divisorShouldNotMatch))
+
+        if ($problemSize % $divisorShouldMatch -eq 0 -and $problemSize % $divisorShouldNotMatch -ne 0) {
+            return $problemSize
+        }
+
+        $problemSize = $problemSize - 1
+    }
+
+    return $problemSize
+}
+
+
+
+<#
+.DESCRIPTION
+    Get a value for the leading dimension size (LDA parameter) for Linpack
+    It's advised to select the next larger integer value that is divisble by 8 (apparently "odd" multiple, see below)
+    From the xhelp.lpk file:
+    The leading dimension must be no less than the number of equations. Experience has shown that the best performance for a given problem size
+    is obtained when the leading dimension is set to the nearest odd multiple of 8 (16 for Intel(R) AVX processors) equal to or larger
+    than the number of equations (divisible by 8 but not by 16, or divisible by 16 but not 32 for Intel(R) AVX processors).
+    https://stackoverflow.com/questions/49345420/understanding-linpack-input-configuration
+.PARAMETER problemSize
+    [UInt64] The problem size
+.PARAMETER usesAvx
+    [Bool] If set, use a different formula to determine the leading dimension value
+.OUTPUTS
+    [UInt64] The leading dimension value
+#>
+function Get-LinpackLeadingDimensionValue {
+    param(
+        [Parameter(Mandatory=$true)] [UInt64] $problemSize,
+        [Parameter(Mandatory=$true)] [Bool] $usesAvx
+    )
+
+    # Uses AVX:    the nearest odd multiple of 16
+    # Uses no AVX: the nearest odd multiple of 8
+    $divisor = $(if ($usesAvx) { 16 } else { 8 })
+
+    [UInt64] $leadingDimensionSize = [Math]::Ceiling($problemSize / $divisor) * $divisor
+
+    # Check if it's an odd number when again dividided by the divisor (8 resp. 16) (= an odd multiple of the divisor)
+    # I assume we don't want fractures of multiples (e.g. 500MB -> 7906 / 8 = 988.25), so test against a remaining 1
+    $isOdd = [Bool] (($leadingDimensionSize / $divisor) % 2 -eq 1)
+
+    # It's an odd multiple of the divisor, we can return it
+    if ($isOdd) {
+        return $leadingDimensionSize
+    }
+
+    # Otherwise it's an even multiple of the divisor, so we need to go up one step
+    return ($leadingDimensionSize + $divisor)
+}
+
+
+
+<#
+.DESCRIPTION
     Final summary when exiting the script
 .PARAMETER ReturnText
     [Switch] (optional) If set, will only return a the text, not using the Write-X functions
@@ -2258,6 +2340,22 @@ function Show-FinalSummary {
 
         Write-Text('')
     }
+
+
+    # Display the log file location(s)
+    Write-ColorText('--------------------------------------------------------------------------------') Cyan
+
+    $leftStringLength = $(if ($stressTestLogFileName) { [Math]::Max(10, $stressTestPrograms[$settings.General.stressTestProgram]['displayName'].Length) + 5 } else { 15 })
+
+    Write-ColorText('The log files for this run are stored in:') Cyan
+    Write-ColorText($logFilePathAbsolute) Cyan
+    Write-ColorText((' - CoreCycler:').PadRight($leftStringLength, ' ') + $logFileName) Cyan
+
+    if ($stressTestLogFileName) {
+        Write-ColorText((' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ':').PadRight($leftStringLength, ' ') + $stressTestLogFileName) Cyan
+    }
+
+    Write-Text('')
 }
 
 
@@ -2863,7 +2961,21 @@ function Import-Settings {
     )
 
     # Certain setting values are strings
-    $settingsWithStrings = @('stressTestProgram', 'stressTestProgramPriority', 'name', 'mode', 'FFTSize', 'coreTestOrder', 'tests', 'memory', 'modeToUseForSuspension')
+    $settingsWithStrings = @(
+        'useConfigFile',
+        'stressTestProgram',
+        'stressTestProgramPriority',
+        'name',
+        'mode',
+        'FFTSize',
+        'coreTestOrder',
+        'tests',
+        'memory',
+        'modeToUseForSuspension'
+    )
+
+    # Certain setting values are decimals
+    $settingsWithDecimals = @('updateCheckFrequency')
 
     # Lowercase for certain settings
     $settingsToLowercase = @('stressTestProgram', 'coreTestOrder', 'memory', 'modeToUseForSuspension')
@@ -2952,8 +3064,21 @@ function Import-Settings {
                 }
 
                 # The possible y-Cruncher test values
+                # Depends on the version of y-Cruncher the user has selected
+                # Hopefully we already have the [General] section parsed
                 $possibleTests = $stressTestPrograms.ycruncher.availableTests
                 $selectedTests = @()
+
+                if ($ini['General']['stressTestProgram']) {
+                    if ($ini['General']['stressTestProgram'] -eq 'ycruncher_old') {
+                        $possibleTests = $stressTestPrograms.ycruncher_old.availableTests
+                    }
+                }
+
+                # The setting is not available yet, merge both available tests
+                else {
+                    $possibleTests = @($possibleTests + $stressTestPrograms.ycruncher_old.availableTests) | Sort-Object | Get-Unique
+                }
 
                 # Filter for only the possible test values
                 $thisSetting | ForEach-Object {
@@ -3005,6 +3130,12 @@ function Import-Settings {
                 }
 
 
+                # Decimal values
+                elseif ($settingsWithDecimals -contains $name -and $value -and ![String]::IsNullOrWhiteSpace($value)) {
+                    $thisSetting = [Decimal] $value
+                }
+
+
                 # Integer values
                 elseif ($value -and ![String]::IsNullOrWhiteSpace($value)) {
                     $thisSetting = [Int] $value
@@ -3041,9 +3172,7 @@ function Import-Settings {
 function Get-Settings {
     Write-Verbose('Parsing the user settings')
 
-    # Get the absolute path of the config file
-    $configUserPath    = $PSScriptRoot + '\config.ini'
-    $logFilePrefix     = 'CoreCycler'
+    $logFilePrefix = 'CoreCycler'
 
     # Set the temporary name and path for the logfile
     # We need it because of the Exit-WithFatalError calls below
@@ -3072,11 +3201,50 @@ function Get-Settings {
 
 
     # Read the config file and overwrite the default settings
-    $userSettings = Import-Settings $configUserPath
+    try {
+        $userSettings = Import-Settings $configUserPath
+    }
+
+    # Couldn't get the a valid content from the config.ini, replace it with the default
+    catch {
+        Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
+
+        if (!(Test-Path $configDefaultPath -PathType Leaf)) {
+            Exit-WithFatalError -text 'Neither config.ini nor default.config.ini found!'
+        }
+
+        [System.IO.File]::WriteAllLines($configUserPath, $DEFAULT_SETTINGS)
+        $userSettings = Import-Settings $configUserPath
+    }
+
+
+    # Check if we should use a custom config file, and if the file exists
+    if ($userSettings['General']['useConfigFile'] -and $userSettings['General']['useConfigFile'].ToString().Trim(' ', '"', '''').Length -gt 0) {
+        $customConfigPath = $PSScriptRoot + '\' + $userSettings['General']['useConfigFile']
+
+        Write-Text('Using a custom config file:')
+        Write-Text($customConfigPath)
+
+        try {
+            if (Test-Path $customConfigPath -PathType Leaf) {
+                # Overwrite the already parsed settings
+                $userSettings = Import-Settings $customConfigPath
+            }
+            else {
+                Write-Text('Couldn''t find the custom config file, using the values from the config.ini!')
+            }
+        }
+
+        # The custom config file existed, but couldn't be parsed correctly
+        catch {
+            Write-ColorText('WARNING: "' + $customConfigPath + '" is corrupted!') Yellow
+            Write-ColorText('         Using the values from the config.ini instead') Yellow
+        }
+    }
 
 
     # Check if the config.ini contained valid setting
-    # It may be corrupted if the computer immediately crashed due to unstable settings
+    # It may be corrupted if the computer immediately crashed when saving due to unstable settings
     try {
         foreach ($entry in $userSettings.GetEnumerator()) {
         }
@@ -3087,10 +3255,10 @@ function Get-Settings {
         Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
 
         if (!(Test-Path $configDefaultPath -PathType Leaf)) {
-            Exit-WithFatalError -text 'Neither config.ini nor config.default.ini found!'
+            Exit-WithFatalError -text 'Neither config.ini nor default.config.ini found!'
         }
 
-        Copy-Item -Path $configDefaultPath -Destination $configUserPath
+        [System.IO.File]::WriteAllLines($configUserPath, $DEFAULT_SETTINGS)
         $userSettings = Import-Settings $configUserPath
     }
 
@@ -3248,25 +3416,24 @@ function Get-Settings {
 
 <#
 .DESCRIPTION
-    Export the default settings and writes the config.default.ini file
+    Export the default settings and writes the default.config.ini file
 .PARAMETER
     [Void]
 .OUTPUTS
-    [Void] Writes the config.default.ini file
+    [Void] Writes the default.config.ini file
 #>
 function Export-DefaultSettings {
-    $filePath = $PSScriptRoot + '\config.default.ini'
-
     $noticeLines = @(
         '# This is the default config file for CoreCycler',
-        '# Rename this file to config.ini and change the settings accordingly',
-        '# Do not change the settings inside the config.default.ini file directly,',
-        '# as they will be reset their default values on every start of CoreCycler',
+        '# Rename this file to config.ini, copy it to the main CoreCycler directory'
+        '# and change the settings accordingly',
+        '# Do not change the settings inside this default.config.ini file directly,',
+        '# as they will be reset to their default values on every start of CoreCycler',
         '',
         ''
     )
 
-    [System.IO.File]::WriteAllLines($filePath, [string]::Join([Environment]::NewLine, ($noticeLines -Join [Environment]::NewLine), $DEFAULT_SETTINGS))
+    [System.IO.File]::WriteAllLines($configDefaultPath, [string]::Join([Environment]::NewLine, ($noticeLines -Join [Environment]::NewLine), $DEFAULT_SETTINGS))
 }
 
 
@@ -3859,29 +4026,37 @@ function Get-StressTestProcessInformation {
             Write-ColorText('FATAL ERROR: Incorrect number of threads found that could be running the stress test!') Red
             Write-ColorText('             Found ' + $thisStressTestThreads.Count + ' threads, but expected ' + $expectedNumberOfThreads) Red
 
-            $threads = $thisStressTestProcess.Threads | Sort-Object -Property Id
-            $possibleStressTestThreads = $thisStressTestProcess.Threads | Where-Object {
-                ($_ | Get-Member TotalProcessorTime) -and
-                $null -ne $_.TotalProcessorTime -and
-                $_.TotalProcessorTime.Ticks -ne 0 -and
-                $_.ThreadState -match '^Running$|^Ready$'
-            } | Sort-Object -Property Id
-
-            $threadIds     = ($threads | Select-Object -Property Id).Id -Join ', '
-            $threadsString = $threads | Format-Table 'Id', 'ThreadState', 'TotalProcessorTime', 'WaitReason', 'ProcessorAffinity' | Out-String
-
-            $possibleStressTestThreadsIds    = ($possibleStressTestThreads | Select-Object -Property Id).Id -Join ', '
-            $possibleStressTestThreadsString = $possibleStressTestThreads | Format-Table 'Id', 'ThreadState', 'TotalProcessorTime', 'WaitReason', 'ProcessorAffinity' | Out-String
-
             Write-Debug('The process id:                      ' + $thisStressTestProcess.Id)
-            Write-Debug('The stress test thread ids:          ' + $threadIds)
-            Write-Debug('The possible stress test thread ids: ' + $possibleStressTestThreadsIds)
 
-            Write-Debug('All of the threads of the process:')
-            Write-Debug($threadsString)
+            if ($thisStressTestProcess.Threads.Count -gt 0) {
+                $threads       = $thisStressTestProcess.Threads | Sort-Object -Property Id
+                $threadIds     = ($threads | Select-Object -Property Id).Id -Join ', '
+                $threadsString = $threads | Format-Table 'Id', 'ThreadState', 'TotalProcessorTime', 'WaitReason', 'ProcessorAffinity' | Out-String
+                $possibleStressTestThreadsIds    = @()
+                $possibleStressTestThreadsString = ''
 
-            Write-Debug('All of the possible stress test threads of the process:')
-            Write-Debug($possibleStressTestThreadsString)
+                $possibleStressTestThreads = @($thisStressTestProcess.Threads | Where-Object {
+                    ($_ | Get-Member TotalProcessorTime) -and
+                    $null -ne $_.TotalProcessorTime -and
+                    $_.TotalProcessorTime.Ticks -ne 0 -and
+                    $_.ThreadState -match '^Running$|^Ready$'
+                })
+
+                if ($possibleStressTestThreads.Count -gt 0) {
+                    $possibleStressTestThreads       = $possibleStressTestThreads | Sort-Object -Property Id
+                    $possibleStressTestThreadsIds    = ($possibleStressTestThreads | Select-Object -Property Id).Id -Join ', '
+                    $possibleStressTestThreadsString = $possibleStressTestThreads | Format-Table 'Id', 'ThreadState', 'TotalProcessorTime', 'WaitReason', 'ProcessorAffinity' | Out-String
+                }
+
+                Write-Debug('The stress test thread ids:          ' + $threadIds)
+                Write-Debug('The possible stress test thread ids: ' + $possibleStressTestThreadsIds)
+
+                Write-Debug('All of the threads of the process:')
+                Write-Debug($threadsString)
+
+                Write-Debug('All of the possible stress test threads of the process:')
+                Write-Debug($possibleStressTestThreadsString)
+            }
 
             Exit-WithFatalError
         }
@@ -4006,12 +4181,13 @@ function Initialize-Prime95 {
     }
     if ($prime95Version[0] -eq 30 -and $prime95Version[1] -le 19) {
         $isMaxPrime95_30_19 = $true
-        $useOnlyPrimeTxt    = $true
     }
     if (($prime95Version[0] -eq 30 -and $prime95Version[1] -ge 20) -or $prime95Version[0] -gt 30) {
         $isNewerPrime95  = $true
-        $useOnlyPrimeTxt = $true
         $Script:showPrime95NewWarning = $true       # Inform the user that this version pf Prime95 has not yet been tested with CoreCycler
+    }
+    if ($isNewerPrime95 -or $isMaxPrime95_30_19 -and !$isMaxPrime95_30_9) {
+        $useOnlyPrimeTxt = $true
     }
 
 
@@ -4394,7 +4570,7 @@ function Initialize-Prime95 {
     # Before 30.10, there were two config files, local.txt and prime.txt
     else {
         $configFile1 = $stressTestPrograms[$p95Type]['absolutePath'] + 'local.txt'
-        $configFile2 = $configFile1
+        $configFile2 = $stressTestPrograms[$p95Type]['absolutePath'] + 'prime.txt'
 
         # Create the local.txt and overwrite if necessary
         $null = New-Item $configFile1 -ItemType File -Force
@@ -5714,23 +5890,35 @@ function Initialize-LinpackXtreme {
     # Problem Size = sqrt(MB * 1000 * 1000 / 8)
     # Problem Size = sqrt(GB * 1000 * 1000 * 1000 / 8)
     # Problem Size = sqrt(TB * 1000 * 1000 * 1000 * 1000 / 8)
+
+    # The default value for the leading dimension (LDA) is problemSize+1
+    # It's advised to select the next larger integer value that is divisble by 8 (apparently "odd" multiple, see below)
+
+    # From the xhelp.lpk file:
+    # The leading dimension must be no less than the number of equations. Experience has shown that the best performance for a given problem size
+    # is obtained when the leading dimension is set to the nearest odd multiple of 8 (16 for Intel(R) AVX processors) equal to or larger
+    # than the number of equations (divisible by 8 but not by 16, or divisible by 16 but not 32 for Intel(R) AVX processors).
+    # https://stackoverflow.com/questions/49345420/understanding-linpack-input-configuration
+
+    # The string entered by the user
     $memorySizeString = $settings.LinpackXtreme.memory.ToLowerInvariant()
 
     # Also, let's hard code the problem sizes that are already defined in Linpack Xtreme
     # Calculating these ourselves would result in slightly different values
     # But let's keep these values to be consistent with the standalone version of Linpack Xtreme
     $hardCodedProblemSizes = @{
-        '2GB'  = 15825
-        '4GB'  = 22611
-        '6GB'  = 27818
-        '8GB'  = 32209
-        '10GB' = 35000
-        '14GB' = 42789
-        '30GB' = 62897
+    #    '2GB'  = 15825
+    #    '4GB'  = 22611
+    #    '6GB'  = 27818
+    #    '8GB'  = 32209
+    #    '10GB' = 35000
+    #    '14GB' = 42789
+    #    '30GB' = 62897
     }
 
-    # The default value
+    # The default values
     $problemSize = $hardCodedProblemSizes['2GB']
+    $leadingDim  = $hardCodedProblemSizes['2GB']
 
     # Get the memory size in bytes
     [UInt64] $memory = Get-ByteValueFromString -string $memorySizeString
@@ -5738,24 +5926,29 @@ function Initialize-LinpackXtreme {
     # Check for a hardcoded value
     $gbValue = ($memory / [Math]::Pow(1000, 3)).ToString() + 'GB'
 
+    # Use the hardcoded value
     if ($hardCodedProblemSizes[$gbValue]) {
         $problemSize = $hardCodedProblemSizes[$gbValue]
-        Write-Debug('Found a hardcoded problem size: "' + $memorySizeString + '" -> ' + $gbValue + ' -> ' + $problemSize)
+        $leadingDim  = $problemSize
+        Write-Debug('Found a hardcoded problem size: "' + $memorySizeString + '" -> ' + $gbValue + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
     }
 
     # For any other memory value, calculate the problem size ourself
     else {
-        $problemSize = [Math]::Floor([Math]::Sqrt($memory / 8))
-        Write-Debug('Calculated the problem size: "' + $memorySizeString + '" -> ' + $memory + ' -> ' + $problemSize)
+        $usesAvx     = ($settings.LinpackXtreme.mode -eq 'FAST' -or $settings.LinpackXtreme.mode -eq 'FASTEST')
+        $problemSize = Get-LinpackProblemSize -memoryBytes $memory -usesAvx $usesAvx
+        $leadingDim  = Get-LinpackLeadingDimensionValue -problemSize $problemSize -usesAvx $usesAvx
+        Write-Debug('Calculated the problem size: "' + $memorySizeString + '" -> ' + $memory + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
     }
 
     Write-Debug('Selected Memory: ' + [Math]::Round($memory / 1GB, 1)     + ' GB (' + $memory     + ' bytes) ("memory = ' + $memorySizeString + '")')
     Write-Debug('Free Memory:     ' + [Math]::Round($freeMemory / 1GB, 1) + ' GB (' + $freeMemory + ' bytes)')
-    Write-Debug('The final problem size:   ' + $problemSize)
+    Write-Debug('The final problem size: ' + $problemSize)
+    Write-Debug('The leading dimension:  ' + $leadingDim)
 
     if ($problemSize -lt 1) {
         $errorText  = 'The Linpack Xtreme memory size is too small or the problem size could not be calculated!'
-        $errorText += [Environment]::NewLine + '             (memory = "' + $memorySizeString + '", problem size = ' + $problemSize + ')'
+        $errorText += [Environment]::NewLine + '             (memory = "' + $memorySizeString + '", problem size = ' + $problemSize + ', leading dimensions = ' + $leadingDim + ')'
         Exit-WithFatalError -text $errorText
     }
 
@@ -5768,14 +5961,18 @@ function Initialize-LinpackXtreme {
     }
 
 
+    # The custom ini file entries
+    # Here's some explanation:
+    # https://stackoverflow.com/questions/49345420/understanding-linpack-input-configuration
+    # The first two lines apparently can be any text
     $configEntries = @(
         'Linpack data file'
         'Linpack Xtreme v1.1.5 by Regeneration (64-bit)'
-        '1'             # Unknown
+        '1'             # The number of runs (tests). Leave this at 1
         $problemSize    # The problem size, calculated from the memory size
-        $problemSize    # Yeah, add it twice
-        '999999'        # Number of iterations. Not sure if there's an upper limit
-        '4'             # Unknown
+        $leadingDim     # Leading dimension of the array. It's advised to set this to the $problemSize+x, to get the closest larger integer value that is an odd multiple of 8
+        '9999999'       # Number of iterations per run (times to run a test ("trials"))
+        '4'             # Alignment values in kilobytes (should be left at 4, but maybe increase it to 16 or 64 for large memory pages)
     )
 
     [System.IO.File]::WriteAllLines($configFile, $configEntries)
@@ -6854,9 +7051,10 @@ function Test-StressTestProgrammIsRunning {
             # Look for the line the error message appears in
             $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
 
+            # This is the same message as already displayed, so don't show it by default
             if ($errorResults) {
-                Write-ColorText('ERROR: The line with the error:') Magenta
-                Write-ColorText($errorResults.Line) Magenta
+                Write-Verbose('ERROR: The line with the error:')
+                Write-Verbose($errorResults.Line)
             }
 
             # Get the last 10 rows
@@ -7848,13 +8046,397 @@ try {
     }
 
 
-    # Export the default settings to the config.default.ini file
+    # We need the configs directory to exist
+    if (!(Test-Path -Path $configsPathAbsolute)) {
+        $null = New-Item $configsPathAbsolute -ItemType Directory
+    }
+
+
+    # Export the default settings to the default.config.ini file
     Export-DefaultSettings
 
 
     # Get the default and the user settings
     # This is early because we want to be able to get the log level
     Get-Settings
+
+
+    # Start a request to check for an update
+    # As early as possible, so that it has time to finish the URL query while other things are being processed
+    # The result of this job will be received later
+    if ($settings.Update.enableUpdateCheck) {
+        Write-Debug('Update check is enabled, initializing the background job')
+
+        $updateCheckJob = Start-Job -Name 'UpdateCheck' -ScriptBlock {
+            $startTime = Get-Date
+            $messages = [System.Collections.ArrayList] @()
+
+            # Wrap Write-Debug to add to $messages instead, since we're in a job
+            function Write-Debug {
+                [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '')]
+
+                param(
+                    [Parameter(Mandatory=$true)][AllowEmptyString()] [String] $string
+                )
+
+                [Void] $messages.Add($string)
+            }
+
+
+            Write-Debug('Checking for updates...')
+            Write-Debug('Started: ' + $startTime.ToString('HH:mm:ss'))
+
+            $updateCheckUrl        = $args[0]
+            $updateCheckFile       = $args[1]
+            $currentVersionString  = $args[2]
+            $updateSettings        = $args[3]
+            $currentVersionInt     = 0
+            $lastReleaseString     = ''
+            $lastReleaseInt        = 0
+            $lastCheckedTime       = 0
+            $lastCheckedVersionInt = 0
+            $lastCheckedVersionStr = ''
+            $lastCheckedUrl        = ''
+            $doOnlineCheck         = $false
+
+
+            $returnObj = @{
+                'isNew'    = $false
+                'version'  = ''
+                'url'      = ''
+                'messages' = [System.Collections.ArrayList] @()
+            }
+
+            $currentVersion = @{
+                'major'    = 0
+                'minor'    = 0
+                'revision' = 0
+                'build'    = 0
+            }
+
+            $lastRelease = @{
+                'major'    = 0
+                'minor'    = 0
+                'revision' = 0
+                'build'    = 0
+            }
+
+
+            # Get the current version int value
+            $null = $currentVersionString -Match '(?-i)(?<major>\d+)\.(?<minor>\d+)\.(?<revision>\d+)\.(?<build>\d+)(?<string>[aA-zZ0-9_\.\-]*)'
+
+            Write-Debug('The current version: ' + $currentVersionString)
+
+            $currentVersion['major']    = $(if ($Matches['major'])    { $Matches['major'] }    else { 0 })
+            $currentVersion['minor']    = $(if ($Matches['minor'])    { $Matches['minor'] }    else { 0 })
+            $currentVersion['revision'] = $(if ($Matches['revision']) { $Matches['revision'] } else { 0 })
+            $currentVersion['build']    = $(if ($Matches['build'])    { $Matches['build'] }    else { 0 })
+            $currentVersion['string']   = $(if ($Matches['string'])   { -1 }                   else { 0 })  # If there's a string behind the version number, it's not a final version
+
+            # If a string is present in the version number, reduce the int value by one to match the (assumed) previous version
+            # E.g. 0.9.5.3alpha1 would become 9005002, which makes it equal to 0.9.5.2
+            # This is to prevent that 0.9.5.3alpha1 would not register an available update for the final 0.9.5.3 (without string)
+            [UInt64] $currentVersionInt = [UInt64] $currentVersion['major'] * 1000000000000 + [UInt64] $currentVersion['minor'] * 1000000000 + [UInt64] $currentVersion['revision'] * 1000000 + [UInt64] $currentVersion['build'] * 1000 + $currentVersion['string']
+            Write-Debug('currentVersionInt:   ' + $currentVersionInt)
+
+
+            # Check the stored .updatecheck file
+            if (!(Test-Path $updateCheckFile -PathType Leaf)) {
+                Write-Debug('The .updatecheck file doesn''t exist, initiate online check')
+                $doOnlineCheck = $true
+            }
+            else {
+                Write-Debug('Reading the .updatecheck file:')
+
+                $reader = [System.IO.File]::OpenText($updateCheckFile)
+                $updateCheckContentString = $reader.ReadToEnd()
+                $reader.Close()
+
+                $updateCheckContent = @($updateCheckContentString -Split '\r?\n')
+
+                foreach ($line in $updateCheckContent) {
+                    Write-Debug($line)
+                }
+
+                # 0 should be the timestamp
+                # 1 should be the version int value
+                # 2 should be the version string
+                # 3 should be the URL
+                # 4 may not exist or be empty
+                if ($updateCheckContent.Count -gt 3) {
+                    try {
+                        $lastCheckedTime       = [UInt64] $updateCheckContent[0]
+                        $lastCheckedVersionInt = [UInt64] $updateCheckContent[1]
+                        $lastCheckedVersionStr = $updateCheckContent[2]
+                        $lastCheckedUrl        = $updateCheckContent[3]
+
+                        if ($lastCheckedVersionStr.Length -lt 6) {
+                            $lastCheckedVersionStr = $lastCheckedVersionInt.ToString()
+                        }
+
+                        if (!$lastCheckedUrl -or $lastCheckedUrl.Length -lt 30) {
+                            $lastCheckedUrl = 'https://github.com/sp00n/corecycler/releases'
+                        }
+
+
+                        Write-Debug('$lastCheckedTime:       ' + $lastCheckedTime)
+                        Write-Debug('$lastCheckedVersionInt: ' + $lastCheckedVersionInt)
+                        Write-Debug('$lastCheckedVersionStr: ' + $lastCheckedVersionStr)
+                        Write-Debug('$lastCheckedUrl:        ' + $lastCheckedUrl)
+
+                        [UInt64] $curTimeStamp = Get-Date -UFormat %s -Millisecond 0
+                        [UInt64] $sinceLastCheck = $curTimeStamp - $lastCheckedTime
+                        [UInt64] $maxSeconds = $updateSettings.updateCheckFrequency * 60 * 60
+
+                        Write-Debug('$curTimeStamp:          ' + $curTimeStamp)
+                        Write-Debug('$sinceLastCheck:        ' + $sinceLastCheck + 's (' + [Math]::Round($sinceLastCheck/60/60, 3)  + 'h)')
+                        Write-Debug('$maxSeconds:            ' + $maxSeconds + 's (' + [Math]::Round($maxSeconds/60/60, 3)  + 'h)')
+
+                        if ($sinceLastCheck -gt $maxSeconds) {
+                            Write-Debug('The check interval time has been exceeded, initiate a new online check')
+                            $doOnlineCheck = $true
+                        }
+                        else {
+                            Write-Debug('The check interval time has not yet been exceeded, do not initiate a new online check')
+                        }
+                    }
+                    catch {
+                        Write-Debug($_)
+                    }
+                }
+            }
+
+
+            # Don't do the online check
+            # Because the interval time hasn't passed yet
+            if (!$doOnlineCheck) {
+                Write-Debug('Not performing an online check')
+
+                # But check if the stored information points to a newer version
+                if ($lastCheckedVersionInt -gt $currentVersionInt) {
+                    Write-Debug('The stored information points to a newer version')
+                    Write-Debug('This version: ' + $currentVersionInt)
+                    Write-Debug('New version:  ' + $lastCheckedVersionInt)
+
+                    $returnObj['isNew']    = $true
+                    $returnObj['version']  = $lastCheckedVersionStr
+                    $returnObj['url']      = $lastCheckedUrl
+                }
+
+                $endTime = Get-Date
+                $runTime = $endTime - $startTime
+
+                Write-Debug('Background Job Started: ' + $startTime.ToString('HH:mm:ss'))
+                Write-Debug('Background Job Ended:   ' + $endTime.ToString('HH:mm:ss'))
+                Write-Debug('Background Job Runtime: ' + $runTime.TotalSeconds)
+
+                $returnObj['messages'] = $messages
+
+                return $returnObj
+            }
+
+
+            # Try to limit the time it takes before aborting
+            $oriIdleTime = [System.Net.ServicePointManager]::MaxServicePointIdleTime
+
+            # Disable the progress bar for Invoke-WebRequest and enable it again later
+            $originalProgressPreference = $global:ProgressPreference
+            $global:ProgressPreference = 'SilentlyContinue'
+
+            # Make the request
+            $content, $statusCode = try {
+                [System.Net.ServicePointManager]::MaxServicePointIdleTime = 2000
+                $response = Invoke-WebRequest -Uri $updateCheckUrl -TimeoutSec 2 -ErrorAction Stop
+                $response.Content
+                $response.StatusCode
+            }
+            catch [System.Net.WebException] {
+                $response = $_.Exception.Response
+
+                if ($response) {
+                    try {
+                        $stream = $response.GetResponseStream()
+                        $encoding = [System.Text.Encoding]::GetEncoding($response.CharacterSet)
+                        $reader = [System.IO.StreamReader]::new($stream, $encoding)
+                        $reader.DiscardBufferedData()
+                        $reader.ReadToEnd()
+                    }
+                    finally {
+                        $reader.Close()
+                    }
+
+                    $response.StatusCode.value__
+                }
+            }
+
+            # Restore the original settings
+            $global:ProgressPreference = $originalProgressPreference
+            [System.Net.ServicePointManager]::MaxServicePointIdleTime = $oriIdleTime
+
+            Write-Debug('$statusCode: ' + $statusCode)
+
+
+            # Couldn't get the releases
+            if (!$content) {
+                Write-Debug('No content found for the request!')
+
+                # But maybe the stored file already contains a newer version info
+                if ($lastCheckedVersionInt -gt $currentVersionInt) {
+                    Write-Debug('But the already stored information points to a newer version')
+                    Write-Debug('This version: ' + $currentVersionInt)
+                    Write-Debug('New version:  ' + $lastCheckedVersionInt)
+
+                    $returnObj['isNew']    = $true
+                    $returnObj['version']  = $lastCheckedVersionStr
+                    $returnObj['url']      = $lastCheckedUrl
+                }
+
+                $endTime = Get-Date
+                $runTime = $endTime - $startTime
+
+                Write-Debug('Background Job Started: ' + $startTime.ToString('HH:mm:ss'))
+                Write-Debug('Background Job Ended:   ' + $endTime.ToString('HH:mm:ss'))
+                Write-Debug('Background Job Runtime: ' + $runTime.TotalSeconds)
+
+                $returnObj['messages'] = $messages
+
+                return $returnObj
+            }
+
+
+            # Parse the response and convert it to JSON
+            $releases = ConvertFrom-Json $content
+            $lastReleaseEntry = @()
+
+            foreach ($release in $releases) {
+                # Write-Debug('$release[draft]: ' + $release.draft)
+                # Write-Debug('$release[prerelease]: ' + $release.prerelease)
+                # Write-Debug('Both False: ' + ($release.draft -ne $true -and $release.prerelease -ne $true))
+
+                if (!$release -or !($release | Get-Member tag_name)) {
+                    continue
+                }
+
+                if ($release.draft -or $release.prerelease) {
+                    continue
+                }
+
+                # But is it a real final release?
+                # A final release shouldn't have a string attached to it, so exclude it
+                $null = $release.tag_name -Match '(?-i)(?<major>\d+)\.(?<minor>\d+)\.(?<revision>\d+)\.(?<build>\d+)(?<string>[aA-zZ0-9_\.\-]*)'
+
+                if ($Matches['string']) {
+                    continue
+                }
+
+                Write-Debug('Found our first real release!')
+
+                $lastReleaseEntry = $release
+                break
+            }
+
+
+            Write-Debug('$lastReleaseEntry.tag_name: ' + $lastReleaseEntry.tag_name)
+
+            $lastReleaseString = $lastReleaseEntry.tag_name
+
+            $null = $lastReleaseString -Match '(?-i)(?<major>\d+)\.(?<minor>\d+)\.(?<revision>\d+)\.(?<build>\d+)'
+
+            $lastRelease['major']    = $(if ($Matches['major'])    { $Matches['major'] }    else { 0 })
+            $lastRelease['minor']    = $(if ($Matches['minor'])    { $Matches['minor'] }    else { 0 })
+            $lastRelease['revision'] = $(if ($Matches['revision']) { $Matches['revision'] } else { 0 })
+            $lastRelease['build']    = $(if ($Matches['build'])    { $Matches['build'] }    else { 0 })
+
+            [UInt64] $lastReleaseInt = [UInt64] $lastRelease['major'] * 1000000000000 + [UInt64] $lastRelease['minor'] * 1000000000 + [UInt64] $lastRelease['revision'] * 1000000 + [UInt64] $lastRelease['build'] * 1000
+
+            Write-Debug('lastReleaseInt: ' + $lastReleaseInt)
+
+            if ($lastReleaseInt -gt $currentVersionInt) {
+                Write-Debug('New Version found! ' + $lastReleaseString + ' - ' + $lastReleaseInt)
+
+                $returnObj['isNew'] = $true
+                $returnObj['url'] = $lastReleaseEntry.html_url
+                $returnObj['version'] = $lastReleaseString
+            }
+            else {
+                Write-Debug('No new version found')
+            }
+
+            Write-Debug('Writing the .updatecheck file')
+
+            [System.IO.File]::WriteAllLines($updateCheckFile, [string]::Join([Environment]::NewLine, (Get-Date -UFormat %s -Millisecond 0), $lastReleaseInt, $lastReleaseString, $lastReleaseEntry.html_url))
+
+            $endTime = Get-Date
+            $runTime = $endTime - $startTime
+
+            Write-Debug('Background Job Started: ' + $startTime.ToString('HH:mm:ss'))
+            Write-Debug('Background Job Ended:   ' + $endTime.ToString('HH:mm:ss'))
+            Write-Debug('Background Job Runtime: ' + $runTime.TotalSeconds)
+
+            $returnObj['messages'] = $messages
+            return $returnObj
+        } -ArgumentList $updateCheckUrl, $updateCheckFile, $version, $settings.Update
+    }
+
+
+    # The amount of memory in the system
+    #$totalMemory = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum  # This is returned in Bytes
+    $freeMemory  = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB                     # This is returned in KB, so we multiply it
+
+
+    # The number of physical and logical cores
+    # This also includes hyperthreading resp. SMT (Simultaneous Multi-Threading)
+    # We currently only test the first core for each hyperthreaded "package",
+    # so e.g. only 12 cores for a 24 threaded Ryzen 5900X
+    # If you disable hyperthreading / SMT, both values should be the same
+    # Newer Intel processors have a mixed layout, where some cores only support 1 thread
+    $processor        = Get-CimInstance -ClassName Win32_Processor
+    $isIntelProcessor = ($processor.Manufacturer -eq 'GenuineIntel')
+    $numLogicalCores  = $($processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+    $numPhysCores     = $($processor | Measure-Object -Property NumberOfCores -Sum).Sum
+
+
+    # Set the flag if Hyperthreading / SMT is enabled or not
+    $isHyperthreadingEnabled = ($numLogicalCores -gt $numPhysCores)
+
+
+    # Set the flag if we have an asymmetric thread loadout, e.g. on a 12th or 13th generation Intel system
+    # Where the Performance cores have 2 threads, but the Efficient cores have only 1
+    $hasAsymmetricCoreThreads = ($isHyperthreadingEnabled -and ($numLogicalCores -lt $numPhysCores*2))
+
+
+    # Get the cores with 2 threads and those with only 1
+    $coresWithTwoThreads = @(0..($numPhysCores-1))
+    $coresWithOneThread  = @()
+
+    if ($hasAsymmetricCoreThreads) {
+        $numTheoreticalLogicalCores    = $numPhysCores * 2
+        $numCoresWithoutHyperthreading = $numTheoreticalLogicalCores - $numLogicalCores
+        $numCoresWithHyperthreading    = $numPhysCores - $numCoresWithoutHyperthreading
+
+        if ($numCoresWithoutHyperthreading -gt 0) {
+            $coresWithTwoThreads = @(0..($numCoresWithHyperthreading-1))
+            $coresWithOneThread  = @($numCoresWithHyperthreading..($numCoresWithoutHyperthreading+$numCoresWithHyperthreading-1))
+        }
+    }
+
+
+    # Check if we have more than 64 logical cores, in which case we need a special treatment for setting the affinity
+    # We cannot use the default .ProcessorAffinity property then, we need to use SetThreadGroupAffinity
+    $hasMoreThan64Cores = ($numLogicalCores -gt 64)
+
+
+    # Calculate the number of Processor Groups
+    # We assume that the first group is filled up to 64 and all remaining CPUs are then put in the second (or third, etc) group
+    # TODO: Note that this is not always the case, for multi-socket mainboards the cores seem to be evenly split across the groups
+    #       Although I don't expect a multi-socket system being used with CoreCycler
+    if ($hasMoreThan64Cores) {
+        $numProcessorGroups = [Math]::ceiling(($numLogicalCores / 64))
+
+        if ($numLogicalCores % 64 -ne 0) {
+            $numCpusInLastProcessorGroup = $numLogicalCores % 64
+        }
+    }
 
 
     # Check if we can use Write-VolumeCache to write the log file data to the disk
@@ -8010,7 +8592,6 @@ try {
             Exit-WithFatalError
         }
     }
-
 
 
 
@@ -8341,6 +8922,43 @@ try {
     $paddingLeft  = [Math]::Ceiling($padding / 2)
     $paddingRight = [Math]::Floor($padding / 2)
 
+
+    # Get the update check job at this point
+    if ($settings.Update.enableUpdateCheck) {
+        Write-Debug('Getting the result of the update check background job')
+
+        $updateStartTime = Get-Date
+        $updateCheckResult = $updateCheckJob | Wait-Job -Timeout 4 | Receive-Job
+
+        # Write-Debug('The returned result:')
+
+        # if ($updateCheckResult) {
+        #     foreach ($entry in $updateCheckResult.GetEnumerator()) {
+        #         if ($entry.Name -ne 'messages') {
+        #             #Write-Debug($entry | Format-List | Out-String)
+        #             Write-Debug('{ ' + $entry.Name + ' = ' + $entry.Value + ' }')
+        #         }
+        #     }
+        # }
+
+        Write-Debug('Messages from the update background job:')
+
+        foreach ($message in $updateCheckResult['messages']) {
+            Write-Debug($message)
+        }
+
+        $showUpdateAvailableMessage = $updateCheckResult['isNew']
+
+        $updateEndTime = Get-Date
+        $updateRunTime = $updateEndTime - $updateStartTime
+
+        Write-Debug('Update Check Started:   ' + $updateStartTime.ToString('HH:mm:ss'))
+        Write-Debug('Update Check Ended:     ' + $updateEndTime.ToString('HH:mm:ss'))
+        Write-Debug('Update Check Runtime:   ' + $updateRunTime.TotalSeconds)
+        Write-Debug('Is there an update available: ' + $updateCheckResult['isNew'])
+    }
+
+
     # Start messages
     Write-ColorText('--------------------------------------------------------------------------------') Green
     Write-ColorText(''.PadLeft($paddingLeft, '-') + $headline + ''.PadRight($paddingRight, '-')) Green
@@ -8417,12 +9035,14 @@ try {
 
 
     # Display the log file location(s)
+    $leftStringLength = $(if ($stressTestLogFileName) { [Math]::Max(10, $stressTestPrograms[$settings.General.stressTestProgram]['displayName'].Length) + 5 } else { 15 })
+
     Write-ColorText('The log files for this run are stored in:') Cyan
     Write-ColorText($logFilePathAbsolute) Cyan
-    Write-ColorText((' - CoreCycler:').PadRight(19, ' ') + $logFileName) Cyan
+    Write-ColorText((' - CoreCycler:').PadRight($leftStringLength, ' ') + $logFileName) Cyan
 
     if ($stressTestLogFileName) {
-        Write-ColorText((' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ':').PadRight(19, ' ') + $stressTestLogFileName) Cyan
+        Write-ColorText((' - ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + ':').PadRight($leftStringLength, ' ') + $stressTestLogFileName) Cyan
     }
 
     Write-ColorText('--------------------------------------------------------------------------------') Cyan
@@ -8549,6 +9169,23 @@ try {
         Write-ColorText('- Separately test the cores with two and those with only one thread'.PadRight(80, ' ')) Yellow DarkRed
         Write-ColorText('- Switch to testing with only one thread altogether'.PadRight(80, ' ')) Yellow DarkRed
         Write-ColorText('--------------------------------------------------------------------------------') Yellow DarkRed
+        Write-Text('')
+        Write-Text('')
+    }
+
+
+
+    # There's an update available
+    if ($showUpdateAvailableMessage) {
+        Write-Text('')
+        Write-Text('')
+        Write-ColorText('------------------------------- UPDATE AVAILABLE -------------------------------') Black DarkGreen
+        Write-ColorText('There''s an update available for CoreCycler!'.PadRight(80, ' ')) Black DarkGreen
+        Write-ColorText(('Your current version: v' + $version).PadRight(80, ' ')) Black DarkGreen
+        Write-ColorText(('The latest version:   ' + $updateCheckResult['version']).PadRight(80, ' ')) Black DarkGreen
+        Write-ColorText('You can find the new version here:'.PadRight(80, ' ')) Black DarkGreen
+        Write-ColorText(($updateCheckResult['url']).PadRight(80, ' ')) Black DarkGreen
+        Write-ColorText('--------------------------------------------------------------------------------') Black DarkGreen
         Write-Text('')
         Write-Text('')
     }
@@ -9832,6 +10469,11 @@ try {
                                 Write-ColorText('y-Cruncher''s log file can be found at:') Cyan
                                 Write-ColorText($stressTestLogFilePath) Cyan
                             }
+                            elseif ($isLinpackXtreme) {
+                                Write-Text('')
+                                Write-ColorText('Linpack Xtreme''s log file can be found at:') Cyan
+                                Write-ColorText($stressTestLogFilePath) Cyan
+                            }
 
                             # And the path to the CoreCycler the log file for this run
                             Write-Text('')
@@ -9900,10 +10542,15 @@ try {
 
                 # Give it half a second
                 Start-Sleep -Milliseconds 500
+
+                if ($isPrime95 -or $isYCruncherWithLogging -or $isLinpackXtreme) {
+                    Get-NewLogfileEntries
+                }
+
                 Test-StressTestProgrammIsRunning $actualCoreNumber
             }
 
-            # On error, the Prime95 process is not running anymore, so skip this core
+            # When an exception is thrown, the stress test process is not running anymore, so skip this core
             catch {
                 Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (#2)')
 
@@ -9926,6 +10573,16 @@ try {
                             # Display the results.txt file name for Prime95 for this run
                             Write-Text('')
                             Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                            Write-ColorText($stressTestLogFilePath) Cyan
+                        }
+                        elseif ($isYCruncherWithLogging) {
+                            Write-Text('')
+                            Write-ColorText('y-Cruncher''s log file can be found at:') Cyan
+                            Write-ColorText($stressTestLogFilePath) Cyan
+                        }
+                        elseif ($isLinpackXtreme) {
+                            Write-Text('')
+                            Write-ColorText('Linpack Xtreme''s log file can be found at:') Cyan
                             Write-ColorText($stressTestLogFilePath) Cyan
                         }
 
@@ -10210,8 +10867,11 @@ finally {
                 Write-Debug('$checkProcess.Threads.Count: ' + $checkProcess.Threads.Count)
                 Write-Debug('$suspendedThreads.Count:     ' + $suspendedThreads.Count)
 
-                if ($checkProcess.Threads.Count -eq $suspendedThreads.Count) {
-                    Write-Debug('Yeah, the threads seems to be suspended, trying to resume')
+                # Do we need to have the counts to be equal at this point?
+                # I suppose not. Resume any thread that is suspended
+                #if ($checkProcess.Threads.Count -eq $suspendedThreads.Count) {
+                if ($suspendedThreads.Count -gt 0) {
+                    Write-Debug('There''s at least one suspended thread')
 
                     $null = Resume-Process -process $checkProcess -ignoreError $true
 
