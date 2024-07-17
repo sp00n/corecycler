@@ -12,6 +12,5 @@ test_programs/y-cruncher*/**/*.cfg
 test_programs/p95_*
 test_programs/p95/local.txt
 test_programs/p95/prime.txt
-test_programs/LinpackXtreme/**/*.ini
-test_programs/LinpackXtreme/**/results.txt
-test_programs/LinpackXtreme/binaries/x64/linpack_amd64_autofail.exe
+test_programs/linpack/*.ini
+tools/results.txt
