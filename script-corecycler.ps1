@@ -2,23 +2,22 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.6.0alpha1
+    0.9.6.0
 .DESCRIPTION
-    Sets the affinity of the selected stress test program process to only one core and cycles through
-    all the cores to test the stability of a Curve Optimizer setting
+    Sets the affinity of the selected stress test program process to only one
+    core and cycles through all the cores which allows to test the stability of
+    each individual core during single core loads
 .LINK
     https://github.com/sp00n/corecycler
 .LICENSE
     Creative Commons "CC BY-NC-SA"
     https://creativecommons.org/licenses/by-nc-sa/4.0/
     https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
-.NOTES
-    Please excuse my amateurish code in this file, it's my first attempt at writing in PowerShell ._.
 #>
 
 
 # Our current version
-$version = '0.9.5.3low-ver-num'
+$version = '0.9.5.3-RC1-for-0-9.6.0'
 
 
 # This defines the strict mode
@@ -49,6 +48,8 @@ $configsPath                   = 'configs'
 $configsPathAbsolute           = $PSScriptRoot + '\' + $configsPath + '\'
 $configDefaultPath             = $configsPathAbsolute + 'default.config.ini'
 $configUserPath                = $PSScriptRoot + '\config.ini'
+$canUseLogFile                 = $false
+$logBuffer                     = [System.Collections.ArrayList]::new()
 $logLevel                      = 2
 $logFilePath                   = 'logs'
 $logFilePathAbsolute           = $PSScriptRoot + '\' + $logFilePath + '\'
@@ -125,7 +126,6 @@ $testedCoresArray              = @{}
 
 
 # Processor and system related variables
-#$totalMemory                 = 0
 $freeMemory                  = 0
 $processor                   = $null
 $isIntelProcessor            = $false
@@ -204,8 +204,8 @@ useConfigFile =
 # Note: For AIDA64, you need to manually download and extract the portable ENGINEER version and put it
 #       in the /test_programs/aida64/ folder
 #       AIDA64 is somewhat sketchy as well
-# Note: There are two versions of y-Cruncher included, which you can select with either "YCRUNCHER" or "YCRUNCHER_OLD"
-#       The "old" version uses the binaries and test algorithms that were available before version 0.8 of y-Cruncher
+# Note: There are two versions of y-cruncher included, which you can select with either "YCRUNCHER" or "YCRUNCHER_OLD"
+#       The "old" version uses the binaries and test algorithms that were available before version 0.8 of y-cruncher
 #       See the comments in the [yCruncher] section for a more detailed description
 #
 # Default: PRIME95
@@ -223,9 +223,9 @@ stressTestProgram = PRIME95
 # You can also set it to "auto", in which case it will perform one "full" run for each core
 # For Prime95, it will wait until all of the FFT sizes in the selected preset have been tested and
 # will then continues to the next core and start again
-# For y-Cruncher the "auto" setting will wait until all selected tests have been finished for a core
+# For y-cruncher the "auto" setting will wait until all selected tests have been finished for a core
 # and will then continue to the next core
-# If logging has been disabled for y-Cruncher, it will fall back to 10 minutes per core
+# If logging has been disabled for y-cruncher, it will fall back to 10 minutes per core
 # For Aida64 the "auto" setting will default to 10 minutes per core
 #
 # Below are some examples of the runtime for one iteration of Prime95 for the various tests on my 5900X with one thread
@@ -419,31 +419,31 @@ FFTSize = Huge
 
 
 
-# y-Cruncher specific settings
+# y-cruncher specific settings
 # These apply to both "YCRUNCHER" and "YCRUNCHER_OLD"
 [yCruncher]
 
-# The test modes for y-Cruncher
-# y-Cruncher offer various test modes (binaries/algorithms), that require different instruction sets to be available
+# The test modes for y-cruncher
+# y-cruncher offer various test modes (binaries/algorithms), that require different instruction sets to be available
 # See the \test_programs\y-cruncher\Binaries\Tuning.txt file for a detailed explanation
 #
-# Test Mode Name       Automatic Selection For       Required Instruction Set
-# -----------------    --------------------------    ------------------------
-# "04-P4P"             Intel Pentium 4 Prescott      SSE, SSE2, SSE3
-# "05-A64 ~ Kasumi"    AMD Athlon 64                 x64, SSE, SSE2, SSE3
-# "08-NHM ~ Ushio"     Intel Nehalem                 x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
-# "11-SNB ~ Hina"      Intel Sandy Bridge            x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX
-# "12-BD2 ~ Miyu"      AMD Piledriver                x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA3
-# "13-HSW ~ Airi"      Intel Haswell                 x64, ABM, BMI1, BMI2, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
-# "14-BDW ~ Kurumi"    Intel Broadwell               x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
-# "17-SKX ~ Kotori"    Intel Skylake X [AVX512]      x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2, AVX512-(F/CD/VL/BW/DQ)
-# "17-ZN1 ~ Yukina"    AMD Zen 1 Summit Ridge        x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
-# "18-CNL ~ Shinoa"    Intel Cannon Lake [AVX512]    x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2, AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI)
-# "19-ZN2 ~ Kagari"    AMD Zen 2 Matisse             x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
-# "20-ZN3 ~ Yuzuki"    AMD Zen 3 Vermeer             x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
-# "22-ZN4 ~ Kizuna"    AMD Zen 4 Raphael [AVX512]    x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2, AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI/GFNI)
+# Test Mode Name       Automatic Selection For             Required Instruction Set
+# --------------       -----------------------             ------------------------
+# "04-P4P"             Intel Pentium 4 Prescott            SSE, SSE2, SSE3
+# "05-A64 ~ Kasumi"    AMD Athlon 64                       x64, SSE, SSE2, SSE3
+# "08-NHM ~ Ushio"     Intel Nehalem                       x64, SSE, SSE2, SSE3, SSSE3, SSE4.1
+# "11-SNB ~ Hina"      Intel Sandy Bridge                  x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX
+# "12-BD2 ~ Miyu"      AMD Piledriver                      x64, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, ABM, FMA3
+# "13-HSW ~ Airi"      Intel Haswell                       x64, ABM, BMI1, BMI2, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+# "14-BDW ~ Kurumi"    Intel Broadwell                     x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+# "17-SKX ~ Kotori"    Intel Skylake X [AVX512]            x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2, AVX512-(F/CD/VL/BW/DQ)
+# "17-ZN1 ~ Yukina"    AMD Zen 1 Summit Ridge              x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+# "18-CNL ~ Shinoa"    Intel Cannon Lake [AVX512]          x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2, AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI)
+# "19-ZN2 ~ Kagari"    AMD Zen 2 Matisse (and Zen 3)       x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2
+# "22-ZN4 ~ Kizuna"    AMD Zen 4 Raphael [AVX512]          x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2, AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI/GFNI)
+# "24-ZN5 ~ Komari"    AMD Zen 5 Granite Ridge [AVX512]    x64, ABM, BMI1, BMI2, ADX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX, FMA3, AVX2, AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI/VBMI2/GFNI)
 #
-# If you let y-Cruncher run on its own, it will automatically select one of these test modes depending on the processor it detects,
+# If you let y-cruncher run on its own, it will automatically select one of these test modes depending on the processor it detects,
 # this is the "Automatic Selection For" column in the table above
 # For CoreCycler however you need to select a specific test mode to be run
 # As a general rule you can assume that the less instructions are required, the less heat a test mode will produce, and therefore the boost clocks can go higher
@@ -455,23 +455,25 @@ FFTSize = Huge
 #
 # A quick overview:
 # "04-P4P" produces the least amount of heat and should therefore produce the highest boost clock on most tests
-# "14-BDW ~ Kurumi" is the test that y-Cruncher itself would default to if you run it on an Intel CPU up to at least 14th gen
-# "19-ZN2 ~ Kagari" is the test that y-Cruncher itself would default to for Zen 2/3 (Ryzen 3000/5000) (it doesn't choose "20-ZN3 ~ Yuzuki" for Zen 3)
-# "22-ZN4 ~ Kizuna" is the test that y-Cruncher itself would default to for Zen 4 (Ryzen 7000) and uses AVX512 instructions
+# "14-BDW ~ Kurumi" is the test that y-cruncher itself would default to if you run it on an Intel CPU up to at least 14th gen
+# "19-ZN2 ~ Kagari" is the test that y-cruncher itself would default to for Zen 2/3 (Ryzen 3000/5000)
+# "22-ZN4 ~ Kizuna" is the test that y-cruncher itself would default to for Zen 4 (Ryzen 7000) and uses AVX512 instructions
+# "24-ZN5 ~ Komari" is the test that y-cruncher itself would default to for Zen 5 (Ryzen 9000) and uses AVX512 instructions
 #
-# User experience seems to indicate that "19-ZN2 ~ Kagari" is pretty good for testing stability, even for Zen4 (Ryzen 7000) CPUs
+# User experience seems to indicate that "19-ZN2 ~ Kagari" is pretty good for testing stability, even for Zen 4 (Ryzen 7000) CPUs
+# It is unclear yet how Zen 5 / Ryzen 9000 CPUs will turn out
 # So as a recommendation, use "04-P4P" for low load testing and "19-ZN2 ~ Kagari" for higher/AVX2 load scenarios
-# As "14-BDW ~ Kurumi" is the test mode that y-Cruncher chooses for Intel CPUs, it is not entirely clear if this or "19-ZN2 ~ Kagari"
+# As "14-BDW ~ Kurumi" is the test mode that y-cruncher chooses for Intel CPUs, it is not entirely clear if this or "19-ZN2 ~ Kagari"
 # is the better test for AVX/AVX2 loads on Intel CPUs. At least they share the same instruction sets, so you might need to check for yourself
 #
 #
-# When using the old y-Cruncher version ("YCRUNCHER_OLD" selected as the stress test), there's an additional test mode you can use:
+# When using the old y-cruncher version ("YCRUNCHER_OLD" selected as the stress test), there's an additional test mode you can use:
 #
 # Test Mode Name       Automatic Selection For       Required Instruction Set
-# -----------------    ------------------------      ------------------------
+# --------------       -----------------------       ------------------------
 # "00-x86"             Legacy x86                    86/IA-32 since Pentium (BSWAP, CMPXCHG, CPUID, RDTSC, possibly others...)
 #
-# It is not available anymore in the recent version of y-Cruncher, which is now the default one ("YCRUNCHER"), so if you want to use a test
+# It is not available anymore in the recent version of y-cruncher, which is now the default one ("YCRUNCHER"), so if you want to use a test
 # with the least used instruction sets for low loads, you would need to switch to "YCRUNCHER_OLD" as the stress test
 # Also note that if you use "YCRUNCHER_OLD", you will also need to adapt the "tests" setting, as the old version uses different names
 #
@@ -479,35 +481,40 @@ FFTSize = Huge
 mode = 04-P4P
 
 
-# Set the test algorithms to run for y-Cruncher
-# y-Crunchers offers various different test algorithms that it can run, here you can select which ones it should use
-# Tag - Test Name               Component        CPU------Mem
-# BKT - Basecase + Karatsuba    Scalar Integer    -|--------
-# BBP - BBP Digit Extraction    AVX2 Float        |---------
-# SFT - Small In-Cache FFT      AVX2 Float        -|--------
-# SNT - Small In-Cache N63      AVX2 Integer      --|-------
-# SVT - Small In-Cache VT3      AVX2 Float        --|-------
-# FFT - Fast Fourier Transform  AVX2 Float        ---------|
-# N63 - Classic NTT (v2)        AVX2 Integer      ---|------
-# VT3 - Vector Transform (v3)   AVX2 Float        ----|-----
+# Set the test algorithms to run for y-cruncher
+# y-crunchers offers various different test algorithms that it can run, here you can select which ones it should use
+# Tag     Test Name                     Component        CPU------Mem
+# ---     ---------                     ---------        ------------
+# BKT     Basecase + Karatsuba          Scalar Integer   -|--------
+# BBP     BBP Digit Extraction          AVX2 Float       |---------
+# SFT     Small In-Cache FFTv3          AVX2 Float       -|--------
+# SFTv4   Small In-Cache FFTv4          AVX2 Float       -|--------
+# SNT     Small In-Cache N63            AVX2 Integer     --|-------
+# SVT     Small In-Cache VT3            AVX2 Float       --|-------
+# FFT     Fast Fourier Transform (v3)   AVX2 Float       ---------|
+# FFTv4   Fast Fourier Transform (v4)   AVX2 Float       ---------|
+# N63     Classic NTT (v2)              AVX2 Integer     ---|------
+# VT3     Vector Transform (v3)         AVX2 Float       ----|-----
+
 #
 # Use a comma separated list
-# Default: BKT, BBP, SFT, SNT, SVT, FFT, N63, VT3
-tests = BKT, BBP, SFT, SNT, SVT, FFT, N63, VT3
+# Default: BKT, BBP, SFT, SFTv4, SNT, SVT, FFT, FFTv4, N63, VT3
+tests = BKT, BBP, SFT, SFTv4, SNT, SVT, FFT, FFTv4, N63, VT3
 
 
-# Set the test algorithms to run for the "old" version of y-Cruncher ("YCRUNCHER_OLD" selected as the stress test)
+# Set the test algorithms to run for the "old" version of y-cruncher ("YCRUNCHER_OLD" selected as the stress test)
 # This older version (v0.7.10.9513) has a different set of tests to choose from
-# Tag - Test Name               Component        CPU------Mem
-# BKT - Basecase + Karatsuba    Scalar Integer    -|--------
-# BBP - BBP Digit Extraction    Floating-Point    |---------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# SFT - Small In-Cache FFT      Floating-Point    -|--------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# FFT - Fast Fourier Transform  Floating-Point    ---------|    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# N32 - Classic NTT (32-bit)    Scalar Integer    -----|----    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# N64 - Classic NTT (64-bit)    Scalar Integer    ---|------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# HNT - Hybrid NTT              Mixed Workload    -----|----
-# VST - Vector Transform        Floating-Point    ------|---    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
-# C17 - Code 17 Experiment      AVX2/512 Mixed    ---|------    depending on the selected mode uses AVX2 or AVX512
+# Tag   Test Name               Component         CPU------Mem
+# ---   ---------               ---------         ------------
+# BKT   Basecase + Karatsuba    Scalar Integer    -|--------
+# BBP   BBP Digit Extraction    Floating-Point    |---------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
+# SFT   Small In-Cache FFT      Floating-Point    -|--------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
+# FFT   Fast Fourier Transform  Floating-Point    ---------|    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
+# N32   Classic NTT (32-bit)    Scalar Integer    -----|----    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
+# N64   Classic NTT (64-bit)    Scalar Integer    ---|------    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
+# HNT   Hybrid NTT              Mixed Workload    -----|----
+# VST   Vector Transform        Floating-Point    ------|---    depending on the selected mode uses SSE, AVX, AVX2 or AVX512
+# C17   Code 17 Experiment      AVX2/512 Mixed    ---|------    depending on the selected mode uses AVX2 or AVX512
 #
 # Important:
 # "C17" (Code 17 Experiment) will only work with a AVX2 and AVX512 workload (so with mode "13-HSW ~ Airi" and above)
@@ -517,7 +524,7 @@ tests = BKT, BBP, SFT, SNT, SVT, FFT, N63, VT3
 #tests = BKT, BBP, SFT, FFT, N32, N64, HNT, VST
 
 
-# Set the duration in seconds for each test in y-Cruncher
+# Set the duration in seconds for each test in y-cruncher
 # The duration for each individual test selected above in the "tests" setting
 # Note: not the total runtime
 #
@@ -525,8 +532,8 @@ tests = BKT, BBP, SFT, SNT, SVT, FFT, N63, VT3
 testDuration = 60
 
 
-# Memory allocation for y-Cruncher
-# This allows you to customize the allocated memory for y-Cruncher
+# Memory allocation for y-cruncher
+# This allows you to customize the allocated memory for y-cruncher
 # Set the value in bytes or use a "short" notation like e.g. "64MB"
 # The default setting uses 13.4 MB (13418572 bytes, 12.8 MiB) for one resp. 26.7 MB (26567600 bytes, 25.3 MiB) for two threads
 # Note the difference between "MB" (1000 kilobyte = 1000*1000 byte) and "MiB" (1024 kibibyte = 1024*1024 byte)
@@ -535,10 +542,10 @@ testDuration = 60
 memory = Default
 
 
-# Enable or disable the custom logging wrapper for y-Cruncher
-# We are using the helpers/WriteConsoleToWriteFileWrapper.exe executable to capture the output of y-Cruncher and write it to a file
+# Enable or disable the custom logging wrapper for y-cruncher
+# We are using the helpers/WriteConsoleToWriteFileWrapper.exe executable to capture the output of y-cruncher and write it to a file
 # It is using the Microsoft Detours C++ library to do so
-# Here you can disable this behaviour and revert back to the original y-Cruncher execution
+# Here you can disable this behaviour and revert back to the original y-cruncher execution
 #
 # It is strongly recommended to leave this setting enabled, unless you're experiencing problems with it!
 #
@@ -586,7 +593,7 @@ maxMemory = 90
 
 # Which version of Linpack to use
 # There are four different choices available
-# 2018: Intel Linpack version 2018.0.3.1 - this is the same version as used in Linpack Xtreme 1.15
+# 2018: Intel Linpack version 2018.0.3.1 - this is the same version as used in Linpack Xtreme 1.1.5
 # 2019: Intel Linpack version 2019.0.3.1
 # 2021: Intel Linpack version 2021.1.1.0 - that this version always uses FASTEST (AVX2)
 # 2024: Intel Linpack version 2024.2.1.0 - that this version always uses FASTEST (AVX2)
@@ -861,7 +868,7 @@ stressTestProgramPriority = $stressTestProgramPriorityDefault
 #
 # If enabled, will display the window of the stress test program in the foreground, stealing focus
 # If disabled (default), the window will either be minimized to the tray (Prime95) or be moveed to the background,
-# without stealing focus of the currently opened window (y-Cruncher)
+# without stealing focus of the currently opened window (y-cruncher)
 #
 # Default: $stressTestProgramWindowToForegroundDefault
 stressTestProgramWindowToForeground = $stressTestProgramWindowToForegroundDefault
@@ -912,17 +919,17 @@ $stressTestPrograms = @{
         'command'             = '"%fullPathToExe%" -t'
         'windowBehaviour'     = 0
         'testModes'           = @(
-            'SSE',
-            'AVX',
-            'AVX2',
-            'AVX512',
+            'SSE'
+            'AVX'
+            'AVX2'
+            'AVX512'
             'CUSTOM'
         )
         'windowNames'         = @(
-            '^Prime95 \- Torture Test$',
-            '^Prime95 \- Self\-Test$',
-            '^Prime95 \- Not running$',
-            '^Prime95 \- Waiting for work$',
+            '^Prime95 \- Torture Test$'
+            '^Prime95 \- Self\-Test$'
+            '^Prime95 \- Not running$'
+            '^Prime95 \- Waiting for work$'
             '^Prime95$'
         )
     }
@@ -943,17 +950,17 @@ $stressTestPrograms = @{
         'command'             = '"%fullPathToExe%" -t'
         'windowBehaviour'     = 0
         'testModes'           = @(
-            'SSE',
-            'AVX',
-            'AVX2',
-            'AVX512',
+            'SSE'
+            'AVX'
+            'AVX2'
+            'AVX512'
             'CUSTOM'
         )
         'windowNames'         = @(
-            '^Prime95 \- Torture Test$',
-            '^Prime95 \- Self\-Test$',
-            '^Prime95 \- Not running$',
-            '^Prime95 \- Waiting for work$',
+            '^Prime95 \- Torture Test$'
+            '^Prime95 \- Self\-Test$'
+            '^Prime95 \- Not running$'
+            '^Prime95 \- Waiting for work$'
             '^Prime95$'
         )
     }
@@ -974,9 +981,9 @@ $stressTestPrograms = @{
         'command'             = '"%fullPathToExe%" /SAFEST /SILENT /SST %mode%'
         'windowBehaviour'     = 6
         'testModes'           = @(
-            'CACHE',
-            'CPU',
-            'FPU',
+            'CACHE'
+            'CPU'
+            'FPU'
             'RAM'
         )
         'windowNames'         = @(
@@ -985,7 +992,7 @@ $stressTestPrograms = @{
     }
 
     'ycruncher'     = @{
-        'displayName'         = 'y-Cruncher'
+        'displayName'         = 'y-cruncher'
         'processName'         = '' # Depends on the selected modeYCruncher
         'processNameExt'      = 'exe'
         'processNameForLoad'  = '' # Depends on the selected modeYCruncher
@@ -998,39 +1005,40 @@ $stressTestPrograms = @{
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
         'fullPathToLoadExe'   = $null
-        'command'             = 'cmd /C start /MIN /AFFINITY 0xC "y-Cruncher - %fileName%" "%fullPathToExe%" priority:2 config "%configFilePath%"'
-        'commandWithLogging'  = 'cmd /C start /MIN /AFFINITY 0xC "y-Cruncher - %fileName%" "%helpersPath%WriteConsoleToWriteFileWrapper.exe" "%fullPathToLoadExe%" priority:2 config "%configFilePath%" /dlllog:"%logFilePath%"'
+        'command'             = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%fullPathToExe%" priority:2 config "%configFilePath%"'
+        'commandWithLogging'  = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%helpersPath%WriteConsoleToWriteFileWrapper.exe" "%fullPathToLoadExe%" priority:2 config "%configFilePath%" /dlllog:"%logFilePath%"'
         'windowBehaviour'     = 6
         'testModes'           = @(
-            '00-x86',
-            '04-P4P',
-            '05-A64 ~ Kasumi',
-            '08-NHM ~ Ushio',
-            '11-SNB ~ Hina',
-            '13-HSW ~ Airi',
-            '14-BDW ~ Kurumi',
-            '17-ZN1 ~ Yukina',
-            '19-ZN2 ~ Kagari',
-            '20-ZN3 ~ Yuzuki',
+            '04-P4P'
+            '05-A64 ~ Kasumi'
+            '08-NHM ~ Ushio'
+            '11-SNB ~ Hina'
+            '13-HSW ~ Airi'
+            '14-BDW ~ Kurumi'
+            '17-ZN1 ~ Yukina'
+            '19-ZN2 ~ Kagari'
 
             # The following settings seem to be designed for Intel CPUs and don't run on Ryzen CPUs
-            '17-SKX ~ Kotori',
-            '18-CNL ~ Shinoa',
+            '17-SKX ~ Kotori'
+            '18-CNL ~ Shinoa'
 
             # This setting is designed for Ryzen 7000 (Zen 4) CPUs and uses AVX-512
             '22-ZN4 ~ Kizuna'
+
+            # This setting is designed for Ryzen 9000 (Zen 5) CPUs and uses AVX-512
+            '24-ZN5 ~ Komari'
         )
-        'availableTests'      = @('BKT', 'BBP', 'SFT', 'SNT', 'SVT', 'FFT', 'N63', 'VT3')
-        'defaultTests'        = @('BKT', 'BBP', 'SFT', 'SNT', 'SVT', 'FFT', 'N63', 'VT3')
+        'availableTests'      = @('BKT', 'BBP', 'SFT', 'SFTv4', 'SNT', 'SVT', 'FFT', 'FFTv4', 'N63', 'VT3')
+        'defaultTests'        = @('BKT', 'BBP', 'SFT', 'SFTv4', 'SNT', 'SVT', 'FFT', 'FFTv4', 'N63', 'VT3')
         'windowNames'         = @(
             '' # Depends on the selected modeYCruncher
         )
     }
 
 
-    # Version 0.7.10 of y-Cruncher
+    # Version 0.7.10 of y-cruncher
     'ycruncher_old' = @{
-        'displayName'         = 'y-Cruncher [0.7.10]'
+        'displayName'         = 'y-cruncher [0.7.10]'
         'processName'         = '' # Depends on the selected modeYCruncher
         'processNameExt'      = 'exe'
         'processNameForLoad'  = '' # Depends on the selected modeYCruncher
@@ -1043,25 +1051,25 @@ $stressTestPrograms = @{
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
         'fullPathToLoadExe'   = $null
-        'command'             = 'cmd /C start /MIN /AFFINITY 0xC "y-Cruncher - %fileName%" "%fullPathToExe%" priority:2 config "%configFilePath%"'
-        'commandWithLogging'  = 'cmd /C start /MIN /AFFINITY 0xC "y-Cruncher - %fileName%" "%helpersPath%WriteConsoleToWriteFileWrapper.exe" "%fullPathToLoadExe%" priority:2 config "%configFilePath%" /dlllog:"%logFilePath%"'
+        'command'             = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%fullPathToExe%" priority:2 config "%configFilePath%"'
+        'commandWithLogging'  = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%helpersPath%WriteConsoleToWriteFileWrapper.exe" "%fullPathToLoadExe%" priority:2 config "%configFilePath%" /dlllog:"%logFilePath%"'
         'windowBehaviour'     = 6
         'testModes'           = @(
-            '00-x86',
-            '04-P4P',
-            '05-A64 ~ Kasumi',
-            '08-NHM ~ Ushio',
-            '11-SNB ~ Hina',
-            '13-HSW ~ Airi',
-            '14-BDW ~ Kurumi',
-            '17-ZN1 ~ Yukina',
-            '19-ZN2 ~ Kagari',
-            '20-ZN3 ~ Yuzuki',
+            '00-x86'
+            '04-P4P'
+            '05-A64 ~ Kasumi'
+            '08-NHM ~ Ushio'
+            '11-SNB ~ Hina'
+            '13-HSW ~ Airi'
+            '14-BDW ~ Kurumi'
+            '17-ZN1 ~ Yukina'
+            '19-ZN2 ~ Kagari'
+            '20-ZN3 ~ Yuzuki'
 
             # The following settings seem to be designed for Intel CPUs and don't run on Ryzen CPUs
-            '11-BD1 ~ Miyu',
-            '17-SKX ~ Kotori',
-            '18-CNL ~ Shinoa',
+            '11-BD1 ~ Miyu'
+            '17-SKX ~ Kotori'
+            '18-CNL ~ Shinoa'
 
             # This setting is designed for Ryzen 7000 (Zen 4) CPUs and uses AVX-512
             '22-ZN4 ~ Kizuna'
@@ -1092,10 +1100,10 @@ $stressTestPrograms = @{
         'command'             = 'cmd /C start /MIN "Linpack CoreCycler" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack CoreCycler''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; $logFilePath = ''%logFilePath%''; if (!([IO.File]::Exists($logFilePath))) { [IO.File]::WriteAllLines($logFilePath, (Get-Date -Format HH:mm:ss)) }; "%fullPathToLoadExe%" ''%configFilePath%'' | Tee-Object -FilePath $logFilePath -Append"'
         'windowBehaviour'     = 6
         'testModes'           = @(
-            'SLOWEST',
-            'SLOW',
-            'MEDIUM',
-            'FAST',
+            'SLOWEST'
+            'SLOW'
+            'MEDIUM'
+            'FAST'
             'FASTEST'
         )
         'availableTests'      = @()
@@ -1690,6 +1698,12 @@ function Write-LogEntry {
         [Parameter(Mandatory=$false)] [Switch] $NoNewline
     )
 
+    # If we cannot use the logfile (yet), store the messages in a buffer
+    if (!$canUseLogFile) {
+        [Void] $Script:logBuffer.Add($string)
+        return
+    }
+
     # The second parameter defines if to append ($true) or overwrite ($false)
     $stream = [System.IO.StreamWriter]::new($logFileFullPath, $true, ([System.Text.Utf8Encoding]::new()))
 
@@ -2240,7 +2254,7 @@ function Show-FinalSummary {
                     $returnString += ('There have been WHEA errors while testing:') + [Environment]::NewLine
                 }
 
-                [Array] $filteredCoresWithWheaErrors = $coresWithWheaErrorsCounter.GetEnumerator() | Where-Object { $_.Value -gt 0 }
+                $filteredCoresWithWheaErrors = @($coresWithWheaErrorsCounter.GetEnumerator() | Where-Object { $_.Value -gt 0 })
                 $coresWithWheaErrorsCounterString = ($filteredCoresWithWheaErrors.GetEnumerator() | Sort-Object -Property Name | ForEach-Object { 'Core ' + $_.Name.ToString() +' (' + $_.Value.ToString() + 'x)' }) -Join ', '
 
                 $returnString += (' - ' + $coresWithWheaErrorsCounterString) + [Environment]::NewLine
@@ -2346,7 +2360,7 @@ function Show-FinalSummary {
                 Write-ColorText('There have been WHEA errors while testing: ') Cyan
             }
 
-            [Array] $filteredCoresWithWheaErrors = $coresWithWheaErrorsCounter.GetEnumerator() | Where-Object { $_.Value -gt 0 }
+            $filteredCoresWithWheaErrors = @($coresWithWheaErrorsCounter.GetEnumerator() | Where-Object { $_.Value -gt 0 })
             $coresWithWheaErrorsCounterString = ($filteredCoresWithWheaErrors.GetEnumerator() | Sort-Object -Property Name | ForEach-Object { 'Core ' + $_.Name.ToString() +' (' + $_.Value.ToString() + 'x)' }) -Join ', '
 
             Write-ColorText(' - ' + $coresWithWheaErrorsCounterString) Cyan
@@ -2573,10 +2587,12 @@ function Suspend-ProcessThreads {
     Write-Debug('           ID:') -NoNewline
 
     $process.Threads | ForEach-Object {
-        # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
-        $currentThreadId = [ThreadHandler]::OpenThread([ThreadHandler]::THREAD_SUSPEND_RESUME, $false, $_.Id)
+        $currentThreadId = $_.Id
 
-        if ($currentThreadId -eq [IntPtr]::Zero) {
+        # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
+        $currentThreadHandle = [ThreadHandler]::OpenThread([ThreadHandler]::THREAD_SUSPEND_RESUME, $false, $currentThreadId)
+
+        if ($currentThreadHandle -eq [IntPtr]::Zero) {
             continue
         }
 
@@ -2589,8 +2605,9 @@ function Suspend-ProcessThreads {
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread
         # Do we also need Wow64SuspendThread?
         # https://docs.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-wow64suspendthread
-        $returnedPreviousSuspendCount = [ThreadHandler]::SuspendThread($currentThreadId)
+        $returnedPreviousSuspendCount = [ThreadHandler]::SuspendThread($currentThreadHandle)
         $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        [Void] [ThreadHandler]::CloseHandle($currentThreadHandle)
 
         #Write-Debug(' ... Returned suspend count was: ' + $returnedPreviousSuspendCount) -NoNewline -SkipIndentation
 
@@ -2612,7 +2629,8 @@ function Suspend-ProcessThreads {
                 $errorResult = Get-DotNetErrorMessage $errorCode
 
                 $errorEntry = $errorResult
-                $errorEntry['threadId'] = $currentThreadId
+                $errorEntry['threadId']     = $currentThreadId
+                $errorEntry['threadHandle'] = $currentThreadHandle
                 $errorEntry['suspendCount'] = $returnedPreviousSuspendCount
 
                 $suspendErrors += $errorResult
@@ -2622,6 +2640,7 @@ function Suspend-ProcessThreads {
             else {
                 $suspendErrors += @{
                     'threadId'     = $currentThreadId
+                    'threadHandle' = $currentThreadHandle
                     'suspendCount' = $returnedPreviousSuspendCount
                     'errorCode'    = 0
                     'errorMessage' = 'Failed to suspend thread. No error code was provided'
@@ -2707,10 +2726,12 @@ function Resume-ProcessThreads {
     Write-Debug('           ID:') -NoNewline
 
     $process.Threads | ForEach-Object {
-        # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
-        $currentThreadId = [ThreadHandler]::OpenThread([ThreadHandler]::THREAD_SUSPEND_RESUME, $false, $_.Id)
+        $currentThreadId = $_.Id
 
-        if ($currentThreadId -eq [IntPtr]::Zero) {
+        # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
+        $currentThreadHandle = [ThreadHandler]::OpenThread([ThreadHandler]::THREAD_SUSPEND_RESUME, $false, $currentThreadId)
+
+        if ($currentThreadHandle -eq [IntPtr]::Zero) {
             continue
         }
 
@@ -2727,8 +2748,10 @@ function Resume-ProcessThreads {
         # Maybe it was set by the stress test program itself, and we don't want to interfere
 
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread
-        $returnedPreviousSuspendCount = [ThreadHandler]::ResumeThread($currentThreadId)
+        $returnedPreviousSuspendCount = [ThreadHandler]::ResumeThread($currentThreadHandle)
         $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+        [Void] [ThreadHandler]::CloseHandle($currentThreadHandle)
 
         #Write-Debug(' ... Returned suspend count was: ' + $returnedPreviousSuspendCount) -NoNewline -SkipIndentation
 
@@ -2746,7 +2769,8 @@ function Resume-ProcessThreads {
                 $errorResult = Get-DotNetErrorMessage $errorCode
 
                 $errorEntry = $errorResult
-                $errorEntry['threadId'] = $currentThreadId
+                $errorEntry['threadId']     = $currentThreadId
+                $errorEntry['threadHandle'] = $currentThreadHandle
                 $errorEntry['suspendCount'] = $returnedPreviousSuspendCount
 
                 $resumeErrors += $errorResult
@@ -2756,6 +2780,7 @@ function Resume-ProcessThreads {
             else {
                 $resumeErrors += @{
                     'threadId'     = $currentThreadId
+                    'threadHandle' = $currentThreadHandle
                     'suspendCount' = $returnedPreviousSuspendCount
                     'errorCode'    = 0
                     'errorMessage' = 'Failed to resume thread. No error code was provided'
@@ -2765,7 +2790,7 @@ function Resume-ProcessThreads {
             #throw('Failed to resume thread. No error code was provided.')
         }
 
-        $processedThreadsArray     += $currentThreadId
+        $processedThreadsArray     += $currentThreadHandle
         $previousSuspendCountArray += $returnedPreviousSuspendCount
 
         # If the previous suspend count is greater than one, the thread had multiple suspend states
@@ -2979,7 +3004,7 @@ function Get-CpuFrequency {
 function Get-InitialLogLevel {
     # Check if the config.ini file exists
     if (!(Test-Path $configUserPath -PathType Leaf)) {
-        return $returnObj
+        return $logLevel
     }
 
     $logLevel = $Script:logLevel
@@ -2996,7 +3021,7 @@ function Get-InitialLogLevel {
         $foundCustomConfigFile = $foundCustomConfigLine.Line -Match '=\s*(.+)'
 
         if ($foundCustomConfigFile -and $Matches[1]) {
-            $configPathTemp = $PSScriptRoot + '\' + $Matches[1].Trim()
+            $configPathTemp = $PSScriptRoot + '\' + $Matches[1].Trim(' ', '"', '''', [Char]0x09)
 
             if (Test-Path $configPathTemp -PathType Leaf) {
                 $configPath = $configPathTemp
@@ -3097,7 +3122,7 @@ function Start-UpdateCheckBackgroundJob {
         # Get the current version int value
         $null = $currentVersionString -Match '(?-i)(?<major>\d+)\.(?<minor>\d+)\.(?<revision>\d+)\.(?<build>\d+)(?<string>[aA-zZ0-9_\.\-]*)'
 
-        Write-Debug('The current version: ' + $currentVersionString)
+        Write-Debug('The current version string:   ' + $currentVersionString)
 
         $currentVersion['major']    = $(if ($Matches['major'])    { $Matches['major'] }    else { 0 })
         $currentVersion['minor']    = $(if ($Matches['minor'])    { $Matches['minor'] }    else { 0 })
@@ -3109,7 +3134,7 @@ function Start-UpdateCheckBackgroundJob {
         # E.g. 0.9.5.3alpha1 would become 9005002, which makes it equal to 0.9.5.2
         # This is to prevent that 0.9.5.3alpha1 would not register an available update for the final 0.9.5.3 (without string)
         [UInt64] $currentVersionInt = [UInt64] $currentVersion['major'] * 1000000000000 + [UInt64] $currentVersion['minor'] * 1000000000 + [UInt64] $currentVersion['revision'] * 1000000 + [UInt64] $currentVersion['build'] * 1000 + $currentVersion['string']
-        Write-Debug('currentVersionInt:   ' + $currentVersionInt)
+        Write-Debug('Int value of current version: ' + $currentVersionInt)
 
 
         # Check the stored .updatecheck file
@@ -3151,18 +3176,18 @@ function Start-UpdateCheckBackgroundJob {
                     }
 
 
-                    Write-Debug('$lastCheckedTime:       ' + $lastCheckedTime)
-                    Write-Debug('$lastCheckedVersionInt: ' + $lastCheckedVersionInt)
-                    Write-Debug('$lastCheckedVersionStr: ' + $lastCheckedVersionStr)
-                    Write-Debug('$lastCheckedUrl:        ' + $lastCheckedUrl)
+                    Write-Debug('Last checked timestamp:   ' + $lastCheckedTime)
+                    Write-Debug('Last checked version int: ' + $lastCheckedVersionInt)
+                    Write-Debug('Last checked version str: ' + $lastCheckedVersionStr)
+                    Write-Debug('Last checked URL:         ' + $lastCheckedUrl)
 
                     [UInt64] $curTimeStamp = Get-Date -UFormat %s -Millisecond 0
                     [UInt64] $sinceLastCheck = $curTimeStamp - $lastCheckedTime
                     [UInt64] $maxSeconds = $updateSettings.updateCheckFrequency * 60 * 60
 
-                    Write-Debug('$curTimeStamp:          ' + $curTimeStamp)
-                    Write-Debug('$sinceLastCheck:        ' + $sinceLastCheck + 's (' + [Math]::Round($sinceLastCheck/60/60, 3)  + 'h)')
-                    Write-Debug('$maxSeconds:            ' + $maxSeconds + 's (' + [Math]::Round($maxSeconds/60/60, 3)  + 'h)')
+                    Write-Debug('Current timestamp:        ' + $curTimeStamp)
+                    Write-Debug('Time since last check:    ' + $sinceLastCheck + 's (' + [Math]::Round($sinceLastCheck/60/60, 3)  + 'h)')
+                    Write-Debug('Check interval:           ' + $maxSeconds + 's (' + [Math]::Round($maxSeconds/60/60, 3)  + 'h)')
 
                     if ($sinceLastCheck -gt $maxSeconds) {
                         Write-Debug('The check interval time has been exceeded, initiate a new online check')
@@ -3245,7 +3270,7 @@ function Start-UpdateCheckBackgroundJob {
         $global:ProgressPreference = $originalProgressPreference
         [System.Net.ServicePointManager]::MaxServicePointIdleTime = $oriIdleTime
 
-        Write-Debug('$statusCode: ' + $statusCode)
+        Write-Debug('Web request status code: ' + $statusCode)
 
 
         # Couldn't get the releases
@@ -3308,7 +3333,7 @@ function Start-UpdateCheckBackgroundJob {
         }
 
 
-        Write-Debug('$lastReleaseEntry.tag_name: ' + $lastReleaseEntry.tag_name)
+        Write-Debug('Tag name of last release:  ' + $lastReleaseEntry.tag_name)
 
         $lastReleaseString = $lastReleaseEntry.tag_name
 
@@ -3321,7 +3346,7 @@ function Start-UpdateCheckBackgroundJob {
 
         [UInt64] $lastReleaseInt = [UInt64] $lastRelease['major'] * 1000000000000 + [UInt64] $lastRelease['minor'] * 1000000000 + [UInt64] $lastRelease['revision'] * 1000000 + [UInt64] $lastRelease['build'] * 1000
 
-        Write-Debug('lastReleaseInt: ' + $lastReleaseInt)
+        Write-Debug('Int value of last release: ' + $lastReleaseInt)
 
         if ($lastReleaseInt -gt $currentVersionInt) {
             Write-Debug('New Version found! ' + $lastReleaseString + ' - ' + $lastReleaseInt)
@@ -3393,7 +3418,7 @@ function Get-InitialUpdateCheckSetting {
         $foundCustomConfigFile = $foundCustomConfigLine.Line -Match '=\s*(.+)'
 
         if ($foundCustomConfigFile -and $Matches[1]) {
-            $configPathTemp = $PSScriptRoot + '\' + $Matches[1].Trim()
+            $configPathTemp = $PSScriptRoot + '\' + $Matches[1].Trim(' ', '"', '''', [Char]0x09)
             Write-Debug('Custom config file: ' + $configPathTemp)
 
             if (Test-Path $configPathTemp -PathType Leaf) {
@@ -3414,7 +3439,7 @@ function Get-InitialUpdateCheckSetting {
         $foundUpdateCheckMatch = $foundUpdateCheckLine.Line -Match '=\s*(\d+)\s*'
 
         if ($foundUpdateCheckMatch -and $Matches[1]) {
-            $isEnabled = [Bool] [Int] $Matches[1].Trim()    # This should only return false for 0
+            $isEnabled = [Bool] [Int] $Matches[1].Trim(' ', '"', '''', [Char]0x09)    # This should only return false for 0
             $returnObj['enabled'] = $isEnabled
         }
     }
@@ -3427,7 +3452,7 @@ function Get-InitialUpdateCheckSetting {
         $foundFrequencyMatch = $foundFrequencyLine.Line -Match '=\s*(\d+\.?\d*)\s*'     # Allow decimal values
 
         if ($foundFrequencyMatch -and $Matches[1]) {
-            $frequency = [Decimal] $Matches[1].Trim()
+            $frequency = [Decimal] $Matches[1].Trim(' ', '"', '''', [Char]0x09)
             $returnObj['frequency'] = $frequency
         }
     }
@@ -3508,7 +3533,7 @@ function Import-Settings {
         # Sections are in brackets: []
         '^\[(.+)\]$' {
             # Remove any spaces, double quotes and single quotes around the section name
-            $section = $Matches[1].ToString().Trim(' ', '"', '''')
+            $section = $Matches[1].ToString().Trim(' ', '"', '''', [Char]0x09)
             $ini[$section] = @{}
         }
 
@@ -3516,9 +3541,11 @@ function Import-Settings {
         '^(.+)\s?=\s?(.*)$' {
             $setting = $null
             $name, $value = $Matches[1..2]
-            $name  = $name.ToString().Trim(' ', '"', '''')
-            $value = $value.ToString().Trim(' ', '"', '''')
+            $name  = $name.ToString().Trim(' ', '"', '''', [Char]0x09)
+            $value = $value.ToString().Trim(' ', '"', '''', [Char]0x09)
 
+            # Treat a "#" as an inline comment and remove it and anything after from the value
+            $value = $(if ($value.IndexOf('#') -gt -1) { $value.Split('#')[0].Trim(' ', '"', '''', [Char]0x09) } else { $value })
 
             # Special handling for coresToIgnore, which can be empty
             if ($name -eq 'coresToIgnore') {
@@ -3540,7 +3567,7 @@ function Import-Settings {
             }
 
 
-            # Special handling for y-Cruncher tests
+            # Special handling for y-cruncher tests
             # Split them into an array
             elseif ($section -eq 'yCruncher' -and $name -eq 'tests') {
                 $thisSetting = @()
@@ -3553,12 +3580,12 @@ function Import-Settings {
                 # Split the string by comma
                 $value -Split ',\s*' | ForEach-Object {
                     if ($_.Length -gt 0) {
-                        $thisSetting += $_.ToString().Trim(' ', '"', '''').ToUpperInvariant()
+                        $thisSetting += $_.ToString().Trim(' ', '"', '''', [Char]0x09).ToUpperInvariant()
                     }
                 }
 
-                # The possible y-Cruncher test values
-                # Depends on the version of y-Cruncher the user has selected
+                # The possible y-cruncher test values
+                # Depends on the version of y-cruncher the user has selected
                 # Hopefully we already have the [General] section parsed
                 $possibleTests = $stressTestPrograms.ycruncher.availableTests
                 $selectedTests = @()
@@ -3569,15 +3596,17 @@ function Import-Settings {
                     }
                 }
 
-                # The setting is not available yet, merge both available tests
+                # The [General] section is not available yet, merge both available tests
                 else {
                     $possibleTests = @($possibleTests + $stressTestPrograms.ycruncher_old.availableTests) | Sort-Object | Get-Unique
                 }
 
                 # Filter for only the possible test values
                 $thisSetting | ForEach-Object {
-                    if ($possibleTests.Contains($_.ToUpperInvariant())) {
-                        $selectedTests += $_.ToUpperInvariant()
+                    $foundKey = $possibleTests.ToUpperInvariant().IndexOf($_.ToUpperInvariant())
+
+                    if ($foundKey -gt -1) {
+                        $selectedTests += $possibleTests[$foundKey]
                     }
                 }
 
@@ -3714,7 +3743,7 @@ function Get-Settings {
 
 
     # Check if we should use a custom config file, and if the file exists
-    if ($userSettings['General']['useConfigFile'] -and $userSettings['General']['useConfigFile'].ToString().Trim(' ', '"', '''').Length -gt 0) {
+    if ($userSettings['General']['useConfigFile'] -and $userSettings['General']['useConfigFile'].ToString().Trim(' ', '"', '''', [Char]0x09).Length -gt 0) {
         $customConfigPath = $PSScriptRoot + '\' + $userSettings['General']['useConfigFile']
 
         Write-Text('A custom config file was provided:')
@@ -3734,6 +3763,8 @@ function Get-Settings {
         catch {
             Write-ColorText('WARNING: "' + $customConfigPath + '" is corrupted!') Yellow
             Write-ColorText('         Using the values from the config.ini instead') Yellow
+            Write-Text('')
+            Write-ColorText('Error: ' + $_) Yellow
         }
     }
 
@@ -3748,6 +3779,7 @@ function Get-Settings {
     # Couldn't get the a valid content from the config.ini, replace it with the default
     catch {
         Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
+        Write-ColorText($_) Yellow
 
         if (!(Test-Path $configDefaultPath -PathType Leaf)) {
             Exit-WithFatalError -text 'Neither config.ini nor default.config.ini found!'
@@ -3771,6 +3803,10 @@ function Get-Settings {
                 # Allow both ycruncher and y-cruncher
                 if ($userSetting.Name -eq 'stressTestProgram' -and $userSetting.Value.ToLowerInvariant() -eq 'y-cruncher') {
                     $userSetting.Value = 'ycruncher'
+                }
+
+                if (!$settings[$sectionEntry.Name]) {
+                    throw 'Found an unexpected section in the config: [' + $sectionEntry.Name + ']'
                 }
 
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
@@ -3818,12 +3854,12 @@ function Get-Settings {
         $settings.mode = $settings.yCruncher.mode.ToUpperInvariant()
     }
     elseif ($isLinpack) {
-        # The mode is only available for 2018 and 2019, anything newer always uses FASTEST
+        # The mode settings is really only available for 2018 and 2019, anything newer always uses FASTEST
         $settings.mode =  $(if ($settings.Linpack.version -eq '2018' -or $settings.Linpack.version -eq '2019') { $settings.Linpack.mode.ToUpperInvariant() } else { 'FASTEST' })
     }
 
 
-    # The selected mode for y-Cruncher = the binary to execute
+    # The selected mode for y-cruncher = the binary to execute
     # Override the variables
     if ($isYCruncher -or $isYCruncherOld) {
         $yCruncherBinary = $stressTestPrograms[$settings.General.stressTestProgram]['testModes'] | Where-Object -FilterScript { $_.ToLowerInvariant() -eq $settings.yCruncher.mode.ToLowerInvariant() }
@@ -3849,18 +3885,7 @@ function Get-Settings {
     # Select the binary for Linpack, depending on the installed processor
     # Linpack is started via powershell, so that we can both see the output and create a log file
     if ($isLinpack) {
-        # Linpack Xtreme uses two different executables, one for Intel and one for AMD (resp. the rest)
-        # The internet says that the linpack library checks for "GenuineIntel", so let's do that as well
-        <#
-        if ($isIntelProcessor) {
-            $linpackBinary = 'linpack_intel64'
-        }
-        else {
-            $linpackBinary = 'linpack_amd64'
-        }
-        #>
-
-        # The verion we're now using (linpack_patched.exe) is already patched to not check for the CPU manufacturer anymore
+        # The version we're now using (linpack_patched.exe) is already patched to not check for the CPU manufacturer anymore
         # Hopefully this is enough
         # There are different versions available
         $versionsToPath = @{
@@ -3895,6 +3920,20 @@ function Get-Settings {
 
     foreach ($mode in $modesArray) {
         if (!($Script:stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $mode)) {
+            # Add a special error message if trying to run 00-x86 for the newer y-cruncher versions
+            if (!$isYCruncherOld -and $mode.ToUpperInvariant() -eq '00-X86') {
+                Write-ColorText('FATAL ERROR: Invalid "mode" setting detected!') Red
+                Write-ColorText('Trying to run "00-x86", but y-cruncher doesn''t support this anymore!') Red
+                Write-ColorText('To be able to use "00-x86", you will need to select "YCRUNCHER_OLD" as the stress test.') Red
+                Write-ColorText('The newer versions of y-cruncher do not support this mode anymore.') Red
+                Write-ColorText('The new minimum "mode" is now "04-P4P" instead.') Red
+                Write-Text('')
+                Write-ColorText('You will also need to adjust the "tests" setting accordingly, as these have changed as well.') Red
+                Write-ColorText('See the comments in the config file for a more detailed explanation.') Red
+                Exit-WithFatalError
+            }
+
+            # The regular error message
             Exit-WithFatalError -text ('The selected test mode "' + $mode + '" is not available for ' + $stressTestPrograms[$settings.General.stressTestProgram]['displayName'] + '!')
         }
     }
@@ -3914,6 +3953,7 @@ function Get-Settings {
 
     $Script:logFileName     = $logFilePrefix + '_' + $scriptStartDateTime + '_' + $settings.General.stressTestProgram.ToUpperInvariant() + '_' + $modeString + '.log'
     $Script:logFileFullPath = $logFilePathAbsolute + $logFileName
+    $Script:canUseLogFile   = $true
 
 
     # Debug settings may override default settings
@@ -3938,6 +3978,19 @@ function Get-Settings {
 
     $Script:enablePerformanceCounters = ((!$Script:disableCpuUtilizationCheck -and $Script:useWindowsPerformanceCountersForCpuUtilization) -or $Script:enableCpuFrequencyCheck)
     $Script:enableUpdateCheck = [Bool] $settings.Update.enableUpdateCheck
+
+
+    # At this point the final log file is available, write the buffer to it (if available)
+    if ($logBuffer.Count -gt 0) {
+        forEach ($logEntry in $logBuffer) {
+            Write-LogEntry $logEntry
+        }
+
+        $logBuffer = $null
+    }
+
+
+    Write-Debug('Settings parsed')
 }
 
 
@@ -4035,7 +4088,7 @@ function Get-FormattedRuntimePerCoreString {
 
 <#
 .DESCRIPTION
-    Get the estimated runtime per core for the y-Cruncher "auto" setting
+    Get the estimated runtime per core for the y-cruncher "auto" setting
 .PARAMETER
     [Void]
 .OUTPUTS
@@ -4295,7 +4348,7 @@ function Get-StressTestProcessInformation {
     # Select the correct one
     $searchForProcess = ('.*' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '\.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '$')
 
-    # If we're running the wrapper for y-Cruncher to capture the output, we need to check the commandline
+    # If we're running the wrapper for y-cruncher to capture the output, we need to check the commandline
     if ($isYCruncherWithLogging) {
         Write-Verbose('enableYCruncherLoggingWrapper has been set, special handling')
 
@@ -4338,58 +4391,9 @@ function Get-StressTestProcessInformation {
             # Return true if the window was identified successfully, so that filteredWindowObj will be the current object
             return $hasMatch
         }
-
-        # We haven't found the window for the stress test. It may be buried inside the Windows Terminal
-        # If Windows Terminal is installed and the default, we cannot search for the window name directly, as Windows Terminal is hijacking it
-        # I.e. the WindowsTerminal.exe will be the found window, and not the powershell.exe that's running inside it
-        # Therefore, search through all the processes that have the original windowObj as their parent and search their command line
-        # There's apparently no way to get this window by its name then
-        # Search for the executable and select it's parent window instead
-        if (!$filteredWindowObj) {
-            Write-Debug('Couldn''t find the window process, it may be buried inside the Windows Terminal')
-            Write-Debug('Looking for the stress test process instead...')
-
-            # Look for any instances of that process that are run from the CoreCycler directory
-            # Need to escape the backslashes
-            $searchForProcessWql = ($stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']).Replace('\', '\\')
-
-            Write-Debug('Looking for: "' + $searchForProcessWql + '"')
-
-            $cimStressTestProcesses = Get-CimInstance Win32_Process -Filter "ExecutablePath = '$searchForProcessWql'"
-
-            # This should really be just one process now, with one parent process
-            # Also, we have our stress test process now, and wouldn't need to get it again below, but oh well
-            #foreach ($testProgram in $stressTestPrograms.GetEnumerator()) {
-            foreach ($currentProcess in $cimStressTestProcesses) {
-                $parentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($currentProcess.ParentProcessId)"
-
-                # We need to filter our main windows again for this found process, otherwise we won't have WinTitle, MainWindowHandle, etc
-                $filteredWindowObj = [GetWindows.Main]::GetWindows() | Where-Object {
-                    $hasMatch = $_.ProcessId -eq $parentProcess.ProcessId
-
-                    if ($hasMatch) {
-                        Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
-                        Write-Verbose('   WinTitle:          ' + $_.WinTitle)
-                        Write-Verbose('   MainWindowHandle:  ' + $_.MainWindowHandle)
-                        Write-Verbose('   Process Path:      ' + $_.ProcessPath)
-                        Write-Verbose('   hasMatch:          ' + $hasMatch)
-                    }
-
-                    return $hasMatch
-                }
-
-                # Break if the window was identified successfully, so that filteredWindowObj will be the current process object
-                if ($filteredWindowObj) {
-                    break
-                }
-            }
-
-            Write-Debug('The window obj we found by searching for the parent:')
-            Write-Debug($filteredWindowObj | Format-Table | Out-String)
-        }
     }
 
-    # Regular y-Cruncher or other stress test programs
+    # Regular y-cruncher or other stress test programs
     else {
         Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
 
@@ -4398,6 +4402,58 @@ function Get-StressTestProcessInformation {
             $_.ProcessPath -Match $searchForProcess
         }
     }
+
+
+    # We haven't found the window for the stress test. It may be buried inside the Windows Terminal
+    # If Windows Terminal is installed and the default, we cannot search for the window name directly, as Windows Terminal is hijacking it
+    # I.e. the WindowsTerminal.exe will be the found window, and not the powershell.exe that's running inside it
+    # Therefore, search through all the processes that have the original windowObj as their parent and search their command line
+    # There's apparently no way to get this window by its name then
+    # Search for the executable and select it's parent window instead
+    if (!$filteredWindowObj) {
+        Write-Debug('Couldn''t find the window process, it may be buried inside the Windows Terminal')
+        Write-Debug('Looking for the stress test process instead...')
+
+        # Look for any instances of that process that are run from the CoreCycler directory
+        # Need to escape the backslashes
+        $searchForProcessWql = ($stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']).Replace('\', '\\')
+
+        Write-Debug('Looking for the process where the ExecutablePath is:')
+        Write-Debug($searchForProcessWql)
+
+        $cimStressTestProcesses = Get-CimInstance Win32_Process -Filter "ExecutablePath = '$searchForProcessWql'"
+
+        # This should really be just one process now, with one parent process
+        # Also, we have our stress test process now, and wouldn't need to get it again below, but oh well
+        foreach ($currentProcess in $cimStressTestProcesses) {
+            # Get the parent process for the stress test process
+            $parentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($currentProcess.ParentProcessId)"
+
+            # We need to filter our main windows again for this found process, otherwise we won't have a MainWindowHandle
+            # The WinTitle may stay empty though
+            $filteredWindowObj = [GetWindows.Main]::GetWindows() | Where-Object {
+                $hasMatch = $_.ProcessId -eq $parentProcess.ProcessId
+
+                if ($hasMatch) {
+                    Write-Verbose('Found a matching main window:')
+                    Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
+                    Write-Verbose('   Process Path:      ' + $_.ProcessPath)
+                    Write-Verbose('   WinTitle:          ' + $_.WinTitle)
+                    Write-Verbose('   MainWindowHandle:  ' + $_.MainWindowHandle)
+                }
+
+                return $hasMatch
+            }
+
+            # Break if the window was identified successfully, so that filteredWindowObj will be the current process object
+            if ($filteredWindowObj) {
+                break
+            }
+        }
+    }
+
+
+    Write-Debug('Found the following windows:')
 
     $filteredWindowObj | ForEach-Object {
         $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
@@ -4500,19 +4556,33 @@ function Get-StressTestProcessInformation {
 
         # We assume that these are threads with the ThreadState = "Running" and are using CPU power
         # This is not always true however, Aida64 spawns 4 threads, of which two are "Running" and two are "Ready"
-        # For Prime95 and y-Cruncher, this should either be one or two threads
+        # For Prime95 and y-cruncher, this should either be one or two threads
         # For Aida64, we will have to deal with four threads
         # And actually for Aida64, we cannot guarantee that all the threads are using CPU time already
         # Also it's using a dedicated stress test process, so we're just going to use all of the threads
-        :LoopGetThreads for ($loop = 1; $loop -le 6; $loop++) {
-            for ($i=1; $i -le 10; $i++) {
+        $maxLoops = 5
+        $maxIterationsPerLoop = 10
+
+        :LoopGetThreads for ($loop = 0; $loop -le $maxLoops; $loop++) {
+            $loopTimestamp = Get-Date -Format 'HH:mm:ss'
+
+            if ($loop -gt 0) {
+                Write-Text($loopTimestamp + ' - Stress test process threads not found yet, trying again... (' + $loop + ' of ' + $maxLoops + ')')
+            }
+
+            for ($i=1; $i -le $maxIterationsPerLoop; $i++) {
                 Write-Debug('Trying to get the threads (loop: ' + $loop + ' - iteration: ' + $i + ')')
 
                 # There seems to be some caching involved, which sometimes prevents this from getting the correct thread states
                 # So we're using a job to get around this issue
                 $thisStressTestThreads = Start-Job -ScriptBlock {
                     # Can't use the process directly, it fails
-                    $thisProcess = Get-Process -Id $args[0]
+                    $thisProcess = Get-Process -Id $args[0] -ErrorAction Ignore
+
+                    # The process doesn't exist anymore
+                    if (!$thisProcess) {
+                        return 999
+                    }
 
                     $thisProcess.Threads | Where-Object {
                         ($_ | Get-Member TotalProcessorTime) -and
@@ -4522,6 +4592,9 @@ function Get-StressTestProcessInformation {
                     } | Sort-Object -Property Id
                 } -ArgumentList $thisStressTestProcess.Id | Wait-Job | Receive-Job
 
+                if ($thisStressTestThreads -eq 999) {
+                    Exit-WithFatalError('Could not find the stress test process while checking for its threads!')
+                }
 
                 $thisStressTestThreads = @($thisStressTestThreads)  # Cast to an array, so that .Count is always available
                 $numFound = $thisStressTestThreads.Count
@@ -4556,7 +4629,7 @@ function Get-StressTestProcessInformation {
 
             Write-Debug('The process id:                      ' + $thisStressTestProcess.Id)
 
-            if ($thisStressTestProcess.Threads.Count -gt 0) {
+            if ($thisStressTestProcess -and $thisStressTestProcess.Threads -and @($thisStressTestProcess.Threads).Count -gt 0) {
                 $threads       = $thisStressTestProcess.Threads | Sort-Object -Property Id
                 $threadIds     = ($threads | Select-Object -Property Id).Id -Join ', '
                 $threadsString = $threads | Format-Table 'Id', 'ThreadState', 'TotalProcessorTime', 'WaitReason', 'ProcessorAffinity' | Out-String
@@ -4564,12 +4637,14 @@ function Get-StressTestProcessInformation {
                 $possibleStressTestThreadsString = ''
 
                 # We need this always to be an array
-                [Array] $possibleStressTestThreads = $thisStressTestProcess.Threads | Where-Object {
-                    ($_ | Get-Member TotalProcessorTime) -and
-                    $null -ne $_.TotalProcessorTime -and
-                    $_.TotalProcessorTime.Ticks -ne 0 -and
-                    $_.ThreadState -match '^Running$|^Ready$'
-                }
+                $possibleStressTestThreads = @(
+                    $thisStressTestProcess.Threads | Where-Object {
+                        ($_ | Get-Member TotalProcessorTime) -and
+                        $null -ne $_.TotalProcessorTime -and
+                        $_.TotalProcessorTime.Ticks -ne 0 -and
+                        $_.ThreadState -match '^Running$|^Ready$'
+                    }
+                )
 
                 if ($possibleStressTestThreads.Count -gt 0) {
                     $possibleStressTestThreads       = $possibleStressTestThreads | Sort-Object -Property Id
@@ -6008,7 +6083,7 @@ function Close-Aida64 {
 
 <#
 .DESCRIPTION
-    Create the y-Cruncher config file
+    Create the y-cruncher config file
     This depends on the $settings.mode variable
 .PARAMETER overrideNumberOfThreads
     [Int] If this is set, use this value instead of $settings.General.numberOfThreads
@@ -6034,12 +6109,12 @@ function Initialize-yCruncher {
     Write-Verbose($binaryWithPathToRun)
 
     if (!(Test-Path ($binaryWithPathToRun) -PathType Leaf)) {
-        Write-ColorText('FATAL ERROR: Could not find y-Cruncher!') Red
+        Write-ColorText('FATAL ERROR: Could not find y-cruncher!') Red
         Write-ColorText('             Trying to run "' + $binaryWithPathToRun + '"') Red
-        Write-ColorText('Make sure to download and extract y-Cruncher into the following directory:') Red
+        Write-ColorText('Make sure to download and extract y-cruncher into the following directory:') Red
         Write-ColorText($stressTestPrograms[$settings.General.stressTestProgram]['absoluteInstallPath']) Yellow
         Write-Text ''
-        Write-ColorText('You can download y-Cruncher from:') Red
+        Write-ColorText('You can download y-cruncher from:') Red
         Write-ColorText('http://www.numberworld.org/y-cruncher/#Download') Cyan
         Exit-WithFatalError
     }
@@ -6077,7 +6152,7 @@ function Initialize-yCruncher {
         $modeNum = [Int] $modeString.Substring(0, 2)
 
         if ($modeNum -lt 13) {
-            Exit-WithFatalError -text ('Test "C17" is present in the "tests" setting, but the selected y-Cruncher mode "' + $modeString + '" does not support it! Aborting!')
+            Exit-WithFatalError -text ('Test "C17" is present in the "tests" setting, but the selected y-cruncher mode "' + $modeString + '" does not support it! Aborting!')
         }
     }
 
@@ -6139,7 +6214,7 @@ function Initialize-yCruncher {
 
 <#
 .DESCRIPTION
-    Open y-Cruncher and set global script variables
+    Open y-cruncher and set global script variables
 .PARAMETER overrideNumberOfThreads
     [Int] If this is set, use this value instead of $settings.General.numberOfThreads for the expected number of threads
 .OUTPUTS
@@ -6150,7 +6225,7 @@ function Start-yCruncher {
         [Parameter(Mandatory=$false)] $overrideNumberOfThreads
     )
 
-    Write-Verbose('Starting y-Cruncher')
+    Write-Verbose('Starting y-cruncher')
 
     # Minimized to the tray
     #$processId = Start-Process -FilePath $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Hidden
@@ -6162,7 +6237,7 @@ function Start-yCruncher {
 
     # This doesn't steal the focus
     # We need to use conhost, otherwise the output would be inside the current console window
-    # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the y-Cruncher binary!
+    # Caution, calling conhost here will also return the process id of the conhost.exe file, not the one for the y-cruncher binary!
     # The escape character in Visual Basic for double quotes seems to be... a double quote!
     # So a triple double quote is actually interpreted as a single double quote here
     #$processId = [Microsoft.VisualBasic.Interaction]::Shell(("conhost.exe """ + $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToExe'] + """ config """ + $stressTestConfigFilePath + """"), 6) # 6 = MinimizedNoFocus
@@ -6200,7 +6275,7 @@ function Start-yCruncher {
             } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
             if (!$processCounterPathId) {
-                Exit-WithFatalError -text ('Could not find the counter path for the y-Cruncher instance!')
+                Exit-WithFatalError -text ('Could not find the counter path for the y-cruncher instance!')
             }
 
             $Script:processCounterPathTime = $processCounterPathId -Replace $counterNames['SearchString'], $counterNames['ReplaceString']
@@ -6221,14 +6296,14 @@ function Start-yCruncher {
 
 <#
 .DESCRIPTION
-    Close y-Cruncher
+    Close y-cruncher
 .PARAMETER
     [Void]
 .OUTPUTS
     [Void]
 #>
 function Close-yCruncher {
-    Write-Verbose('Trying to close y-Cruncher')
+    Write-Verbose('Trying to close y-cruncher')
 
     $windowProcess = $null
     $stressTestProcess = $null
@@ -6245,7 +6320,7 @@ function Close-yCruncher {
     if ($windowProcessMainWindowHandle) {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
-        # y-Cruncher may be run with or without the wrapper
+        # y-cruncher may be run with or without the wrapper
         if ($isYCruncherWithLogging) {
             # Close both the wrapper and the stress test binary
             $stressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
@@ -6257,13 +6332,13 @@ function Close-yCruncher {
         }
         elseif ($isYCruncherWithLogging -and $stressTestProcess) {
             # The process may be suspended, but we don't care, since we're just killing it
-            Write-Verbose('Killing y-Cruncher''s stress test process')
+            Write-Verbose('Killing y-cruncher''s stress test process')
             Stop-Process -InputObject $stressTestProcess -Force -ErrorAction Ignore
         }
 
 
         # This is executed for both cases
-        # If not run with the wrapper, this will be the regular y-Cruncher process anyway
+        # If not run with the wrapper, this will be the regular y-cruncher process anyway
         if (!$windowProcess) {
             Write-Verbose('The window process wasn''t found, no need to close it')
         }
@@ -6272,17 +6347,16 @@ function Close-yCruncher {
             if (!$isYCruncherWithLogging) {
                 $null = Resume-Process -process $windowProcess -ignoreError $true
 
-                Write-Verbose('Trying to gracefully close y-Cruncher')
+                Write-Verbose('Trying to gracefully close y-cruncher')
             }
             else {
-                Write-Verbose('Trying to gracefully close y-Cruncher''s wrapper (the main window)')
+                Write-Verbose('Trying to gracefully close y-cruncher''s wrapper (the main window)')
             }
 
             Write-Debug('The window process main window handle: ' + $windowProcessMainWindowHandle)
 
             # Send the message to close the main window
             # The window may still be blocked from the stress test process being closed, so repeat if necessary
-            #<#
             try {
                 for ($i = 1; $i -le 5; $i++) {
                     Write-Debug('Try ' + $i)
@@ -6319,10 +6393,9 @@ function Close-yCruncher {
                 }
             }
             catch {
-                Write-Verbose('Could not gracefully close y-Cruncher, proceeding to kill the process')
+                Write-Verbose('Could not gracefully close y-cruncher, proceeding to kill the process')
                 Write-Debug('Error: ' + $_)
             }
-            #>
         }
     }
 
@@ -6331,14 +6404,14 @@ function Close-yCruncher {
     $windowProcess = Get-Process $processName -ErrorAction Ignore
 
     if ($windowProcess) {
-        Write-Verbose('Could not gracefully close y-Cruncher, killing the process')
+        Write-Verbose('Could not gracefully close y-cruncher, killing the process')
 
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
         Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
-        Write-Verbose('y-Cruncher closed')
+        Write-Verbose('y-cruncher closed')
     }
 }
 
@@ -6625,7 +6698,7 @@ function Start-Linpack {
             } -ArgumentList $counterNames, $stressTestProcessId | Wait-Job | Receive-Job
 
             if (!$processCounterPathId) {
-                Exit-WithFatalError -text ('Could not find the counter path for the y-Cruncher instance!')
+                Exit-WithFatalError -text ('Could not find the counter path for the y-cruncher instance!')
             }
 
             $Script:processCounterPathTime = $processCounterPathId -Replace $counterNames['SearchString'], $counterNames['ReplaceString']
@@ -6754,7 +6827,10 @@ function Initialize-StressTestProgram {
     )
 
     Write-Verbose('Initializing the stress test program')
-    Write-Debug('Override the number of threads: ' + $overrideNumberOfThreads)
+
+    if ($overrideNumberOfThreads) {
+        Write-Debug('Override the number of threads: ' + $overrideNumberOfThreads)
+    }
 
     if ($isPrime95) {
         Test-Prime95
@@ -6912,9 +6988,9 @@ function Test-StressTestProgrammIsRunning {
 
         # We can use a wrapper to capture the output for yCruncher
         elseif ($isYCruncherWithLogging) {
-            Write-Debug('           Checking the new y-Cruncher log entries...')
+            Write-Debug('           Checking the new y-cruncher log entries...')
 
-            # The messages y-Cruncher displays:
+            # The messages y-cruncher displays:
             # Exception Encountered: XYZ
             #
             # <ERROR MESSAGE>
@@ -6936,9 +7012,9 @@ function Test-StressTestProgrammIsRunning {
                 $errorType = 'CALCULATIONERROR'
 
                 Write-Verbose($timestamp)
-                Write-Verbose('Found an error in the new entries of the y-Cruncher output!')
+                Write-Verbose('Found an error in the new entries of the y-cruncher output!')
 
-                # For y-Cruncher, remove the core number, since it doesn't represent the actual core being tested
+                # For y-cruncher, remove the core number, since it doesn't represent the actual core being tested
                 $stressTestError = $stressTestError -Replace '\s*\d+\.', ''
             }
         }
@@ -7027,7 +7103,7 @@ function Test-StressTestProgrammIsRunning {
                 }
 
 
-                # For y-Cruncher with logging enabled
+                # For y-cruncher with logging enabled
                 elseif ($isYCruncherWithLogging) {
                     # Look for a line with an "error" string in the new log entries
                     $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
@@ -7126,7 +7202,7 @@ function Test-StressTestProgrammIsRunning {
                 }
 
 
-                # For y-Cruncher with logging enabled
+                # For y-cruncher with logging enabled
                 elseif ($isYCruncherWithLogging) {
                     # Look for a line with an "error" string in the new log entries
                     $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
@@ -7294,7 +7370,7 @@ function Test-StressTestProgrammIsRunning {
                 $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' } | Select-Object -Last 1
             }
 
-            # y-Cruncher: Look for "error(s)"
+            # y-cruncher: Look for "error(s)"
             elseif ($isYCruncherWithLogging) {
                 $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
             }
@@ -7310,7 +7386,7 @@ function Test-StressTestProgrammIsRunning {
                 # We don't need to check for a false alarm anymore, as we're already checking only new log entries
                 $stressTestError = $errorResults.Line
 
-                # For y-Cruncher, remove the core number, since it doesn't represent the actual core being tested
+                # For y-cruncher, remove the core number, since it doesn't represent the actual core being tested
                 if ($isYCruncherWithLogging) {
                     $stressTestError = $stressTestError -Replace '\s*\d+\.', ''
                 }
@@ -7510,13 +7586,13 @@ function Test-StressTestProgrammIsRunning {
         }
 
 
-        # y-Cruncher with logging wrapper
+        # y-cruncher with logging wrapper
         elseif ($isYCruncherWithLogging) {
-            Write-Verbose('The stress test program is y-Cruncher with logging wrapper enabled')
+            Write-Verbose('The stress test program is y-cruncher with logging wrapper enabled')
             $lastRunTest = $null
             $lastErrorMessage = $null
 
-            # The messages y-Cruncher displays:
+            # The messages y-cruncher displays:
             # Exception Encountered: XYZ
             #
             # <ERROR MESSAGE>
@@ -7607,9 +7683,9 @@ function Test-StressTestProgrammIsRunning {
         }
 
 
-        # y-Cruncher without the wrapper
+        # y-cruncher without the wrapper
         elseif ($isYCruncher -or $isYCruncherOld) {
-            Write-Verbose('The stress test program is y-Cruncher, no detailed error detection available')
+            Write-Verbose('The stress test program is y-cruncher, no detailed error detection available')
         }
 
 
@@ -7866,7 +7942,7 @@ function Set-StressTestProgramAffinities {
 
     # Go through the stress test threads that we identified earlier, and evenly distribute the CPU affinities across the threads
     # (e.g. just 1, or 1 + 1, or 2 + 2)
-    # Prime95 and y-Cruncher use 1/2 threads, Aida64 uses 4 threads
+    # Prime95 and y-cruncher use 1/2 threads, Aida64 uses 4 threads
     # And let's hope that these threads never change while the test is running!
     $numberOfStressTestThreads = $stressTestThreads.Count
 
@@ -8545,6 +8621,22 @@ function Add-ToErrorCollection {
     The main functionality
 #>
 
+try {
+    # We need the logs directory to exist
+    if (!(Test-Path -Path $logFilePathAbsolute)) {
+        $null = New-Item $logFilePathAbsolute -ItemType Directory
+    }
+
+    # We need the configs directory to exist
+    if (!(Test-Path -Path $configsPathAbsolute)) {
+        $null = New-Item $configsPathAbsolute -ItemType Directory
+    }
+}
+catch {
+    Exit-WithFatalError -text $_
+}
+
+
 # Error Checks
 
 # PowerShell version too low
@@ -8555,28 +8647,94 @@ function Add-ToErrorCollection {
 # The script doesn't work for Powershell version 6 and 7
 # There are some missing cmdlets
 if ($PSVersionTable.PSVersion.Major -gt 5) {
-    Write-Host
-    Write-Host 'FATAL ERROR: The PowerShell version is too _new_!' -ForegroundColor Red
-    Write-Host 'PowerShell version 6 and above do not support the required functions inside this script!' -ForegroundColor Red
-    Write-Host
-    Write-Host 'Please run this script with PowerShell 5.1, which is included with Windows' -ForegroundColor Yellow
+    Write-Host('')
+    Write-Host('FATAL ERROR: The PowerShell version is too _new_!') -ForegroundColor Red
+    Write-Host('PowerShell version 6 and above do not support the required functions inside this script!') -ForegroundColor Red
+    Write-Host('')
+    Write-Host('Please run this script with PowerShell 5.1, which is included with Windows') -ForegroundColor Yellow
 
     Exit-WithFatalError
 }
 
 
-# Non-ANSI characters in the directory path may pose problems
+Write-Verbose('Started the script at ' + $scriptStartDate.ToString('yyyy-MM-dd HH:mm:ss'))
+
+
+# Check the directory we're running from
 Write-Debug('PSScriptRoot: ' + $PSScriptRoot)
 
+
+# Please don't use OneDrive or Dropbox
+if ($PSScriptRoot -Match '\\(OneDrive)\\' -or $PSScriptRoot -Match '\\(Dropbox)\\'  -or $PSScriptRoot -Match '\\(_tests)\\') {
+    $syncFolder = $Matches[1]
+
+    Write-Verbose('Synchronized directory detected: ' + $syncFolder)
+    Write-Debug('Checking if the corresponding binary is still running')
+
+    # We assume that the directory name equals the program name (e.g. OneDrive -> OneDrive.exe)
+    $syncPrograms = @{
+        'onedrive' = @{
+            'process' = 'onedrive'
+            'name'    = 'OneDrive'
+        }
+        'dropbox'  = @{
+            'process' = 'dropbox'
+            'name'    = 'Dropbox'
+        }
+        # Test conditions
+        '_tests'   = @{
+            'process' = 'notepad'
+            'name'    = 'Test Program'
+        }
+    }
+
+    $syncProgramProcess  = $syncPrograms[$syncFolder.ToLowerInvariant()]['process']
+    $syncProgramName     = $syncPrograms[$syncFolder.ToLowerInvariant()]['name']
+    $checkForSyncProcess = Get-Process $syncProgramProcess -ErrorAction Ignore
+
+    Write-Debug('The synchronization process to check for: ' + $syncProgramProcess)
+
+    if ($checkForSyncProcess) {
+        Write-Verbose('The synchronization binary is running!')
+        Write-Debug('Sync Program Name: ' + $syncProgramName)
+        Write-Debug('Sync Program Path: ' + $checkForSyncProcess.Path)
+        Write-Debug('Throwing error and exiting')
+
+        Write-Host('')
+        Write-Host('FATAL ERROR: The directory seems to indicate that you''re trying') -ForegroundColor Red
+        Write-Host('to run this inside the ' + $syncProgramName + ' directory!') -ForegroundColor Red
+        Write-Host('The ' + $syncProgramName + ' synchronization program is also still running!') -ForegroundColor Red
+        Write-Host('')
+        Write-Host('If CoreCycler is running inside a synchronized directory, it can severely') -ForegroundColor Yellow
+        Write-Host('interfere with the testing process.') -ForegroundColor Yellow
+        Write-Host('Please run CoreCycler outside such a directory, or close the synchronization') -ForegroundColor Yellow
+        Write-Host('program while the test is running.') -ForegroundColor Yellow
+        Write-Host('')
+        Write-Host('The current directory is:') -ForegroundColor Yellow
+        Write-Host($PSScriptRoot) -ForegroundColor Cyan
+        Write-Host('')
+        Write-Host('The detected synchronization program path:') -ForegroundColor Yellow
+        Write-Host($checkForSyncProcess.Path) -ForegroundColor Cyan
+
+        Exit-WithFatalError
+    }
+
+    else {
+        Write-Verbose('The synchronization binary is not running, assume we''re ok')
+    }
+}
+
+
+# Non-ANSI characters in the directory path may pose problems
 if ($PSScriptRoot -Match '[^\x00-\x7F]') {
-    Write-Host
-    Write-Host 'FATAL ERROR: The directory path contains non-ANSI characters!' -ForegroundColor Red
-    Write-Host
-    Write-Host 'Please run this script from a directory that only contains ANSI characters.' -ForegroundColor Yellow
-    Write-Host '(for example D:\Overclock\CoreCycler\)' -ForegroundColor Yellow
-    Write-Host
-    Write-Host 'The current directory is:' -ForegroundColor Yellow
-    Write-Host $PSScriptRoot -ForegroundColor Yellow
+    Write-Host('')
+    Write-Host('FATAL ERROR: The directory path contains non-ANSI characters!') -ForegroundColor Red
+    Write-Host('')
+    Write-Host('Please run this script from a directory that only contains ANSI characters.') -ForegroundColor Yellow
+    Write-Host('(for example D:\Overclock\CoreCycler\)') -ForegroundColor Yellow
+    Write-Host('')
+    Write-Host('The current directory is:') -ForegroundColor Yellow
+    Write-Host($PSScriptRoot) -ForegroundColor Cyan
 
     Exit-WithFatalError
 }
@@ -8588,12 +8746,12 @@ $hasDotNet4_0 = (($dotNetEntry4_0 = Get-ItemProperty 'HKLM:\Software\Microsoft\N
 $hasDotNet4_x = (($dotNetEntry4_x = Get-ItemProperty 'HKLM:\Software\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Ignore)     -and ($dotNetEntry4_x | Get-Member Install) -and $dotNetEntry4_x.Install -eq 1)
 
 if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
-    Write-Host
-    Write-Host 'FATAL ERROR: .NET could not be found or the version is too old!' -ForegroundColor Red
-    Write-Host 'At least version 3.5 of .NET is required!' -ForegroundColor Red
-    Write-Host
-    Write-Host 'You can download the .NET Framework here:' -ForegroundColor Yellow
-    Write-Host 'https://dotnet.microsoft.com/download/dotnet-framework' -ForegroundColor Cyan
+    Write-Host('')
+    Write-Host('FATAL ERROR: .NET could not be found or the version is too old!') -ForegroundColor Red
+    Write-Host('At least version 3.5 of .NET is required!') -ForegroundColor Red
+    Write-Host('')
+    Write-Host('You can download the .NET Framework here:') -ForegroundColor Yellow
+    Write-Host('https://dotnet.microsoft.com/download/dotnet-framework') -ForegroundColor Cyan
 
     Exit-WithFatalError
 }
@@ -8613,18 +8771,6 @@ try {
 
 
     Write-Debug('Starting the main functionality block')
-
-
-    # We need the logs directory to exist
-    if (!(Test-Path -Path $logFilePathAbsolute)) {
-        $null = New-Item $logFilePathAbsolute -ItemType Directory
-    }
-
-
-    # We need the configs directory to exist
-    if (!(Test-Path -Path $configsPathAbsolute)) {
-        $null = New-Item $configsPathAbsolute -ItemType Directory
-    }
 
 
     # Check if we can start the update check background job early, before truely parsing the settings
@@ -8721,9 +8867,29 @@ try {
     }
 
 
+    # Get data for the OS (only works for Windows obviously)
+    $winOperatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
+
+
+    # Get the loale
+    $currentLocale = Get-WinSystemLocale
+
+
     # The amount of memory in the system
-    #$totalMemory = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum  # This is returned in Bytes
-    $freeMemory  = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB                     # This is returned in KB, so we multiply it
+    $freeMemory  = $winOperatingSystem.FreePhysicalMemory * 1KB                     # This is returned in KB, so we multiply it
+
+
+    Write-Verbose('Operating System:')
+    Write-Verbose('OS:          ' + $winOperatingSystem.Caption)
+    Write-Verbose('Version:     ' + $winOperatingSystem.Version)
+    Write-Verbose('BuildNumber: ' + $winOperatingSystem.BuildNumber)
+    Write-Verbose('CSDVersion:  ' + $winOperatingSystem.CSDVersion)
+    Write-Verbose('CodeSet:     ' + $winOperatingSystem.CodeSet)
+    Write-Verbose('CountryCode: ' + $winOperatingSystem.CountryCode)
+    Write-Verbose('OSLanguage:  ' + $winOperatingSystem.OSLanguage)
+    Write-Verbose('Locale:      ' + $winOperatingSystem.Locale + ' (hex -> int -> ' + [System.Convert]::ToInt32($winOperatingSystem.Locale, 16) + ')')
+    Write-Verbose('Locale Name: ' + $currentLocale.DisplayName + ' (' + $currentLocale.Name + ')')
+    Write-Verbose('Free Memory: ' + [Math]::Round($freeMemory / 1MB) + ' MB')
 
 
     # Check if we can use Write-VolumeCache to write the log file data to the disk
@@ -8906,7 +9072,7 @@ try {
         $command = $stressTestPrograms[$testProgram.Name]['command']
 
 
-        # Special handling if the custom logging wrapper for y-Cruncher is activated
+        # Special handling if the custom logging wrapper for y-cruncher is activated
         if (($testProgram.Name -eq 'ycruncher' -or $testProgram.Name -eq 'ycruncher_old') -and $isYCruncherWithLogging) {
             $stressTestPrograms[$testProgram.Name]['fullPathToLoadExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processNameForLoad']
 
@@ -9069,14 +9235,14 @@ try {
 
     # It may be set to "auto"
     if ($settings.General.runtimePerCore.ToString().ToLowerInvariant() -eq 'auto') {
-        # For Prime95 and y-Cruncher with logging wrapper, we're setting the runtimePerCore to 24 hours as a temporary value
-        # For y-Cruncher without logging, we're trying to estimate based on the selected/available tests
+        # For Prime95 and y-cruncher with logging wrapper, we're setting the runtimePerCore to 24 hours as a temporary value
+        # For y-cruncher without logging, we're trying to estimate based on the selected/available tests
         # For Aida64 and Linpack, we're using 10 minutes
         if ($isPrime95 -or $isYCruncherWithLogging) {
             $runtimePerCore = 24 * 60 * 60  # 24 hours as a temporary value
             $useAutomaticRuntimePerCore = $true
         }
-        # For y-Cruncher without logging, try to estimate the duration
+        # For y-cruncher without logging, try to estimate the duration
         elseif ($isYCruncher -or $isYCruncherOld) {
             # Selected tests * duration of test + time in suspension + buffer
             $runtimePerCore = Get-EstimatedYCruncherRuntimePerCore
@@ -9280,7 +9446,7 @@ try {
         Write-ColorText('Selected FFT size: .................... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
     }
     if ($isYCruncher -or $isYCruncherOld) {
-        Write-ColorText('Selected y-Cruncher tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
+        Write-ColorText('Selected y-cruncher tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
         Write-ColorText('Duration per test: .................... ' + ($settings.yCruncher.testDuration)) Cyan
     }
     if ($isLinpack) {
@@ -10160,7 +10326,7 @@ try {
 
 
                 # For Prime95, try to get the new log file entries
-                # Also for y-Cruncher with the logging wrapper
+                # Also for y-cruncher with the logging wrapper
                 # Also for Linpack
                 # This sets the following variables:
                 # - $previousFileSize -> [Int] The current file size of the log file (to check if it was updated since then)
@@ -10502,9 +10668,9 @@ try {
 
 
                 # Y-CRUNCHER
-                # If the runtime per core is set to auto and we're running y-Cruncher with the logging functionality enabled
+                # If the runtime per core is set to auto and we're running y-cruncher with the logging functionality enabled
                 # We need to check if all the selected tests have run
-                # Note that the iterations in y-Cruncher may not reflect the iterations in CoreCycler if there has been an error in-between
+                # Note that the iterations in y-cruncher may not reflect the iterations in CoreCycler if there has been an error in-between
                 elseif ($useAutomaticRuntimePerCore -and $isYCruncherWithLogging) {
                     :LoopCheckForAutomaticRuntime while ($true) {
                         $timestamp = Get-Date -Format HH:mm:ss
@@ -10759,7 +10925,7 @@ try {
                             }
                             elseif ($isYCruncherWithLogging) {
                                 Write-Text('')
-                                Write-ColorText('y-Cruncher''s log file can be found at:') Cyan
+                                Write-ColorText('y-cruncher''s log file can be found at:') Cyan
                                 Write-ColorText($stressTestLogFilePath) Cyan
                             }
                             elseif ($isLinpack) {
@@ -10777,11 +10943,11 @@ try {
                             Exit-Script
                         }
 
-                        # y-Cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
+                        # y-cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
                         # And the process is still running of course
                         # And it is still using enough CPU power
                         elseif ($isYCruncherWithLogging -and !$settings.General.restartTestProgramForEachCore -and $_.Exception.InnerException.Message -notmatch 'PROCESSMISSING|CPULOAD') {
-                            Write-Verbose('Running y-Cruncher with the log wrapper and restartTestProgramForEachCore disabled')
+                            Write-Verbose('Running y-cruncher with the log wrapper and restartTestProgramForEachCore disabled')
                             Write-Verbose('And the process is still there resp. the process is still using enough CPU power')
                             Write-Verbose('Continue to the next core')
                         }
@@ -10870,7 +11036,7 @@ try {
                         }
                         elseif ($isYCruncherWithLogging) {
                             Write-Text('')
-                            Write-ColorText('y-Cruncher''s log file can be found at:') Cyan
+                            Write-ColorText('y-cruncher''s log file can be found at:') Cyan
                             Write-ColorText($stressTestLogFilePath) Cyan
                         }
                         elseif ($isLinpack) {
@@ -11006,17 +11172,20 @@ catch {
     # Special handling if the settings couldn't be imported
     if (!$settings -or !$settings.Logging) {
         Write-Host('Error in the main functionality block!') -ForegroundColor Red
+        Write-Host($Error | Out-String) -ErrorAction Ignore
         Write-Host($_.Exception | Format-List -Force | Out-String) -ErrorAction Ignore
         Write-Host($_.InvocationInfo | Format-List -Force | Out-String) -ErrorAction Ignore
     }
     else {
         Write-Verbose('Error in the main functionality block!')
+        Write-Verbose($Error | Out-String) -ErrorAction Ignore
         Write-Verbose($_.Exception | Format-List -Force | Out-String) -ErrorAction Ignore
         Write-Verbose($_.InvocationInfo | Format-List -Force | Out-String) -ErrorAction Ignore
     }
 
     if ($canUseWindowsEventLog) {
-        $errorString  = $_.Exception | Format-List -Force | Out-String -ErrorAction Ignore
+        $errorString  = $Error | Out-String -ErrorAction Ignore
+        $errorString += [Environment]::NewLine + ($_.Exception | Format-List -Force | Out-String -ErrorAction Ignore)
         $errorString += [Environment]::NewLine + ($_.InvocationInfo | Format-List -Force | Out-String -ErrorAction Ignore)
         Write-AppEventLog -type 'script_error' -infoString2 $errorString
     }

@@ -1,0 +1,250 @@
+Intel(R) Distribution for LINPACK* Benchmark extended help information
+
+About Intel(R) Distribution for LINPACK* Benchmark (shared-memory version):
+
+Shared-memory (SMP) version of Intel(R) Distribution for LINPACK* Benchmark
+is a generalization of the LINPACK* 1000 benchmark which solves a dense
+(real*8) system of linear equations (Ax=b), measures the amount of time it
+takes to factor and solve the system, converts that time into a performance
+rate and tests the results for accuracy.  The generalization is in the number
+of equations (N) we can solve, which is not limited to 1000. We use partial 
+pivoting to assure the accuracy of the results. This benchmark should not be 
+used to report LINPACK* 1000 performance as that is a compiled-code only benchmark.
+This is a shared-memory implementation which runs on a single platform and should
+not be confused with MP LINPACK* or HPL*, which is a distributed memory version 
+of the same benchmark.  This benchmark should not be confused with LINPACK*,
+the library, which has been expanded upon by LAPACK the library.
+
+Binaries and the running environment.
+
+Shared-memory (SMP) version of Intel(R) Distribution for LINPACK* Benchmark
+uses these names for the executables to be run:
+        linpack_xeon32.exe            Windows*, Intel(R) Xeon(R) 32-bit
+        linpack_xeon64.exe            Windows*, Intel(R) Xeon(R) 64-bit, supports
+                                                Automatic Offload mode
+        xlinpack_xeon32               Linux*, Intel(R) Xeon(R) 32-bit
+        xlinpack_xeon64               Linux*, Intel(R) Xeon(R) 64-bit, supports
+                                              Automatic Offload mode
+        linpack_cd32                  macOS*, Intel(R) Core(TM) microarchitecture 32-bit
+        linpack_cd64                  macOS*, Intel(R) Core(TM) microarchitecture 64-bit
+
+The name 'linpack' stands for any of these binaries below in the text of this
+extended help information. 'the benchmark' shall stand for this shared-memory (SMP)
+version of Intel(R) Distribution for LINPACK* Benchmark. Which of these binaries
+will be present in the package depends on which package was installed.
+
+The benchmark makes use of SMP parallelism and by default generates as many
+threads of execution as the number of the processors of the SMP system. One can
+override the default number of threads by setting the environment variable
+OMP_NUM_THREADS to any positive number. Note that performance is usually
+maximized when the number of the threads is equal to the number of cores (so,
+for a two socket dual-core system, 4 would be ideal).
+
+Usage:
+
+linpack
+linpack -h[elp]
+linpack -e[xtended_help]
+linpack [-i[nput_file]] data_file
+linpack < data_file
+
+Here is an explanation for the options.
+
+linpack
+        when used without options, the benchmark prints this prompt
+                Input data or print help ? Type [data]/help :
+        and waits for the input. If 'help' was typed, it prints brief usage
+        information (just like a 'linpack -h[elp]' form) and quits. Otherwise,
+        be ready to input data for a run of the benchmark. Enter the 4 numbers on the
+        following prompts:
+                Number of equations to solve (problem size):
+                Leading dimension of array:
+                Number of trials to run:
+                Data alignment value (in Kbytes):
+        See notes on the input data below.
+        The output will contain the system information, input data and test results.
+        See notes on the output data format below.
+        The "linpack_cd32" will hang without a data file.
+
+linpack -h[elp]
+        prints brief usage information and quits
+
+linpack -e[xtended_help]
+        prints this extended help information and quits
+
+linpack [-i[nput_file]] data_file
+linpack < data_file
+        makes the benchmark run with the input data contained in 'data_file'.
+   The benchmark allows a user to either enter data manually or with a data file.
+   Manual data can be provided when the benchmark is executed with no arguments.
+   Below we provide a sample of the data file format and give a brief description of
+   its contents.
+        Data file sample (next 7 lines):
+                Shared-memory version of Intel(R) Distribution for LINPACK* Benchmark. *Other names and brands may be claimed as the property of others.
+                User-defined string
+                5                         # number of tests
+                1000 2000 3000 4000 5000  # number of equations (problem sizes)
+                1000 2008 3000 4008 5000  # leading dimensions
+                4 4 2 1 1                 # number of times to run a test (trials)
+                4 4 4 4 4                 # alignment values (in KBytes)
+        Data file format description:
+        Line 1 is discarded.
+        Line 2 is printed on the standard output as it is.
+        Line 3 begins with the number of tests, must be non-negative.
+        Lines 4, 5, 6, 7 contain the values of the four specified parameters
+        (a number of equations, a leading dimension, times to run a test, alignment
+        value in KBytes) for each of the tests. The number of the values on each
+        line from 4 to 7 must be no less than the number of tests.
+        Note that in the current version of the benchmark the number of tests is
+        restricted by 32, so only the first 32 tests will be performed if the
+        greater number of the tests is specified.
+        See the notes on the input data values and the output data format below.
+
+Notes on the input data values for a shared-memory (SMP) version of 
+  Intel(R) Distribution for LINPACK* Benchmark
+
+Every test of the benchmark is defined by the 4 input parameters values:
+        Number of equations to solve (problem size)
+        Leading dimension of array
+        Number of trials to run
+        Data alignment value (in Kbytes)
+One can set no more than 1 test per an executable run in case of manual
+input (with 'linpack' usage), or up to 32 tests in case of the package form
+input (with 'linpack ... data_file' usage). The rules for every test's set
+are as follows.
+The number of equations must be positive, this value (with the couple of the
+leading dimension value) is restricted only by the memory available. The benchmark
+solves a real*8 system of linear equations; just to store the matrix
+requires at least 8*(leading dimension)*(number of equations) bytes.  Each
+test or trial may have a different memory requirement, but the program may
+exit if given a leading dimension and number of equations too large.
+The leading dimension must be no less than the number of equations.
+Experience has shown that the best performance for a given problem size
+is obtained when the leading dimension is set to the nearest odd
+multiple of 8 (16 for Intel(R) AVX processors) equal to or larger
+than the number of equations (divisible by 8 but not by 16, or
+divisible by 16 but not 32 for Intel(R) AVX processors).
+Two other input values must be non-negative.
+The number of trials determines how many runs with the same initial data
+will be accomplished repeatedly.
+The alignment value allows the arrays to be aligned to the value specified,
+zero means that no specific alignment will be performed - the arrays are
+used as they are allocated.
+The best performance is likely to be obtained when arrays are aligned to
+the page size boundary.
+
+Notes on Creating the Input Data files
+
+The product is released with sample data files.  These are set up to
+provide good performance numbers with an ideal memory configuration.
+Users may find that their memory configuration is smaller than the
+predefined inputs.  In this event, take a sample data file as described
+above.  Note that the most significant part is determining the largest
+problem size.  While the above text talks to problem sizes and how they
+match memory, here we will walk through an example.
+Suppose the target machine only has 4 GBytes of memory (and assuming that
+OS allows one to do a malloc of size 4 GB as well.)  Note that
+22000*22000*8 is 3.872 billion bytes, which is close to the maximum
+malloc size.  We can try a problem size of 22000 interactively first.
+If this is an Intel(R) Itanium(R) 2 processor, we find that a leading dimension
+of 22000 is a wise choice (hence 22000*22000*8).  There will be another
+things resident in memory, so 22000 may not fit.  If not, we can back
+off to 21000, or some other value as the largest problem.
+
+For example, in a sample run of 5000, we observe on the output line (see below):
+
+        Maximum memory requested that can be used = 200104096, at the size = 5000
+
+This corresponds to the actual size in bytes of the malloc performed by
+the benchmark and can be used to help guide the calculation of the
+largest problem.
+Once one has the largest problem, it is easier to fill out the rest of the
+data file given the information above.
+
+Notes on the output format of the shared-memory (SMP) version of
+  Intel(R) Distribution for LINPACK* Benchmark
+
+The sample of the benchmark output, which corresponds to the sample data
+file shown above:
+
+        User-defined string
+
+        Current date/time: Thu Apr  6 11:29:53 2006
+
+        CPU frequency:    2.197 GHz
+        Number of CPUs: 2
+        Number of cores: 2
+        Number of threads: 2
+
+        Parameters are set to:
+
+        Number of tests                             : 5
+        Number of equations to solve (problem size) : 1000  2000  3000  4000  5000
+        Leading dimension of array                  : 1000  2008  3000  4008  5000
+        Number of trials to run                     : 4     4     2     1     1
+        Data alignment value (in Kbytes)            : 4     4     4     4     4
+
+        Maximum memory requested that can be used = 200104096, at the size = 5000
+        ============= Timing linear equation system solver =================
+
+        Size   LDA    Align. Time(s)    GFlops   Residual      Residual(norm)
+        1000   1000   4      0.197      3.3956   1.104141e-12 3.765403e-02
+        1000   1000   4      0.194      3.4435   1.104141e-12 3.765403e-02
+        1000   1000   4      0.195      3.4349   1.104141e-12 3.765403e-02
+        1000   1000   4      0.195      3.4325   1.104141e-12 3.765403e-02
+        2000   2008   4      1.160      4.6047   4.613973e-12 4.013591e-02
+        2000   2008   4      1.157      4.6177   4.613973e-12 4.013591e-02
+        2000   2008   4      1.159      4.6086   4.613973e-12 4.013591e-02
+        2000   2008   4      1.158      4.6114   4.613973e-12 4.013591e-02
+        3000   3000   4      3.478      5.1810   9.879433e-12 3.804333e-02
+        3000   3000   4      3.462      5.2044   9.879433e-12 3.804333e-02
+        4000   4008   4      7.759      5.5029   1.898731e-11 4.138464e-02
+        5000   5000   4      14.654     5.6901   2.307041e-11 3.216983e-02
+
+        Performance Summary (GFlops)
+
+        Size   LDA    Align.  Average  Maximal
+        1000   1000   4       3.4266   3.4435
+        2000   2008   4       4.6106   4.6177
+        3000   3000   4       5.1927   5.2044
+        4000   4008   4       5.5029   5.5029
+        5000   5000   4       5.6901   5.6901
+
+        End of tests
+
+
+The columns of the results listing can be described as follows:
+        Size = Number of Equations/Problem Size (input)
+        LDA = Leading dimension (input)
+        Align = Alignment values (input)
+        Time = Benchmarked Time to solve the system in Seconds
+        Gflops = Number of Gflops
+        Residual = Should be a small number  like E-09 or less
+        Residual(norm) = The norm of the vector - a number in the range .01-1000
+        typically.
+
+The performance summary listing presents accumulated results for each test.
+The columns can be described as follows:
+        Size = Number of equations to solve (problem size)
+        LDA = Leading dimension
+        Align = Alignment value
+        Average = Average performance (in Gflops) by all the benchmark runs for a
+                          single test
+        Maximal = The best observed performance of the benchmark for the test.
+
+
+BunnyPeople, Celeron, Celeron Inside, Centrino, Centrino logo, Chips, Core Inside,
+Dialogic, EtherExpress, ETOX, FlashFile, i386, i486, i960, iCOMP, InstantIP, Intel,
+Intel logo, Intel386, Intel486, Intel740, IntelDX2, IntelDX4, IntelSX2, Intel Core,
+Intel Inside, Intel Inside logo, Intel. Leap ahead., Intel. Leap ahead. logo,
+Intel NetBurst, Intel NetMerge, Intel NetStructure, Intel SingleDriver, Intel SpeedStep,
+Intel StrataFlash, Intel Viiv, Intel XScale, IPLink, Itanium, Itanium Inside, MCS, MMX,
+MMX logo, Optimizer logo, OverDrive, Paragon, PDCharm, Pentium, Pentium II Xeon,
+Pentium III Xeon, Performance at Your Command, Pentium Inside, skoool, Sound Mark,
+The Computer Inside., The Journey Inside, VTune, Xeon, Xeon Inside and Xircom are trademarks
+or registered trademarks of Intel Corporation or its subsidiaries in the United States
+and other countries.
+
+* Other names and brands may be claimed as the property of others
+
+Copyright 2000-2018, Intel Corporation.

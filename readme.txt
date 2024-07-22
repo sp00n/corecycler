@@ -34,15 +34,15 @@ Also, using PBO *technically* voids the warranty of a Ryzen CPU, so use it at yo
 INCLUDED SOFTWARE
 -----------------
 The script itself is a PowerShell script, but it uses other, inlcuded software to do the actual stress testing, for
-example Prime95, y-Cruncher and Linpack Xtreme.
+example Prime95, y-cruncher and Linpack Xtreme.
 You can also move your own copy of the stress test programs in to the respective folders in the /test_programs/
-directory (e.g. /test_programs/p95 for Prime95, /test_programs/y-cruncher for y-Cruncher, etc).
+directory (e.g. /test_programs/p95 for Prime95, /test_programs/y-cruncher for y-cruncher, etc).
 For example if you want to be on the safe side (good choice!) or want to use a dedicated version.
 However be aware that the stress test programs can change their settings from time to time, so if you include a version
 that has not been tested with CoreCycler, it may not work as intended or not even start at all.
 
 To download Prime95, go to the official site: at https://www.mersenne.org/download/
-To download y-Cruncher, go to the official site at: http://www.numberworld.org/y-cruncher/#Download
+To download y-cruncher, go to the official site at: http://www.numberworld.org/y-cruncher/#Download
 To download Linpack Xtreme, go to the official site at: https://www.ngohq.com/linpack-xtreme.html
 
 CoreCycler also supports Aida64, which however is NOT directly included due to its license.
@@ -56,7 +56,7 @@ You can use the trial version for up to 30 days, which should give you enough ti
 
 DESCRIPTION
 -----------
-This script will run your selected stress test (Prime95, y-Cruncher, Aida64) with only one (or two) worker threads and
+This script will run your selected stress test (Prime95, y-cruncher, Aida64) with only one (or two) worker threads and
 sets the affinity of the stress test process alternating to each physical core, cycling through all of them. This way
 you can test the stability of your Curve Optimizer / Active-Core setting for each core individually, much more
 thoroughly than e.g. with Cinebench or the Windows Repair, and much easier than manually setting the affinity of the
@@ -123,9 +123,9 @@ A: Short answer: all of them.
    Long answer: I've defaulted this to Prime95 without AVX and AVX2 and "Huge" FFTs. The reason behind this is that 
    this *should* produce the least amount of heat and therefore the highest boost clock. But you should eventually run 
    all of the tests to make sure that you're really error free.
-   Also switching from Prime95 to y-Cruncher or Aida64 produces different load scenarios, which can prove useful in 
+   Also switching from Prime95 to y-cruncher or Aida64 produces different load scenarios, which can prove useful in 
    detecting instabilities.
-   For y-Cruncher, "04-P4P" and "19-ZN2 ~ Kagari" seem to produce the fastest results (even if "20-ZN3 ~ Yuzuki" is
+   For y-cruncher, "04-P4P" and "19-ZN2 ~ Kagari" seem to produce the fastest results (even if "20-ZN3 ~ Yuzuki" is
    described as being optimized for Ryzen 7000 / Zen4).
 
 Q: Why are you using SSE? AVX stresses the CPU much more!
@@ -137,7 +137,7 @@ A: Yes, AVX/AVX2/AVX512 does stress the CPU more than the SSE mode. However, it 
    On the other hand, not testing the AVX/AVX2 instructions will also not test the transistors associated with these
    instructions, so you're not "fully" testing your chip. So you should indeed test both scenarios, light load / SEE
    and heavy load with AVX/AVX2.
-   You can change the mode to SSE, AVX, AVX2 or AVX512 for Prime95 and Aida64 in the config.ini, and for y-Cruncher you
+   You can change the mode to SSE, AVX, AVX2 or AVX512 for Prime95 and Aida64 in the config.ini, and for y-cruncher you
    can select different test modes which require different instruction sets.
 
 Q: What settings can I change?
@@ -162,8 +162,9 @@ Q: When starting the tool I see a "FATAL ERROR: Could not get the localized Perf
 A: See above. You probably need to re-enable the Windows Performance Process Counter (PerfProc).
 
 Q: When starting the tool I see a "FATAL ERROR: .NET could not be found or the version is too old!" message!
-A: This tool requires the .NET Framework with at least version 3.5. You can download it here:
-   https://docs.microsoft.com/en-us/dotnet/framework/install/dotnet-35-windows-10
+A: This tool requires the .NET Framework with at least version 3.5. You can download .NET here:
+   https://dotnet.microsoft.com/en-us/download/dotnet-framework/net481
+   https://dotnet.microsoft.com/en-us/download/dotnet
 
 Q: I have overclocked my RAM and I see errors when running this program, but I'm sure my CPU is fine!
 A: The errors may actually come from your overclocked RAM and not your CPU directly.
@@ -225,17 +226,30 @@ The licenses of all included programs remain unaffected by this and retain their
 - Prime95
   https://www.mersenne.org/legal/
 
-- y-Cruncher
+- y-cruncher
   http://www.numberworld.org/y-cruncher/license.html
 
-- Linpack Xtreme
-  https://www.ngohq.com/linpack-xtreme.html
+- Linpack (current version)
+  https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html
+
+- Linpack (all included versions)
+  2024.2.0.662 -               https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7816a8cf-2378-4d49-bfa6-6013a3d7be6a/w_onemkl_p_2024.2.0.662_offline.exe
+  2021.4.0.640 - https://web.archive.org/web/20211115133152/https://registrationcenter-download.intel.com/akdlm/irc_nas/18230/w_onemkl_p_2021.4.0.640_offline.exe
+  2019.3.203   - https://web.archive.org/web/20190509182800/http://registrationcenter-download.intel.com/akdlm/irc_nas/tec/15247/w_mkl_2019.3.203.exe
+  2018.3.011   - https://web.archive.org/web/20220412021802/registrationcenter-download.intel.com/akdlm/irc_nas/9752/w_mklb_p_2018.3.011.zip
+
+- WriteConsoleToWriteFileWrapper
+  https://github.com/sp00n/WriteConsoleToWriteFileWrapperDll?tab=MIT-1-ov-file
+  https://github.com/sp00n/WriteConsoleToWriteFileWrapperExe?tab=MIT-1-ov-file
 
 - BoostTester
   https://github.com/jedi95/BoostTester
 
-- BoostTesterMannix
+- BoostTester.Mannix
   https://github.com/mann1x/BoostTesterMannix?tab=Unlicense-1-ov-file
+
+- BoostTester.sp00n
+  https://github.com/sp00n/BoostTester?tab=Unlicense-1-ov-file
 
 - CoreTunerX
   https://github.com/CXWorld/CoreTunerX?tab=License-1-ov-file
