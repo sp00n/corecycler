@@ -233,7 +233,7 @@ The licenses of all included programs remain unaffected by this and retain their
   https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html
 
 - Linpack (all included versions)
-  2024.2.0.662 -               https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7816a8cf-2378-4d49-bfa6-6013a3d7be6a/w_onemkl_p_2024.2.0.662_offline.exe
+  2024.2.0.662 - https://web.archive.org/web/20240722184607/https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7816a8cf-2378-4d49-bfa6-6013a3d7be6a/w_onemkl_p_2024.2.0.662_offline.exe
   2021.4.0.640 - https://web.archive.org/web/20211115133152/https://registrationcenter-download.intel.com/akdlm/irc_nas/18230/w_onemkl_p_2021.4.0.640_offline.exe
   2019.3.203   - https://web.archive.org/web/20190509182800/http://registrationcenter-download.intel.com/akdlm/irc_nas/tec/15247/w_mkl_2019.3.203.exe
   2018.3.011   - https://web.archive.org/web/20220412021802/registrationcenter-download.intel.com/akdlm/irc_nas/9752/w_mklb_p_2018.3.011.zip
@@ -241,12 +241,6 @@ The licenses of all included programs remain unaffected by this and retain their
 - WriteConsoleToWriteFileWrapper
   https://github.com/sp00n/WriteConsoleToWriteFileWrapperDll?tab=MIT-1-ov-file
   https://github.com/sp00n/WriteConsoleToWriteFileWrapperExe?tab=MIT-1-ov-file
-
-- BoostTester
-  https://github.com/jedi95/BoostTester
-
-- BoostTester.Mannix
-  https://github.com/mann1x/BoostTesterMannix?tab=Unlicense-1-ov-file
 
 - BoostTester.sp00n
   https://github.com/sp00n/BoostTester?tab=Unlicense-1-ov-file
@@ -256,9 +250,6 @@ The licenses of all included programs remain unaffected by this and retain their
 
 - PBO2Tuner
   https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29337788
-
-- HWMonitor
-  https://www.cpuid.com/softwares/hwmonitor.html
 
 
 
