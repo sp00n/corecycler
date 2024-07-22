@@ -595,8 +595,8 @@ maxMemory = 90
 # There are four different choices available
 # 2018: Intel Linpack version 2018.0.3.1 - this is the same version as used in Linpack Xtreme 1.1.5
 # 2019: Intel Linpack version 2019.0.3.1
-# 2021: Intel Linpack version 2021.1.1.0 - that this version always uses FASTEST (AVX2)
-# 2024: Intel Linpack version 2024.2.1.0 - that this version always uses FASTEST (AVX2)
+# 2021: Intel Linpack version 2021.4.1.0 - this version always uses FASTEST (AVX2)
+# 2024: Intel Linpack version 2024.2.1.0 - this version always uses FASTEST (AVX2)
 #
 # Version 2018 and 2019 are the only ones where you can set the mode to anything but "FASTEST"
 # These two version also run slightly faster (more GFlops) on AMD processors than the newer versions when set to "FASTEST"
@@ -3891,7 +3891,7 @@ function Get-Settings {
         $versionsToPath = @{
             '2018' = '2018.0.3.1'
             '2019' = '2019.0.3.1'
-            '2021' = '2021.1.1.0'
+            '2021' = '2021.4.1.0'
             '2024' = '2024.2.1.0'
         }
 
@@ -4788,7 +4788,7 @@ function Initialize-Prime95 {
     }
     if (($prime95Version[0] -eq 30 -and $prime95Version[1] -ge 20) -or $prime95Version[0] -gt 30) {
         $isNewerPrime95  = $true
-        $Script:showPrime95NewWarning = $true       # Inform the user that this version pf Prime95 has not yet been tested with CoreCycler
+        $Script:showPrime95NewWarning = $true       # Inform the user that this version of Prime95 has not yet been tested with CoreCycler
     }
     if ($isNewerPrime95 -or $isMaxPrime95_30_19 -and !$isMaxPrime95_30_9) {
         $useOnlyPrimeTxt = $true

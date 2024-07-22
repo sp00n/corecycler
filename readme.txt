@@ -31,29 +31,6 @@ Also, using PBO *technically* voids the warranty of a Ryzen CPU, so use it at yo
 
 
 
-INCLUDED SOFTWARE
------------------
-The script itself is a PowerShell script, but it uses other, inlcuded software to do the actual stress testing, for
-example Prime95, y-cruncher and Linpack Xtreme.
-You can also move your own copy of the stress test programs in to the respective folders in the /test_programs/
-directory (e.g. /test_programs/p95 for Prime95, /test_programs/y-cruncher for y-cruncher, etc).
-For example if you want to be on the safe side (good choice!) or want to use a dedicated version.
-However be aware that the stress test programs can change their settings from time to time, so if you include a version
-that has not been tested with CoreCycler, it may not work as intended or not even start at all.
-
-To download Prime95, go to the official site: at https://www.mersenne.org/download/
-To download y-cruncher, go to the official site at: http://www.numberworld.org/y-cruncher/#Download
-To download Linpack Xtreme, go to the official site at: https://www.ngohq.com/linpack-xtreme.html
-
-CoreCycler also supports Aida64, which however is NOT directly included due to its license.
-You need to download the >>>Portable Engineer<<< version yourself and extract it into the /test_programs/aida64 folder.
-It has to be the Portable Engineer version, because the regular "Extreme" edition doesn't support starting the stress
-test from the command line.
-To download Aida64 Portable Engineer, go to the official site at: https://www.aida64.com/downloads
-You can use the trial version for up to 30 days, which should give you enough time to find your stable settings.
-
-
-
 DESCRIPTION
 -----------
 This script will run your selected stress test (Prime95, y-cruncher, Aida64) with only one (or two) worker threads and
@@ -92,13 +69,38 @@ setting in the config.ini to enable testing with two threads as well.
 
 
 
+INCLUDED SOFTWARE
+-----------------
+The script itself is a PowerShell script, but it uses other, inlcuded software to do the actual stress testing, for
+example Prime95, y-cruncher, and Intel's Linpack.
+You can also move your own copy of the stress test programs in to the respective folders in the /test_programs/
+directory (e.g. /test_programs/p95 for Prime95, /test_programs/y-cruncher for y-cruncher, etc).
+For example if you want to be on the safe side (good choice!) or want to use a dedicated version.
+However be aware that the stress test programs can change their settings from time to time, so if you include a version
+that has not been tested with CoreCycler, it may not work as intended or not even start at all.
+
+To download Prime95, go to the official site: at https://www.mersenne.org/download/
+To download y-cruncher, go to the official site at: http://www.numberworld.org/y-cruncher/#Download
+To download Linpack, go to the official site at: https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl-download.html
+To download older versions of Linpack, you can use the Internet Archive:
+https://web.archive.org/web/*/https://registrationcenter-download.intel.com/*
+And filter for e.g. "mkl .exe" to get a list of all archived Linpack versions.
+
+CoreCycler also supports Aida64, which however is NOT directly included due to its license.
+You need to download the >>>Portable Engineer<<< version yourself and extract it into the /test_programs/aida64 folder.
+It has to be the Portable Engineer version, because the regular "Extreme" edition doesn't support starting the stress
+test from the command line.
+To download Aida64 Portable Engineer, go to the official site at: https://www.aida64.com/downloads
+You can use the trial version for up to 30 days, which should give you enough time to find your stable settings.
+
+
 
 TROUBLESHOOTING & FAQ
 ---------------------
 Q: What does "Set to Core X (CPU Y)" (e.g. "Set to Core 6 (CPU 12)") mean?
 A: CoreCycler - as the name suggests - cycles through your cores and informs you on which core it is currently running.
    When Hyperthreading / Simultaneous Multithreading (SMT) is enabled, each physical core contains two "virtual" CPUs,
-   effectively doubling the amount of CPUs available to you.
+   effectively doubling the amount of CPUs available to you (at least for Ryzen and Intel P-Cores).
    Since Cores and CPUs generally start with 0 (zero-based), as seen in the BIOS and in the Task Manager, CoreCycler
    also uses this format. So "Core 0" means your first core, and "CPU 0" the first virtual CPU.
    "Core 6 (CPU 12)" respectively means it's running on the 7th core (remember, zero-based!) and 13th virtual CPU.
@@ -110,23 +112,22 @@ A: Yes, Ryzen Master starts it's core numbering with 1. Only AMD knows why, it's
    Blame AMD for breaking this naming convention.
 
 Q: My computer crashes when running this program!
-A: Very likely your Curve Optimizer or Turbo Boost setting is unstable. Change the settings to a higher resp. less
-   negative value (e.g. from -15 to -12) and try again, or lower your Boost Clock.
+A: Very likely your Boost or Curve Optimizer setting is unstable. Reduce your clock speed, increase your voltage, resp.
+   change the CO setting to a higher or more precisely less negative value (e.g. from -15 to -12) and try again.
 
 Q: How long should I run this for?
 A: Basically as long as you can. If you aim for a "12h prime-stable setup", you'd need to run every single core for 
    12 hours, which for a processor with 12 cores like the 5900X would sum up to a total of 144 hours of stress testing.
    Of course, you can also settle for less - that's totally up to you.
 
-Q: Which setting should I use?
-A: Short answer: all of them.
+Q: Which setting should I use to test?
+A: Short answer: as many as cou can.
    Long answer: I've defaulted this to Prime95 without AVX and AVX2 and "Huge" FFTs. The reason behind this is that 
    this *should* produce the least amount of heat and therefore the highest boost clock. But you should eventually run 
    all of the tests to make sure that you're really error free.
-   Also switching from Prime95 to y-cruncher or Aida64 produces different load scenarios, which can prove useful in 
-   detecting instabilities.
-   For y-cruncher, "04-P4P" and "19-ZN2 ~ Kagari" seem to produce the fastest results (even if "20-ZN3 ~ Yuzuki" is
-   described as being optimized for Ryzen 7000 / Zen4).
+   Also switching from Prime95 to y-cruncher, Linpack or Aida64 produces different load scenarios, which can prove useful
+   in detecting instabilities.
+   For y-cruncher, "04-P4P" and "19-ZN2 ~ Kagari" seem to produce the fastest results, at least for Ryzen CPUs.
 
 Q: Why are you using SSE? AVX stresses the CPU much more!
 A: Yes, AVX/AVX2/AVX512 does stress the CPU more than the SSE mode. However, it is exactly this additional load on the
@@ -141,7 +142,7 @@ A: Yes, AVX/AVX2/AVX512 does stress the CPU more than the SSE mode. However, it 
    can select different test modes which require different instruction sets.
 
 Q: What settings can I change?
-A: The config.ini contains details and an explanation for each setting, so take a look there.
+A: The /configs/default.config.ini contains details and an explanation for each setting, so take a look there.
 
 Q: When starting the tool I see a "FATAL ERROR: Could not access the Windows Performance Process Counter!" message!
 A: For some stress test programs the script needs to check the CPU utilization to determine if here has been an error.
@@ -233,10 +234,10 @@ The licenses of all included programs remain unaffected by this and retain their
   https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html
 
 - Linpack (all included versions)
-  2024.2.0.662 - https://web.archive.org/web/20240722184607/https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7816a8cf-2378-4d49-bfa6-6013a3d7be6a/w_onemkl_p_2024.2.0.662_offline.exe
-  2021.4.0.640 - https://web.archive.org/web/20211115133152/https://registrationcenter-download.intel.com/akdlm/irc_nas/18230/w_onemkl_p_2021.4.0.640_offline.exe
-  2019.3.203   - https://web.archive.org/web/20190509182800/http://registrationcenter-download.intel.com/akdlm/irc_nas/tec/15247/w_mkl_2019.3.203.exe
-  2018.3.011   - https://web.archive.org/web/20220412021802/registrationcenter-download.intel.com/akdlm/irc_nas/9752/w_mklb_p_2018.3.011.zip
+  2024.2.1.0 (2024.2.0.662) - https://web.archive.org/web/20240722184607/https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7816a8cf-2378-4d49-bfa6-6013a3d7be6a/w_onemkl_p_2024.2.0.662_offline.exe
+  2021.4.1.0 (2021.4.0.640) - https://web.archive.org/web/20211115133152/https://registrationcenter-download.intel.com/akdlm/irc_nas/18230/w_onemkl_p_2021.4.0.640_offline.exe
+  2019.0.3.1 (2019.3.203)   - https://web.archive.org/web/20190509182800/https://registrationcenter-download.intel.com/akdlm/irc_nas/tec/15247/w_mkl_2019.3.203.exe
+  2018.0.3.1 (2018.3.011)   - https://web.archive.org/web/20220412021802/https://registrationcenter-download.intel.com/akdlm/irc_nas/9752/w_mklb_p_2018.3.011.zip
 
 - WriteConsoleToWriteFileWrapper
   https://github.com/sp00n/WriteConsoleToWriteFileWrapperDll?tab=MIT-1-ov-file
