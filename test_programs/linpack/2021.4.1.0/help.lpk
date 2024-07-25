@@ -1,0 +1,15 @@
+Intel(R) Distribution for LINPACK* Benchmark.
+
+This is a shared-memory (SMP) implementation of the benchmark for Windows*
+which runs on a single platform and generalizes the LINPACK* 1000 benchmark.
+
+*Other names and brands may be claimed as the property of others.
+
+Usage:
+
+linpack
+linpack -h[elp]
+linpack -e[xtended_help]
+linpack [-i[nput_file]] data_file
+linpack < data_file
+

@@ -1,11 +1,9 @@
 The binaries in this package have been tuned for different systems.
 
-http://www.numberworld.org/y-cruncher/internals/arch-optimizations.html
-
 
 --------------------------------------------------------------------------------
 
-Binary: "22-ZN4 ~ Kizuna" (AMD Zen 4)
+Binary: "24-ZN5 ~ Komari" (AMD Zen5)
 
 
 Required Instructions:
@@ -16,27 +14,48 @@ Required Instructions:
 
 
 Target Systems:
-    - AMD Zen 4 Raphael
+    - AMD Zen5 Granite Ridge
 
 Recommended For:
-    - AMD Zen 4 Raphael
+    - AMD Zen5
+
+
+This binary was tuned on:
+
+    Processor(s)    :   AMD Ryzen 9 9950X
+    CPU Frequency   :   stock (variable frequency)
+    Memory          :   192 GB DDR5 @ 5200 MT/s
+
+
+--------------------------------------------------------------------------------
+
+Binary: "22-ZN4 ~ Kizuna" (AMD Zen5)
+
+
+Required Instructions:
+    x64, ABM, BMI1, BMI2, ADX,
+    SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2,
+    AVX, FMA3, AVX2
+    AVX512-(F/CD/VL/BW/DQ/IFMA/VBMI/VBMI2/GFNI)
+
+
+Target Systems:
+    - AMD Zen4 Raphael
+
+Recommended For:
+    - AMD Zen4
 
 
 This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 9 7950X
     CPU Frequency   :   stock (variable frequency)
-    Memory          :   128 GB DDR5 @ 4400 MHz (40-37-37-71)
-
-    Cores           :   16
-    Threads         :   32
-    Cache           :   80 MB
-    Cache / Thread  :   2.5 MB / Thread
+    Memory          :   128 GB DDR5 @ 5200 MT/s
 
 
 --------------------------------------------------------------------------------
 
-Binary: "20-ZN3 ~ Yuzuki" (AMD Zen 3)
+Binary: "20-ZN3 ~ Yuzuki" (AMD Zen3)
 
 
 Required Instructions:
@@ -46,27 +65,25 @@ Required Instructions:
 
 
 Target Systems:
-    - AMD Zen 3 Vermeer
+    - AMD Zen3 Vermeer
 
 Recommended For:
-    - AMD Zen 3 Vermeer
+    - AMD Zen3
 
 
 This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 6 5600X
     CPU Frequency   :   stock (variable frequency)
-    Memory          :   128 GB DDR4 @ 2666 MHz (20-19-19-43)
+    Memory          :   128 GB DDR4 @ 2666 MT/s
 
-    Cores           :   6
-    Threads         :   12
-    Cache           :   32 MB
-    Cache / Thread  :   4 MB / thread
+
+This build is no longer supported.
 
 
 --------------------------------------------------------------------------------
 
-Binary: "19-ZN2 ~ Kagari" (AMD Zen 2)
+Binary: "19-ZN2 ~ Kagari" (AMD Zen2)
 
 
 Required Instructions:
@@ -76,22 +93,17 @@ Required Instructions:
 
 
 Target Systems:
-    - AMD Zen 2 Matisse
+    - AMD Zen2 Matisse
 
 Recommended For:
-    - AMD Zen 2 Matisse
+    - AMD Zen2 and Zen3
 
 
 This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 9 3950X
     CPU Frequency   :   stock (variable frequency)
-    Memory          :   128 GB DDR4 @ 3000 MHz (16-18-18-38)
-
-    Cores           :   16
-    Threads         :   32
-    Cache           :   64 MB
-    Cache / Thread  :   2 MB / thread
+    Memory          :   128 GB DDR4 @ 2667 MT/s
 
 
 --------------------------------------------------------------------------------
@@ -117,18 +129,14 @@ Recommended For:
     - Intel Tiger Lake
     - Intel Alder Lake (only with AVX512)
     - Intel Sapphire Rapids
+    - Intel Emerald Rapids
 
 
 This binary was tuned on:
 
     Processor(s)    :   Intel Core i7 11800H
-    CPU Frequency   :   stock (variable frequency)
-    Memory          :   64 GB DDR4 @ 3200 MHz
-
-    Cores           :   8
-    Threads         :   16
-    Cache           :   24 MB
-    Cache / Thread  :   1.5 MB / thread
+    CPU Frequency   :   stock ~60W (variable frequency)
+    Memory          :   64 GB DDR4 @ 3200 MT/s
 
 
 This binary was formerly turned for Cannon Lake 8121U, but has since been
@@ -156,15 +164,10 @@ Recommended For:
 
 This binary was tuned on:
 
-    Processor(s)    :   Intel Core i9 7940X
-    CPU Frequency   :   4.6/4.0/3.6 GHz (all-core non-AVX/AVX/AVX512)
-    Cache Frequency :   2.8 GHz
-    Memory          :   128 GB DDR4 @ 3466 MHz (16-18-18-38)
-
-    Cores           :   14
-    Threads         :   28
-    Cache           :   14 MB
-    Cache / Thread  :   512 KB / thread
+    Processor(s)    :   Intel Core i9 10980XE
+    CPU Frequency   :   stock 300W (variable frequency)
+    Cache Frequency :   3.0 GHz
+    Memory          :   128 GB DDR4 @ 3600 MT/s
 
 
 --------------------------------------------------------------------------------
@@ -196,7 +199,7 @@ This build is no longer supported as of version 0.7.8.
 
 --------------------------------------------------------------------------------
 
-Binary: "17-ZN1 ~ Yukina" (AMD Zen)
+Binary: "17-ZN1 ~ Yukina" (AMD Zen1)
 
 
 Required Instructions:
@@ -206,22 +209,17 @@ Required Instructions:
 
 
 Target Systems:
-    - AMD Zen 1 Summit Ridge
+    - AMD Zen1 Summit Ridge
 
 Recommended For:
-    - AMD Zen 1 Summit Ridge
+    - AMD Zen1
 
 
 This binary was tuned on:
 
     Processor(s)    :   AMD Ryzen 7 1800X
     Frequency       :   stock (variable frequency)
-    Memory          :   64 GB DDR4 @ 2866 MHz
-
-    Cores           :   8
-    Threads         :   16
-    Cache           :   16 MB
-    Cache / Thread  :   1 MB / thread
+    Memory          :   64 GB DDR4 @ 2866 MT/s
 
 
 --------------------------------------------------------------------------------
@@ -246,12 +244,7 @@ This binary was tuned on:
 
     Processor(s)    :   Intel Core i7 6820HK
     Frequency       :   3.20 GHz
-    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
-
-    Cores           :   4
-    Threads         :   8
-    Cache           :   8 MB
-    Cache / Thread  :   1 MB / thread
+    Memory          :   64 GB DDR4 @ 2133 MT/s
 
 
 --------------------------------------------------------------------------------
@@ -277,12 +270,7 @@ This binary was tuned on:
 
     Processor(s)    :   Intel Core i7 5960X
     Frequency       :   4.00 GHz
-    Memory          :   64 GB (8 x 8GB) DDR4 @ 2400 MHz
-
-    Cores           :   8
-    Threads         :   16
-    Cache           :   20 MB
-    Cache / Thread  :   1 MB / thread
+    Memory          :   64 GB (8 x 8GB) DDR4 @ 2400 MT/s
 
 
 --------------------------------------------------------------------------------
@@ -304,13 +292,13 @@ Recommended For:
 This binary was tuned on:
 
     Processor(s)    :   AMD FX-8350
-    Frequency       :   4.00 GHz
-    Memory          :   32 GB (4 x 8GB) DDR3 @ 1333 MHz (11-11-11-28)
+    Frequency       :   stock
+    Memory          :   32 GB (4 x 8GB) DDR3 @ 1333 MT/s
 
-    Cores           :   8 (4 modules)
-    Threads         :   8
-    Cache           :   8 MB
-    Cache / Thread  :   1 MB / thread
+This binary used be named "11-BD1" and could run on 1st generation Bulldozer
+processors. But due the increasing difficulty of maintaining FMA4 codepaths, it
+has been changed to use FMA3 instead and thus requires 2nd generation Bulldozer
+to run.
 
 
 --------------------------------------------------------------------------------
@@ -331,14 +319,9 @@ Recommended For:
 
 This binary was tuned on:
 
-    Processor(s)    :   Intel Core i7 6820HK
-    Frequency       :   3.20 GHz
-    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
-
-    Cores           :   4
-    Threads         :   8
-    Cache           :   8 MB
-    Cache / Thread  :   1 MB / thread
+    Processor(s)    :   Intel Core i7 3630QM
+    Frequency       :   stock
+    Memory          :   8 GB DDR3 @ 1600 MT/s
 
 
 This build will run on any processor supporting AVX instructions. But it is not
@@ -363,14 +346,9 @@ Recommended For:
 
 This binary was tuned on:
 
-    Processor(s)    :   Intel Core i7 6820HK
-    Frequency       :   3.20 GHz
-    Memory          :   64 GB DDR4 @ 2133 MHz (15-15-15-36)
-
-    Cores           :   4
-    Threads         :   8
-    Cache           :   8 MB
-    Cache / Thread  :   1 MB / thread
+    Processor(s)    :   Intel Core i7 920
+    Frequency       :   3.50 GHz
+    Memory          :   12 GB DDR3 @ 1333 MT/s
 
 This build will also run on Intel Penryn processors. (Intel Core 2 with SSE4.1.)
 
@@ -391,10 +369,7 @@ Recommended For:
     - All Intel Core 2 processors with SSE4.1.
 
 
-This binary is no longer tuned as the computer it was intended for has since
-been retired.
-
-This build is no longer supported as of version 0.6.1.
+This build is no longer supported.
 
 
 --------------------------------------------------------------------------------
@@ -413,8 +388,15 @@ Recommended For:
     - All x86-64 processors supporting SSE3 that are not already listed.
 
 
-This binary is no longer tuned as the computer it was intended for has since
-been retired.
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 920
+    Frequency       :   3.50 GHz
+    Memory          :   12 GB DDR3 @ 1333 MT/s
+
+
+This binary is tuned on a newer computer than the one it was intended for
+because the original computer has since been decommissioned.
 
 
 --------------------------------------------------------------------------------
@@ -430,8 +412,15 @@ Recommended For:
     - All x86 processors supporting SSE3 that are not already listed.
 
 
-This binary is no longer tuned as the computer it was intended for has since
-been retired.
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 920
+    Frequency       :   3.50 GHz
+    Memory          :   12 GB DDR3 @ 1333 MT/s
+
+
+This binary is tuned on a newer computer than the one it was intended for
+because the original computer has since been decommissioned.
 
 
 --------------------------------------------------------------------------------
@@ -447,8 +436,15 @@ Recommended For:
     - Legacy x86.
 
 
-This binary is no longer tuned as the computer it was intended for has since
-been retired.
+This binary was tuned on:
+
+    Processor(s)    :   Intel Core i7 920
+    Frequency       :   3.50 GHz
+    Memory          :   12 GB DDR3 @ 1333 MT/s
+
+
+This binary is tuned on a newer computer than the one it was intended for
+because the original computer has since been decommissioned.
 
 
 --------------------------------------------------------------------------------

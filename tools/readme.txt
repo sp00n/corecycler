@@ -2,16 +2,6 @@ In this directory are some helpful tools that you might find interesting.
 
 
 
-analyze_prime95_logfile.ps1
----------------------------
-This is a PowerShell script that can be used to analyze Prime95 log files.
-It will try to determine the amount of FFT iterations and how long the various iterations have taken.
-
-Usage example:
-.\analyze_prime95_logfile.ps1 "E:\CoreCycler\logs\Prime95_2022-10-18_13-01-31_SSE_ALL_FFT_4K-32768K.txt"
-
-
-
 BoostTester.exe
 ---------------
 https://github.com/jedi95/BoostTester
@@ -23,11 +13,16 @@ should boost as high as they can. Unfortunately there is no error checking for t
 
 
 
-BoostTesterMannix.exe
----------------
-https://github.com/mann1x/BoostTesterMannix
+BoostTester.sp00n.exe
+---------------------
+https://github.com/sp00n/BoostTester
 
-Slightly modified version of the original BoostTester tool, which apparently generates an even higher core clock.
+Modified version of the original BoostTester tool, which correctly works with Intel P- and E-Cores.
+Also includes the modifications done by mann1x which apparently generates an even higher core clock.
+
+Sources:
+https://github.com/jedi95/BoostTester
+https://github.com/mann1x/BoostTesterMannix
 
 
 
@@ -45,17 +40,16 @@ The higher the score, the higher the priority from the windows sheduler.
 
 enable_performance_counter.bat
 ------------------------------
-Sometimes the Perfomance Counters can corrupt on a Windows installation, which breaks CoreCycler.
+Sometimes the Perfomance Counters can corrupt on a Windows installation, which breaks CoreCycler if it set to use them.
 This batch file tries to fix/reset these Performance Counters.
 It requires Administator priviliges and will try to get them / complain otherwise.
 
 
 
-PBO2Tuner v1.1-beta
--------------------
+PBO2Tuner
+---------
 by PJVol from overclock.net
-https://www.overclock.net/threads/official-amd-5700g-5600g-5300g-apu-apu.1792840/page-27#post-29121806
-https://drive.google.com/file/d/17UZ7pXpc85GXfJiqDlYLoEuYw38vIsuk/view
+https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29337788
 
 This tool can set the Curve Optimizer, PPT, TDC, EDC, Max Boost and FIT Scalar values from within Windows.
 It can be run either with a GUI or using the command line (e.g. on startup), as seen below.
