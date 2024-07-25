@@ -1,5 +1,7 @@
 .updatecheck
 config.ini
+deploy.ps1
+_deploy
 *.git-credentials
 *.zip
 *.7z

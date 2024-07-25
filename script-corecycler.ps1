@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.5.3-RC1-for-0-9.6.0'
+$version = '0.9.6.0'
 
 
 # This defines the strict mode
@@ -2036,10 +2036,8 @@ function Get-ByteValueFromString {
 .DESCRIPTION
     Get the problem size value for Linpack
     Problem size = sqrt(memory in bytes / 8), ceiled to the next integer
-    No AVX:   divisible by 8 but not by 16
-    With AVX: divisible by 16 but not 32
-    From the xhelp.lpk file:
-    [...] the number of equations (divisible by 8 but not by 16, or divisible by 16 but not 32 for Intel(R) AVX processors).
+    Apparently the problem size does not need to be divisible by 8, 16, or 32:
+    http://web.archive.org/web/20240725212018/https://community.intel.com/t5/Intel-oneAPI-Math-Kernel-Library/Linpack-Correctly-calculate-the-number-of-equations-problem-size/m-p/1617218/highlight/true#M36293
 .PARAMETER memoryBytes
     [UInt64] The memory in bytes
 .PARAMETER usesAvx
@@ -2053,27 +2051,8 @@ function Get-LinpackProblemSize {
         [Parameter(Mandatory=$true)] [Bool] $usesAvx
     )
 
-    # Uses AVX:    divisible by 16 but not 32
-    # Uses no AVX: divisible by 8 but not by 16
-    $divisorShouldMatch    = $(if ($usesAvx) { 16 } else { 8 })
-    $divisorShouldNotMatch = $(if ($usesAvx) { 32 } else { 16 })
-
+    # Only full integers
     [UInt64] $problemSize = [Math]::Floor([Math]::Sqrt($memory / 8))
-
-    Write-Debug('Initial problem size: ' + $problemSize)
-    Write-Debug('Uses AVX: ' + $usesAvx)
-
-    while ($problemSize -gt 0) {
-        Write-Debug('Checking problem size: ' + $problemSize) -NoNewline
-        Write-Debug(' ║ % ' + $divisorShouldMatch    + ' == 0: ' + ($problemSize % $divisorShouldMatch -eq 0).ToString().PadRight(5, ' ')    + (' (' + ($problemSize % $divisorShouldMatch)    + ')').PadLeft(5, ' ')) -NoNewline -SkipIndentation
-        Write-Debug(' ║ % ' + $divisorShouldNotMatch + ' != 0: ' + ($problemSize % $divisorShouldNotMatch -ne 0).ToString().PadRight(5, ' ') + (' (' + ($problemSize % $divisorShouldNotMatch) + ')').PadLeft(5, ' ')) -SkipIndentation
-
-        if ($problemSize % $divisorShouldMatch -eq 0 -and $problemSize % $divisorShouldNotMatch -ne 0) {
-            return $problemSize
-        }
-
-        $problemSize = $problemSize - 1
-    }
 
     return $problemSize
 }
@@ -2089,6 +2068,8 @@ function Get-LinpackProblemSize {
     is obtained when the leading dimension is set to the nearest odd multiple of 8 (16 for Intel(R) AVX processors) equal to or larger
     than the number of equations (divisible by 8 but not by 16, or divisible by 16 but not 32 for Intel(R) AVX processors).
     https://stackoverflow.com/questions/49345420/understanding-linpack-input-configuration
+    Also here:
+    http://web.archive.org/web/20240725212018/https://community.intel.com/t5/Intel-oneAPI-Math-Kernel-Library/Linpack-Correctly-calculate-the-number-of-equations-problem-size/m-p/1617218/highlight/true#M36293
 .PARAMETER problemSize
     [UInt64] The problem size
 .PARAMETER usesAvx
@@ -2102,23 +2083,30 @@ function Get-LinpackLeadingDimensionValue {
         [Parameter(Mandatory=$true)] [Bool] $usesAvx
     )
 
-    # Uses AVX:    the nearest odd multiple of 16
-    # Uses no AVX: the nearest odd multiple of 8
-    $divisor = $(if ($usesAvx) { 16 } else { 8 })
+    # Uses no AVX: the nearest odd multiple of 8, divisible by 8 but not by 16
+    # Uses AVX:    the nearest odd multiple of 16, divisible by 16 but not 32
+    $divisorShouldMatch    = $(if ($usesAvx) { 16 } else { 8 })
+    $divisorShouldNotMatch = $(if ($usesAvx) { 32 } else { 16 })
 
-    [UInt64] $leadingDimensionSize = [Math]::Ceiling($problemSize / $divisor) * $divisor
 
-    # Check if it's an odd number when again dividided by the divisor (8 resp. 16) (= an odd multiple of the divisor)
-    # I assume we don't want fractures of multiples (e.g. 500MB -> 7906 / 8 = 988.25), so test against a remaining 1
-    $isOdd = [Bool] (($leadingDimensionSize / $divisor) % 2 -eq 1)
+    # The leading dimension should be divisible by 8 or 16 (the problem size doesn't need to)
+    [UInt64] $leadingDimensionSize = [Math]::Ceiling($problemSize / $divisorShouldMatch) * $divisorShouldMatch
 
-    # It's an odd multiple of the divisor, we can return it
-    if ($isOdd) {
-        return $leadingDimensionSize
+    Write-Debug('Problem size:                ' + $problemSize)
+    Write-Debug('Use AVX:                     ' + $usesAvx)
+
+    while ($true) {
+        Write-Debug('Checking leading dimension:  ' + $leadingDimensionSize) -NoNewline
+        Write-Debug(' ║ % ' + $divisorShouldMatch    + ' == 0: ' + ($leadingDimensionSize % $divisorShouldMatch -eq 0).ToString().PadRight(5, ' ')    + (' (' + ($leadingDimensionSize % $divisorShouldMatch)    + ')').PadLeft(5, ' ')) -NoNewline -SkipIndentation
+        Write-Debug(' ║ % ' + $divisorShouldNotMatch + ' != 0: ' + ($leadingDimensionSize % $divisorShouldNotMatch -ne 0).ToString().PadRight(5, ' ') + (' (' + ($leadingDimensionSize % $divisorShouldNotMatch) + ')').PadLeft(5, ' ')) -SkipIndentation
+
+        if ($leadingDimensionSize % $divisorShouldMatch -eq 0 -and $leadingDimensionSize % $divisorShouldNotMatch -ne 0) {
+            Write-Debug('The final leading dimension: ' + $leadingDimensionSize)
+            return $leadingDimensionSize
+        }
+
+        $leadingDimensionSize = $leadingDimensionSize + 1
     }
-
-    # Otherwise it's an even multiple of the divisor, so we need to go up one step
-    return ($leadingDimensionSize + $divisor)
 }
 
 
@@ -6596,7 +6584,7 @@ function Initialize-Linpack {
         Exit-WithFatalError -text $errorText
     }
 
-    #exit
+    exit #DEBUGEXIT
 
     # If the parameter to override the number of threads is provided, use it, otherwise use the setting value
     $numberOfThreads = $(if ($overrideNumberOfThreads -gt 0) { $overrideNumberOfThreads } else { $settings.General.numberOfThreads })
@@ -8707,8 +8695,14 @@ if ($PSScriptRoot -Match '\\(OneDrive)\\' -or $PSScriptRoot -Match '\\(Dropbox)\
         Write-Host('')
         Write-Host('If CoreCycler is running inside a synchronized directory, it can severely') -ForegroundColor Yellow
         Write-Host('interfere with the testing process.') -ForegroundColor Yellow
-        Write-Host('Please run CoreCycler outside such a directory, or close the synchronization') -ForegroundColor Yellow
-        Write-Host('program while the test is running.') -ForegroundColor Yellow
+        Write-Host('')
+        Write-Host('')
+
+        Write-Host('┌──────────────────────────────────────────────────────────────────────────────┐') -ForegroundColor Black -BackgroundColor DarkYellow
+        Write-Host('│ ' + 'To fix this, please run CoreCycler outside such a directory, or close the'.PadRight(76, ' ') + ' │') -ForegroundColor Black -BackgroundColor DarkYellow
+        Write-Host('│ ' + 'synchronization program before starting CoreCycler.'.PadRight(76, ' ') + ' │') -ForegroundColor Black -BackgroundColor DarkYellow
+        Write-Host('└──────────────────────────────────────────────────────────────────────────────┘') -ForegroundColor Black -BackgroundColor DarkYellow
+
         Write-Host('')
         Write-Host('The current directory is:') -ForegroundColor Yellow
         Write-Host($PSScriptRoot) -ForegroundColor Cyan
