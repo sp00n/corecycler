@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.6.0
+    0.9.6.1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.6.0'
+$version = '0.9.6.1'
 
 
 # This defines the strict mode
@@ -6584,7 +6584,6 @@ function Initialize-Linpack {
         Exit-WithFatalError -text $errorText
     }
 
-    exit #DEBUGEXIT
 
     # If the parameter to override the number of threads is provided, use it, otherwise use the setting value
     $numberOfThreads = $(if ($overrideNumberOfThreads -gt 0) { $overrideNumberOfThreads } else { $settings.General.numberOfThreads })
