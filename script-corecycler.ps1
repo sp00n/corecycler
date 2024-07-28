@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.7.0alpha1
+    0.9.7.0alpha2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.7.0alpha1'
+$version = '0.9.7.0alpha2'
 
 
 # This defines the strict mode
@@ -4021,7 +4021,7 @@ function Get-Settings {
 
     # Sanity check the selected test mode
     # For Aida64, you can set a comma separated list of multiple stress tests
-    $modesArray = $settings.mode -Split '\s*,\s*|\s+' | Where-Object { $_.Length -gt 0 }
+    $modesArray = $settings.mode -Split '\s*,\s*' | Where-Object { $_.Length -gt 0 }
     $modeString = ($modesArray -Join '-').ToUpperInvariant()
 
     foreach ($mode in $modesArray) {
@@ -9340,7 +9340,7 @@ try {
         # yCruncher and yCruncher Old share the same setting in the config file, adjust for that
         # As do Prime95 and Prime95 Dev
         $settingTestProgramName = $(if ($testProgram.Name -eq 'ycruncher_old') { 'ycruncher' } elseif ($testProgram.Name -eq 'prime95_dev') { 'prime95' } else { $testProgram.Name })
-        $commandMode = (($settings[$settingTestProgramName].mode -Split '\s*,\s*|\s+' | Where-Object { $_.Length -gt 0 }) -Join ',').ToUpperInvariant()
+        $commandMode = (($settings[$settingTestProgramName].mode -Split '\s*,\s*' | Where-Object { $_.Length -gt 0 }) -Join ',').ToUpperInvariant()
 
         # Generate the command line
         $data = @{
