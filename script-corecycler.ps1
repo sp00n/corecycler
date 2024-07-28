@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.7.0alpha2
+    0.9.7.0alpha3
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.7.0alpha2'
+$version = '0.9.7.0alpha3'
 
 
 # This defines the strict mode
@@ -146,7 +146,7 @@ $coresWithIncreasedCurveOptimizerValue   = [System.Collections.ArrayList]::new()
 $coresWithErrorAndMaxCurveOptimizerValue = [System.Collections.ArrayList]::new()
 $numCoresWithIncreasedCoValue            = 0
 $numCoresWithErrorAndMaxCoValue          = 0
-$pbo2TunerExe                            = $PSScriptRoot + '\tools\PBO2Tuner\PBO2tuner.exe'
+$pboCliTool                              = $PSScriptRoot + '\tools\pbocli\pbotest.exe'
 
 
 # Parameters that are controllable by debug settings
@@ -691,7 +691,10 @@ enableAutomaticAdjustment = 0
 
 
 # The starting Curve Optimizer values
-# You need to provide the Curve Optimizer starting values here, they cannot be automatically detected
+# You can provide the Curve Optimizer starting values here, or let them be automatically detected
+# If you specify values here, they will overwrite your currently applied CO settings
+# If you leave the value blank or at "Default", it will try to automatically detect your current settings
+#
 # Important: use a negative sign if you have negative CO values, not providing a negative sign will
 # instead apply a positive CO offset
 # Use a comma separated list or define a single value that will be applied to all cores
@@ -703,8 +706,8 @@ enableAutomaticAdjustment = 0
 # Example to assign a single value to all cores:
 # startValues = -20
 #
-# Default: (empty)
-startValues =
+# Default: Default
+startValues = Default
 
 
 # The upper limit for the Curve Optimizer values
@@ -3575,13 +3578,13 @@ function Import-Settings {
     # Certain setting values are strings
     $settingsWithStrings = @(
         'useConfigFile'
+        'coreTestOrder'
         'stressTestProgram'
         'stressTestProgramPriority'
         'name'
         'version'
         'mode'
         'FFTSize'
-        'coreTestOrder'
         'tests'
         'memory'
         'modeToUseForSuspension'
@@ -3591,12 +3594,22 @@ function Import-Settings {
     $settingsWithDecimals = @('updateCheckFrequency')
 
     # Lowercase for certain settings
-    $settingsToLowercase = @('stressTestProgram', 'coreTestOrder', 'memory', 'modeToUseForSuspension')
+    $settingsToLowercase = @(
+        'stressTestProgram'
+        'coreTestOrder'
+        'startValues'
+        'memory'
+        'modeToUseForSuspension'
+    )
 
     # Settings with arrays
     $settingsWithArrays = @(
-        #'coreTestOrder'    # This has a special treatment, since it can have string values as well
         'coresToIgnore'
+    )
+
+    # Settings that are arrays but also can have a string value
+    $settingsWithArrayOrString = @(
+        #'coreTestOrder' # This is handled later
         'startValues'
     )
 
@@ -3662,10 +3675,40 @@ function Import-Settings {
                         }
                     }
 
-                    # Sort if it's coresToIgnore
+                    # Sort the array if it's coresToIgnore
                     if ($name -eq 'coresToIgnore') {
                         # We cannot use Sort here, as it would transform an array with only one entry into an integer!
                         $thisSetting::Sort($thisSetting)
+                    }
+                }
+
+                $setting = $thisSetting
+            }
+
+
+            # Settings that can be arrays or a string value
+            elseif ($settingsWithArrayOrString -contains $name) {
+                $thisSetting = $null
+
+                if ($null -ne $value -and ![String]::IsNullOrWhiteSpace($value)) {
+                    if ($settingsToLowercase -contains $name) {
+                        $thisSetting = ([String] $value).ToLowerInvariant()
+                    }
+                    else {
+                        $thisSetting = [String] $value
+                    }
+
+                    # Try to split the string by comma or space
+                    $splitString = @(@($thisSetting -Split '\s*,\s*|\s+') | Where-Object { $_.Length -gt 0 })
+
+                    # Is there only one entry and is it not an integer?
+                    if ($splitString.Count -eq 1 -and $splitString[0] -Match '^\-?\d+$') {
+                        $thisSetting = $splitString[0]
+                    }
+
+                    # More than one entry, or the single entry is an integer
+                    else {
+                        $thisSetting = @($splitString | ForEach-Object { if ($_ -Match '^\-?\d+$')  { [Int] $_ } else { $_ } })
                     }
                 }
 
@@ -4138,10 +4181,31 @@ function Initialize-AutomaticCurveOptimizer {
         return
     }
 
+
+    # This only works for Ryzen CPUs
+    # TODO: Probably also doesn't yet work for Ryzen 9000 / Zen 5
+    if ($isIntelProcessor) {
+        Write-Text('')
+        Write-Text('')
+        Write-ColorText('┌─────────────────────────────────┤ IMPORTANT ├────────────────────────────────┐') Yellow DarkRed
+        Write-ColorText('│ ' + 'You have selected to use the Automatic Curve Optimizer.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'This feature only works with Ryzen processors, but Intel was detected.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'Continuing without this feature.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('└──────────────────────────────────────────────────────────────────────────────┘') Yellow DarkRed
+        Write-Text('')
+        Write-Text('')
+
+        Write-Text('Press any key to continue...')
+        $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+
+        return
+    }
+
+
     # The Automatic Curve Optimizer has been enabled, we require administrator privileges!
     $weAreAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-    Write-Debug('Automatic Curve Optimizer enabled')
+    Write-Debug('Initializing Automatic Curve Optimizer')
     Write-Debug('Are we admin: ' + $weAreAdmin)
 
 
@@ -4177,7 +4241,8 @@ function Initialize-AutomaticCurveOptimizer {
             [Void] [System.Diagnostics.Process]::Start($newProcess)
 
             # Close this window, the new window should be opened
-            #[Void] $SendMessage::SendMessage($parentMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+            [Void] $SendMessage::SendMessage($parentMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+            exit
         }
         else {
             Write-ColorText('You did not select to open the script with administrator rights, but the') Red
@@ -4190,36 +4255,6 @@ function Initialize-AutomaticCurveOptimizer {
         Write-Debug('We have admin rights, proceeding')
     }
 
-
-    <#
-    #$getCoValuesProcess = Start-Process -FilePath "E:\_Overclock\PBO2Tuner-InfoTest-Release\pbotest.exe" -ArgumentList "info" -Wait -Verb RunAs -WindowStyle Hidden -PassThru
-
-    $getCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $getCoValuesProcessInfo.FileName = 'E:\_Overclock\PBO2Tuner-InfoTest-Release\pbotest.exe'
-    $getCoValuesProcessInfo.Arguments = 'info'
-    $getCoValuesProcessInfo.Verb = 'runas'
-    $getCoValuesProcessInfo.RedirectStandardError = $true
-    $getCoValuesProcessInfo.RedirectStandardOutput = $true
-    $getCoValuesProcessInfo.UseShellExecute = $false
-
-
-    $getCoValuesProcess = New-Object System.Diagnostics.Process
-    $getCoValuesProcess.StartInfo = $getCoValuesProcessInfo
-    $null = $getCoValuesProcess.Start()
-
-
-    'ExitCode: ' + $getCoValuesProcess.ExitCode
-    $stdout = $getCoValuesProcess.StandardOutput.ReadToEnd()
-    $stderr = $getCoValuesProcess.StandardError.ReadToEnd()
-    $getCoValuesProcess.WaitForExit()
-
-    '$stdout: ' + $stdout
-    '$stderr: ' + $stderr
-
-    exit #DEBUGEXIT
-    #>
-
-
     # Either get or set the starting Curve Optimizer values
     $settingsStartCoValues = @($settings['AutomaticCurveOptimizer']['startValues'])
 
@@ -4227,16 +4262,16 @@ function Initialize-AutomaticCurveOptimizer {
     Write-Debug($settingsStartCoValues)
 
     # Empty of default should use the currently assigned values, get them
-    # TODO: NOT YET IMPLEMENTED
-    if ($settingsStartCoValues.Count -eq 0 -or $settingsStartCoValues[0].ToString().ToUpperInvariant() -eq 'DEFAULT') {
-        Exit-WithFatalError('Automatic Curve Optimizer enabled, you need to provide the starting Curve Optimizer values!')
+    if ($settingsStartCoValues.Count -eq 0 -or $settingsStartCoValues[0].ToString().ToLowerInvariant() -eq 'default') {
+        # Get the currently applied Curve Optimizer values
+        $settingsStartCoValues = Get-CurveOptimizerValues
     }
 
     # The number of settings must equal the number of cores or be exactly one value
-    if (@($settingsStartCoValues).Count -ne $numPhysCores) {
+    if ($settingsStartCoValues.Count -ne $numPhysCores) {
         # Apply this value to each core
-        if (@($settingsStartCoValues).Count -eq 1 -and @($settingsStartCoValues)[0] -Match '^\s*\-\d+\s*$') {
-            $valueForAllCores = [Int] @($settingsStartCoValues)[0]
+        if ($settingsStartCoValues.Count -eq 1 -and $settingsStartCoValues[0] -Match '^\s*\-\d+\s*$') {
+            $valueForAllCores = [Int] $settingsStartCoValues[0]
             $settingsStartCoValues = @($valueForAllCores) * $numPhysCores
         }
         else {
@@ -4262,6 +4297,82 @@ function Initialize-AutomaticCurveOptimizer {
 
 <#
 .DESCRIPTION
+    Get the currently applied Curve Optimizer values
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Array] The Curve Optimizer values
+#>
+function Get-CurveOptimizerValues {
+    try {
+        Write-Debug('Trying to query for the Curve Optimizer values')
+
+        $getCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $getCoValuesProcessInfo.FileName = $pboCliTool
+        $getCoValuesProcessInfo.Arguments = 'get'
+        $getCoValuesProcessInfo.Verb = 'runas'
+        $getCoValuesProcessInfo.RedirectStandardError = $true
+        $getCoValuesProcessInfo.RedirectStandardOutput = $true
+        $getCoValuesProcessInfo.UseShellExecute = $false
+
+
+        $getCoValuesProcess = New-Object System.Diagnostics.Process
+        $getCoValuesProcess.StartInfo = $getCoValuesProcessInfo
+        $null = $getCoValuesProcess.Start()
+
+
+        $stdOut = $getCoValuesProcess.StandardOutput.ReadToEnd()
+        $stdErr = $getCoValuesProcess.StandardError.ReadToEnd()
+        $getCoValuesProcess.WaitForExit()
+        $exitCode = $getCoValuesProcess.ExitCode
+
+
+        if ($exitCode -ne 0) {
+            $msg = 'Program terminated unexpectedly. Exit Code: ' + $exitCode
+
+            if ($stdErr) {
+                $msg += [Environment]::NewLine + $stdErr
+            }
+
+            throw($msg)
+        }
+
+        if ($stdErr -and $stdErr.Length -gt 0) {
+            throw('Error message returned: ' + $stdErr)
+        }
+
+        if (!$stdOut -or $stdOut -eq '') {
+            throw('Returned value was empty')
+        }
+
+
+        # Try to parse the the CO values
+        $coArray = @(($stdOut -Split '\s+') | Where-Object { $_ -Match '\-?\d+' } | ForEach-Object { [Int] $_ } )
+
+        Write-Debug('The queried and parsed Curve Optimizer values:')
+        Write-Debug($coArray)
+
+        if ($coArray.Count -ne $numPhysCores) {
+            throw('Found ' + $coArray.Count + ' entries instead of the expected ' + $numPhysCores + ':' + [Environment]::NewLine + $coArray)
+        }
+
+        # Only reasonable values
+        $limit = 50
+        if (@($coArray | Where-Object { [Math]::Abs($_) -gt $limit }).Count -gt 0) {
+            throw('Found invalid values (either higher or lower than +-' + $limit + ')' + [Environment]::NewLine + $coArray)
+        }
+
+        return $coArray
+    }
+    catch {
+        throw('Could not get the current Curve Optimizer values!' + [Environment]::NewLine + $_)
+    }
+}
+
+
+
+<#
+.DESCRIPTION
     Set the new Curve Optimizer values
 .PARAMETER
     [Void]
@@ -4270,13 +4381,64 @@ function Initialize-AutomaticCurveOptimizer {
 #>
 function Set-CurveOptimizerValues {
     try {
-        $coString = $curveOptimizerCurrentValues -Join ' '
+        Write-Debug('Trying to set the Curve Optimizer values:')
 
-        Write-Verbose('Applying the Curve Optimizer values: ' + $coString)
-        Start-Process -FilePath $pbo2TunerExe -ArgumentList $coString -Wait -Verb RunAs -WindowStyle Hidden
+        $coString = $curveOptimizerCurrentValues -Join ' '
+        $argumentString = 'set ' + $coString
+
+        Write-Verbose($coString)
+
+        $getCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $getCoValuesProcessInfo.FileName = $pboCliTool
+        $getCoValuesProcessInfo.Arguments = $argumentString
+        $getCoValuesProcessInfo.Verb = 'runas'
+        $getCoValuesProcessInfo.RedirectStandardError = $true
+        $getCoValuesProcessInfo.RedirectStandardOutput = $true
+        $getCoValuesProcessInfo.UseShellExecute = $false
+
+
+        $getCoValuesProcess = New-Object System.Diagnostics.Process
+        $getCoValuesProcess.StartInfo = $getCoValuesProcessInfo
+        $null = $getCoValuesProcess.Start()
+
+
+        $stdOut = $getCoValuesProcess.StandardOutput.ReadToEnd()
+        $stdErr = $getCoValuesProcess.StandardError.ReadToEnd()
+        $getCoValuesProcess.WaitForExit()
+        $exitCode = $getCoValuesProcess.ExitCode
+
+
+        if ($exitCode -ne 0) {
+            $msg = 'Program terminated unexpectedly. Exit Code: ' + $exitCode
+
+            if ($stdErr) {
+                $msg += [Environment]::NewLine + $stdErr
+            }
+
+            throw($msg)
+        }
+
+        if ($stdErr -and $stdErr.Length -gt 0) {
+            throw('Error message returned: ' + $stdErr)
+        }
+
+        # On success this returns the values that have been set
+        if (!$stdOut -or $stdOut -eq '') {
+            throw('Returned value was empty')
+        }
+
+        # Double trim to also remove any new lines
+        $stdOut = $stdOut.Trim().Trim(' ', '"', '''', [Char]0x09)
+
+        if ($stdOut -eq '') {
+            throw('Returned value was empty')
+        }
+
+        Write-Debug('Curve Optimizer values successfuly set to:')
+        Write-Debug($stdOut)
     }
     catch {
-        throw $_
+        throw('Could not set the Curve Optimizer values!' + [Environment]::NewLine + $_)
     }
 }
 
@@ -11233,7 +11395,7 @@ try {
                         $incrementBy = [Int] $settings['AutomaticCurveOptimizer']['incrementBy']
                         $maxCoValue  = [Int] $settings['AutomaticCurveOptimizer']['maxValue']
                         $oldCoValue  = [Int] $curveOptimizerCurrentValues[$actualCoreNumber]
-                        $newCoValue  = [Int] [Math]::Min($oldCoValue + $incrementBy, $maxCoValue)
+                        $newCoValue  = [Int] [Math]::Max($oldCoValue, [Math]::Min($oldCoValue + $incrementBy, $maxCoValue))
 
                         Write-Debug('The new CO value: ' + $newCoValue + ' (old: ' + $oldCoValue + ')')
 
@@ -11243,8 +11405,9 @@ try {
                         $numCoresWithIncreasedCoValue++
 
                         # Don't increase above the set maximum
-                        if ($oldCoValue -eq $maxCoValue) {
-                            Write-ColorText('Cannot increase the Curve Optimizer value for core ' + $actualCoreNumber + ' anymore! The maximum of ' + $maxCoValue + ' has been reached') Yellow
+                        if ($oldCoValue -ge $maxCoValue) {
+                            $reachedOrExceeded = $(if ($oldCoValue -gt $maxCoValue) { 'exceeded' } else { 'reached' })
+                            Write-ColorText('Cannot increase the Curve Optimizer value for core ' + $actualCoreNumber + ' anymore! The maximum of ' + $maxCoValue + ' has been ' + $reachedOrExceeded) Yellow
 
                             [Void] $coresWithIncreasedCurveOptimizerValue.Add($actualCoreNumber)
                             [Void] $coresWithErrorAndMaxCurveOptimizerValue.Add($actualCoreNumber)

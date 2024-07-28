@@ -3,11 +3,11 @@ You can also use it over the command line, by passing the CO values as arguments
 "PBO2tuner.exe" CO_Core0 CO_Core1 [...] CO_CoreMax PPT TDC EDC FMAX
 
 For example, to set the CO values for a 6 core processor:
-"PBO2tuner.exe" -20 2 -15 -20 -19
+"PBO2tuner.exe" -20 2 -15 -20 -19 -5
 Note the minus sign for negative CO values.
 
 Or to also set the limits:
-"PBO2tuner.exe" -20 2 -15 -20 -19 95 60 90 0
+"PBO2tuner.exe" -20 2 -15 -20 -19 -5 95 60 90 0
 You need to provide all of the four limits. "0" for a limit means to not change the current value.
 
 

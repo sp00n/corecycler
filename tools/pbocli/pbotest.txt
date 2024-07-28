@@ -1,0 +1,22 @@
+This tool lets you allow to get and set the Curve Optimizer values via the command line.
+
+Usage:
+To get the currently applied Curve Optimizer values:
+pbotest.exe get
+
+To set new Curve Optimizer values:
+pbotest.exe set CO_Core0 CO_Core1 [...] CO_CoreMax
+
+
+For example, to set the Curve Optimizer values for a 6 core processor:
+pbotest.exe set -20 2 -15 -20 -19 -5
+
+Note the minus sign for negative Curve Optimizer values.
+You need to provide a value for each core in your processor, otherwise the tool will throw an error message.
+
+
+
+Source of this version:
+https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29350110
+(https://web.archive.org/web/20240728202343/https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/page-90?post_id=29350110#post-29350110)
+(https://web.archive.org/web/20240728202442/https://www.overclock.net/attachments/release-zip.2666937/)
