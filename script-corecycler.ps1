@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.6.2
+    0.9.7.0alpha1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.6.2'
+$version = '0.9.7.0alpha1'
 
 
 # This defines the strict mode
@@ -136,6 +136,17 @@ $numCpusInLastProcessorGroup = 0
 $isHyperthreadingEnabled     = $false
 $hasAsymmetricCoreThreads    = $false
 $hasMoreThan64Cores          = $false
+
+
+# Curve Optimizer variables
+$useCurveOptimizer                       = $false
+$curveOptimizerStartingValues            = @()
+$curveOptimizerCurrentValues             = @()
+$coresWithIncreasedCurveOptimizerValue   = [System.Collections.ArrayList]::new()
+$coresWithErrorAndMaxCurveOptimizerValue = [System.Collections.ArrayList]::new()
+$numCoresWithIncreasedCoValue            = 0
+$numCoresWithErrorAndMaxCoValue          = 0
+$pbo2TunerExe                            = $PSScriptRoot + '\tools\PBO2Tuner\PBO2tuner.exe'
 
 
 # Parameters that are controllable by debug settings
@@ -662,6 +673,57 @@ memory = 2GB
 
 
 
+# Settings for the Automatic Curve Optimizer adjustment
+[AutomaticCurveOptimizer]
+
+# Enable the automatic Curve Optimizer adjustment
+# It uses PJVol's PBO2 Tuner, which is included in the /tools/ directory
+# If you enable this setting, the script will automatically adjust the Curve Optimizer values
+# when an error occurs
+# Note that it will only INCREASE the Curve Optimizer values, i.e. it will try to make the settings more stable,
+# it will never push the settings more into the negative
+# Also note that enabling this setting will require the script to be run with administrator privileges
+# And lastly, enabling it will set "skipCoreOnError" to 0 and "stopOnError" also top 0
+# IMPORTANT: This only works up to Ryzen 7000 (Zen 4) so far
+#
+# Default: 0
+enableAutomaticAdjustment = 0
+
+
+# The starting Curve Optimizer values
+# You need to provide the Curve Optimizer starting values here, they cannot be automatically detected
+# Important: use a negative sign if you have negative CO values, not providing a negative sign will
+# instead apply a positive CO offset
+# Use a comma separated list or define a single value that will be applied to all cores
+#
+# Note: The minimum possible value is defined by your CPU (and possibly motherboard). -30 is a common value
+#
+# Example for a Ryzen 5800X with 8 cores:
+# startValues = -15, -10, -15, -8, 2, -20, 0, -30
+# Example to assign a single value to all cores:
+# startValues = -20
+#
+# Default: (empty)
+startValues =
+
+
+# The upper limit for the Curve Optimizer values
+# If this limit is reached, the CO value will no longer be increased, instead the core will now simply
+# throw an error and the regular "skipCoreOnError" setting will be obeyed
+#
+# Default: 5
+maxValue = 5
+
+
+# The amount by which to increase the Curve Optimizer value
+# On an error, the Curve Optimizer value will be increased by this amount
+#
+# Default: 1
+incrementBy = 1
+
+
+
+
 # Log specific settings
 [Logging]
 
@@ -729,7 +791,7 @@ updateCheckFrequency = $updateCheckFrequency
 
 
 # Custom settings for Prime95
-[Custom]
+[Prime95Custom]
 
 # This needs to be set to 1 for AVX mode
 # (and also if you want to set AVX2 below)
@@ -2255,6 +2317,26 @@ function Show-FinalSummary {
             }
         }
 
+
+        # Display the Curve Optimizer values
+        if ($useCurveOptimizer) {
+            $coCoresString    = ((0..($numPhysCores-1)) | ForEach-Object { ('C' + $_.ToString()).PadLeft(4, ' ') }) -Join ' |'
+            $startingCoString = ($curveOptimizerStartingValues | ForEach-Object { $_.ToString().PadLeft(4, ' ') }) -Join ' |'
+            $currentCoString  = ($curveOptimizerCurrentValues | ForEach-Object { $_.ToString().PadLeft(4, ' ') }) -Join ' |'
+
+            if ($numCoresWithIncreasedCoValue -gt 0) {
+                $returnString += ('There have been adjustments to the Curve Optimizer values:') + [Environment]::NewLine
+                $returnString += ('Core            ' + $coCoresString) + [Environment]::NewLine
+                $returnString += ('Starting values ' + $startingCoString) + [Environment]::NewLine
+                $returnString += ('Current values  ' + $currentCoString) + [Environment]::NewLine
+            }
+            else {
+                $returnString += ('No adjustments to the Curve Optimizer values were necessary') + [Environment]::NewLine
+                $returnString += ('Core      ' + $coCoresString) + [Environment]::NewLine
+                $returnString += ('CO values ' + $startingCoString) + [Environment]::NewLine
+            }
+        }
+
         return $returnString
     }
 
@@ -2358,6 +2440,30 @@ function Show-FinalSummary {
         }
         else {
             Write-ColorText('No WHEA errors were observed during the test') Cyan
+        }
+    }
+
+
+    # Display the Curve Optimizer values
+    if ($useCurveOptimizer) {
+        Write-Text('')
+        Write-ColorText('────────────────────────────────────────────────────────────────────────────────') Cyan
+        Write-Text('')
+
+        $coCoresString    = ((0..($numPhysCores-1)) | ForEach-Object { ('C' + $_.ToString()).PadLeft(4, ' ') }) -Join ' |'
+        $startingCoString = ($curveOptimizerStartingValues | ForEach-Object { $_.ToString().PadLeft(4, ' ') }) -Join ' |'
+        $currentCoString  = ($curveOptimizerCurrentValues | ForEach-Object { $_.ToString().PadLeft(4, ' ') }) -Join ' |'
+
+        if ($numCoresWithIncreasedCoValue -gt 0) {
+            Write-ColorText('There have been adjustments to the Curve Optimizer values:') Cyan
+            Write-ColorText('Core            ' + $coCoresString) Cyan
+            Write-ColorText('Starting values ' + $startingCoString) Cyan
+            Write-ColorText('Current values  ' + $currentCoString) Cyan
+        }
+        else {
+            Write-ColorText('No adjustments to the Curve Optimizer values were necessary') Cyan
+            Write-ColorText('Core      ' + $coCoresString) Cyan
+            Write-ColorText('CO values ' + $startingCoString) Cyan
         }
     }
 
@@ -3468,16 +3574,16 @@ function Import-Settings {
 
     # Certain setting values are strings
     $settingsWithStrings = @(
-        'useConfigFile',
-        'stressTestProgram',
-        'stressTestProgramPriority',
-        'name',
-        'version',
-        'mode',
-        'FFTSize',
-        'coreTestOrder',
-        'tests',
-        'memory',
+        'useConfigFile'
+        'stressTestProgram'
+        'stressTestProgramPriority'
+        'name'
+        'version'
+        'mode'
+        'FFTSize'
+        'coreTestOrder'
+        'tests'
+        'memory'
         'modeToUseForSuspension'
     )
 
@@ -3486,6 +3592,13 @@ function Import-Settings {
 
     # Lowercase for certain settings
     $settingsToLowercase = @('stressTestProgram', 'coreTestOrder', 'memory', 'modeToUseForSuspension')
+
+    # Settings with arrays
+    $settingsWithArrays = @(
+        #'coreTestOrder'    # This has a special treatment, since it can have string values as well
+        'coresToIgnore'
+        'startValues'
+    )
 
     # Check if the file exists
     if ($filePathOrDefault -ne 'DEFAULT' -and !(Test-Path $filePathOrDefault -PathType Leaf)) {
@@ -3532,23 +3645,28 @@ function Import-Settings {
             $name  = $name.ToString().Trim(' ', '"', '''', [Char]0x09)
             $value = $value.ToString().Trim(' ', '"', '''', [Char]0x09)
 
+
             # Treat a "#" as an inline comment and remove it and anything after from the value
             $value = $(if ($value.IndexOf('#') -gt -1) { $value.Split('#')[0].Trim(' ', '"', '''', [Char]0x09) } else { $value })
 
-            # Special handling for coresToIgnore, which can be empty
-            if ($name -eq 'coresToIgnore') {
+
+            # Settings that are regular arrays and can be empty
+            if ($settingsWithArrays -contains $name) {
                 $thisSetting = @()
 
                 if ($null -ne $value -and ![String]::IsNullOrWhiteSpace($value)) {
-                    # Split the string by comma and add to the coresToIgnore entry
-                    $value -Split ',\s*' | ForEach-Object {
+                    # Split the string by comma or space and add each entry as an integer
+                    $value -Split '\s*,\s*|\s+' | ForEach-Object {
                         if ($_.Length -gt 0) {
                             $thisSetting += [Int] $_
                         }
                     }
 
-                    # We cannot use Sort here, as it would transform an array with only one entry into an integer!
-                    $thisSetting::sort($thisSetting)
+                    # Sort if it's coresToIgnore
+                    if ($name -eq 'coresToIgnore') {
+                        # We cannot use Sort here, as it would transform an array with only one entry into an integer!
+                        $thisSetting::Sort($thisSetting)
+                    }
                 }
 
                 $setting = $thisSetting
@@ -3565,8 +3683,8 @@ function Import-Settings {
                     $value = $stressTestPrograms.ycruncher.defaultTests -Join ', '
                 }
 
-                # Split the string by comma
-                $value -Split ',\s*' | ForEach-Object {
+                # Split the string by comma or space
+                $value -Split '\s*,\s*|\s+' | ForEach-Object {
                     if ($_.Length -gt 0) {
                         $thisSetting += $_.ToString().Trim(' ', '"', '''', [Char]0x09).ToUpperInvariant()
                     }
@@ -3903,7 +4021,7 @@ function Get-Settings {
 
     # Sanity check the selected test mode
     # For Aida64, you can set a comma separated list of multiple stress tests
-    $modesArray = $settings.mode -Split ',\s*'
+    $modesArray = $settings.mode -Split '\s*,\s*|\s+' | Where-Object { $_.Length -gt 0 }
     $modeString = ($modesArray -Join '-').ToUpperInvariant()
 
     foreach ($mode in $modesArray) {
@@ -4003,6 +4121,163 @@ function Export-DefaultSettings {
     )
 
     [System.IO.File]::WriteAllLines($configDefaultPath, [string]::Join([Environment]::NewLine, ($noticeLines -Join [Environment]::NewLine), $DEFAULT_SETTINGS_STRING))
+}
+
+
+
+<#
+.DESCRIPTION
+    Check if the Automatic Curve Optimizer feature was enabled and if yes, initialize it
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
+function Initialize-AutomaticCurveOptimizer {
+    if ($settings['AutomaticCurveOptimizer']['enableAutomaticAdjustment'] -ne 1) {
+        return
+    }
+
+    # The Automatic Curve Optimizer has been enabled, we require administrator privileges!
+    $weAreAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    Write-Debug('Automatic Curve Optimizer enabled')
+    Write-Debug('Are we admin: ' + $weAreAdmin)
+
+
+    if (!$weAreAdmin) {
+        Write-Text('')
+        Write-Text('')
+        Write-ColorText('┌─────────────────────────────────┤ IMPORTANT ├────────────────────────────────┐') Yellow DarkRed
+        Write-ColorText('│ ' + 'You have selected to use the Automatic Curve Optimizer.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'To be able to use this feature, the script needs to be run with'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'administrator privileges.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'Trying to open a new window now.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('└──────────────────────────────────────────────────────────────────────────────┘') Yellow DarkRed
+        Write-Text('')
+        Write-Text('')
+
+
+        $title    = 'Open CoreCycler with administrator privileges?'
+        $question = ' '
+        $choices  = @(
+            [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', 'Ooen the script with admin rights')
+            [System.Management.Automation.Host.ChoiceDescription]::new('&No', 'Abort')
+        )
+        $decision = $Host.UI.PromptForChoice($title, $question, $choices, 0)
+
+        if ($decision -eq 0) {
+            Write-Text('Trying to re-open in a new window with admin privileges')
+            $newProcess = New-Object System.Diagnostics.ProcessStartInfo
+            $newProcess.WorkingDirectory = $PSScriptRoot
+            $newProcess.FileName = 'cmd'
+            $newProcess.Arguments = '/K pushd "' + $PSScriptRoot + '" && "Run CoreCycler.bat"'
+            $newProcess.Verb = 'runas'
+
+            [Void] [System.Diagnostics.Process]::Start($newProcess)
+
+            # Close this window, the new window should be opened
+            #[Void] $SendMessage::SendMessage($parentMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+        }
+        else {
+            Write-ColorText('You did not select to open the script with administrator rights, but the') Red
+            Write-ColorText('Automatic Curve Optimizer feature requires it') Red
+            Write-ColorText('Aborting') Red
+            Exit-Script
+        }
+    }
+    else {
+        Write-Debug('We have admin rights, proceeding')
+    }
+
+
+    <#
+    #$getCoValuesProcess = Start-Process -FilePath "E:\_Overclock\PBO2Tuner-InfoTest-Release\pbotest.exe" -ArgumentList "info" -Wait -Verb RunAs -WindowStyle Hidden -PassThru
+
+    $getCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $getCoValuesProcessInfo.FileName = 'E:\_Overclock\PBO2Tuner-InfoTest-Release\pbotest.exe'
+    $getCoValuesProcessInfo.Arguments = 'info'
+    $getCoValuesProcessInfo.Verb = 'runas'
+    $getCoValuesProcessInfo.RedirectStandardError = $true
+    $getCoValuesProcessInfo.RedirectStandardOutput = $true
+    $getCoValuesProcessInfo.UseShellExecute = $false
+
+
+    $getCoValuesProcess = New-Object System.Diagnostics.Process
+    $getCoValuesProcess.StartInfo = $getCoValuesProcessInfo
+    $null = $getCoValuesProcess.Start()
+
+
+    'ExitCode: ' + $getCoValuesProcess.ExitCode
+    $stdout = $getCoValuesProcess.StandardOutput.ReadToEnd()
+    $stderr = $getCoValuesProcess.StandardError.ReadToEnd()
+    $getCoValuesProcess.WaitForExit()
+
+    '$stdout: ' + $stdout
+    '$stderr: ' + $stderr
+
+    exit #DEBUGEXIT
+    #>
+
+
+    # Either get or set the starting Curve Optimizer values
+    $settingsStartCoValues = @($settings['AutomaticCurveOptimizer']['startValues'])
+
+    Write-Debug('The Curve Optimizer starting values from the settings:')
+    Write-Debug($settingsStartCoValues)
+
+    # Empty of default should use the currently assigned values, get them
+    # TODO: NOT YET IMPLEMENTED
+    if ($settingsStartCoValues.Count -eq 0 -or $settingsStartCoValues[0].ToString().ToUpperInvariant() -eq 'DEFAULT') {
+        Exit-WithFatalError('Automatic Curve Optimizer enabled, you need to provide the starting Curve Optimizer values!')
+    }
+
+    # The number of settings must equal the number of cores or be exactly one value
+    if (@($settingsStartCoValues).Count -ne $numPhysCores) {
+        # Apply this value to each core
+        if (@($settingsStartCoValues).Count -eq 1 -and @($settingsStartCoValues)[0] -Match '^\s*\-\d+\s*$') {
+            $valueForAllCores = [Int] @($settingsStartCoValues)[0]
+            $settingsStartCoValues = @($valueForAllCores) * $numPhysCores
+        }
+        else {
+            Exit-WithFatalError('The number of Curve Optimizer starting values needs to match the number of cores!')
+        }
+    }
+
+    $Script:curveOptimizerStartingValues = $settingsStartCoValues.Clone()
+    $Script:curveOptimizerCurrentValues  = $settingsStartCoValues.Clone()
+    $Script:useCurveOptimizer = $true
+
+
+    # Apply the starting values
+    Set-CurveOptimizerValues
+
+
+    Write-Verbose('Automatic Curve Optimizer enabled')
+    Write-Verbose('The starting values:')
+    Write-Verbose($settingsStartCoValues)
+}
+
+
+
+<#
+.DESCRIPTION
+    Set the new Curve Optimizer values
+.PARAMETER
+    [Void]
+.OUTPUTS
+    [Void]
+#>
+function Set-CurveOptimizerValues {
+    try {
+        $coString = $curveOptimizerCurrentValues -Join ' '
+
+        Write-Verbose('Applying the Curve Optimizer values: ' + $coString)
+        Start-Process -FilePath $pbo2TunerExe -ArgumentList $coString -Wait -Verb RunAs -WindowStyle Hidden
+    }
+    catch {
+        throw $_
+    }
 }
 
 
@@ -4831,10 +5106,10 @@ function Initialize-Prime95 {
         CUSTOM = @{
             CpuSupportsSSE    = 1
             CpuSupportsSSE2   = 1
-            CpuSupportsAVX    = $settings.Custom.CpuSupportsAVX
-            CpuSupportsAVX2   = $settings.Custom.CpuSupportsAVX2
-            CpuSupportsFMA3   = $settings.Custom.CpuSupportsFMA3
-            CpuSupportsAVX512 = $settings.Custom.CpuSupportsAVX512
+            CpuSupportsAVX    = $settings.Prime95Custom.CpuSupportsAVX
+            CpuSupportsAVX2   = $settings.Prime95Custom.CpuSupportsAVX2
+            CpuSupportsFMA3   = $settings.Prime95Custom.CpuSupportsFMA3
+            CpuSupportsAVX512 = $settings.Prime95Custom.CpuSupportsAVX512
         }
     }
 
@@ -5032,8 +5307,8 @@ function Initialize-Prime95 {
 
     # Get the correct min and max values for the selected FFT settings
     if ($settings.mode -eq 'CUSTOM') {
-        $Script:minFFTSize = [Int] $settings.Custom.MinTortureFFT * 1024
-        $Script:maxFFTSize = [Int] $settings.Custom.MaxTortureFFT * 1024
+        $Script:minFFTSize = [Int] $settings.Prime95Custom.MinTortureFFT * 1024
+        $Script:maxFFTSize = [Int] $settings.Prime95Custom.MaxTortureFFT * 1024
     }
 
     # Custom preset (xxx-yyy)
@@ -5061,8 +5336,8 @@ function Initialize-Prime95 {
     if ($settings.mode -eq 'CUSTOM') {
         $Script:cpuTestMode = 'SSE'
 
-        if ($settings.Custom.CpuSupportsAVX -eq 1) {
-            if ($settings.Custom.CpuSupportsAVX2 -eq 1 -and $settings.Custom.CpuSupportsFMA3 -eq 1) {
+        if ($settings.Prime95Custom.CpuSupportsAVX -eq 1) {
+            if ($settings.Prime95Custom.CpuSupportsAVX2 -eq 1 -and $settings.Prime95Custom.CpuSupportsFMA3 -eq 1) {
                 $Script:cpuTestMode = 'AVX2'
             }
             else {
@@ -5268,8 +5543,8 @@ function Initialize-Prime95 {
 
     # Custom settings
     if ($modeString -eq 'CUSTOM') {
-        [Void] $output2.Add('TortureMem='  + $settings.Custom.TortureMem)
-        [Void] $output2.Add('TortureTime=' + $settings.Custom.TortureTime)
+        [Void] $output2.Add('TortureMem='  + $settings.Prime95Custom.TortureMem)
+        [Void] $output2.Add('TortureTime=' + $settings.Prime95Custom.TortureTime)
     }
 
     # Default settings
@@ -5515,7 +5790,7 @@ function Initialize-Aida64 {
     }
 
 
-    $modesArray = $settings.mode -Split ',\s*'
+    $modesArray = $settings.mode -Split '\s*,\s*|\s+' | Where-Object { $_.Length -gt 0 }
     $modeString = ($modesArray -Join '-').ToUpperInvariant()
 
     # TODO: Do we want to offer a way to start Aida64 with admin rights?
@@ -7716,7 +7991,7 @@ function Test-StressTestProgrammIsRunning {
             $errorString  = 'There has been an error while running ' + $selectedStressTestProgram + '!'
             $errorString += [Environment]::NewLine + $errorLogMessage
             $errorString += [Environment]::NewLine + 'Error Type: ' + $errorType
-            Write-AppEventLog -type 'core_error' -infoString $coreString -infoString2 $errorString
+            Write-AppEventLog -type 'core_error' -infoString1 $coreString -infoString2 $errorString
         }
 
         Add-ToErrorCollection $coreNumber $cpuNumberString $errorType $stressTestError $errorLogMessage
@@ -8360,10 +8635,12 @@ function Add-AppEventLogSource {
 .DESCRIPTION
     Writes an entry to the Windows Event Log
 .PARAMETER type
-    [String] Which Event Log type to add (script_started, script_finished, script_terminated, script_error, core_started, core_finished, core_error, core_whea)
-.PARAMETER infoString
+    [String] Which Event Log type to add (script_started, script_finished, script_terminated, script_error, core_started, core_finished, core_error, core_whea, core_co_value)
+.PARAMETER infoString1
     [String] A string with additional information
 .PARAMETER infoString2
+    [String] A string with with more additional information
+.PARAMETER infoString3
     [String] A string with with more additional information
 .OUTPUTS
     [Void]
@@ -8371,8 +8648,9 @@ function Add-AppEventLogSource {
 function Write-AppEventLog {
     param(
         [Parameter(Mandatory=$true)] [String] $type,
-        [Parameter(Mandatory=$false)] [String] $infoString,
-        [Parameter(Mandatory=$false)] [String] $infoString2
+        [Parameter(Mandatory=$false)] [String] $infoString1,
+        [Parameter(Mandatory=$false)] [String] $infoString2,
+        [Parameter(Mandatory=$false)] [String] $infoString3
     )
 
     Write-Debug('Adding Event Log entry: ' + $type)
@@ -8381,7 +8659,7 @@ function Write-AppEventLog {
         'script_started'    = @{
             'eventId'   = 100
             'entryType' = 'Information'
-            'message'   = [String]::Format('CoreCycler has started{0}{1}', [Environment]::NewLine*2, $infoString)
+            'message'   = [String]::Format('CoreCycler has started{0}{1}', [Environment]::NewLine*2, $infoString1)
         }
         'script_finished'   = @{
             'eventId'   = 200
@@ -8391,32 +8669,37 @@ function Write-AppEventLog {
         'script_terminated' = @{
             'eventId'   = 300
             'entryType' = 'Information'
-            'message'   = [String]::Format('CoreCycler was terminated{0}{1}{2}{3}', [Environment]::NewLine*2, $infoString, [Environment]::NewLine*2, $infoString2)
+            'message'   = [String]::Format('CoreCycler was terminated{0}{1}{2}{3}', [Environment]::NewLine*2, $infoString1, [Environment]::NewLine*2, $infoString2)
         }
         'script_error'      = @{
             'eventId'   = 999
             'entryType' = 'Error'
-            'message'   = [String]::Format('There has been a general error in the script!{0}{1}', [Environment]::NewLine*2, $infoString2)
+            'message'   = [String]::Format('There has been a general error in the script!{0}{1}', [Environment]::NewLine*2, $infoString1)
         }
         'core_started'      = @{
             'eventId'   = 1000
             'entryType' = 'Information'
-            'message'   = [String]::Format('Started testing Core {0}', $infoString)
+            'message'   = [String]::Format('Started testing Core {0}', $infoString1)
         }
         'core_finished'     = @{
             'eventId'   = 2000
             'entryType' = 'Information'
-            'message'   = [String]::Format('Finished testing Core {0}{1}{2}', $infoString, [Environment]::NewLine*2, $infoString2)
+            'message'   = [String]::Format('Finished testing Core {0}{1}{2}', $infoString1, [Environment]::NewLine*2, $infoString2)
+        }
+        'core_co_value'     = @{
+            'eventId'   = 5000
+            'entryType' = 'Information'
+            'message'   = [String]::Format('Increasing Curve Optimizer value for core {0} from {1} to {2}', $infoString1, $infoString2, $infoString3)
         }
         'core_whea'         = @{
             'eventId'   = 8888
             'entryType' = 'Warning'
-            'message'   = [String]::Format('There has been a WHEA error while running the test for Core {0}.{1}The WHEA error:{2}{3}', $infoString, [Environment]::NewLine, [Environment]::NewLine, $infoString2)
+            'message'   = [String]::Format('There has been a WHEA error while running the test for Core {0}.{1}The WHEA error:{2}{3}', $infoString1, [Environment]::NewLine, [Environment]::NewLine, $infoString2)
         }
         'core_error'        = @{
             'eventId'   = 9999
             'entryType' = 'Error'
-            'message'   = [String]::Format('Error on Core {0}!{1}{2}', $infoString, [Environment]::NewLine*2, $infoString2)
+            'message'   = [String]::Format('Error on Core {0}!{1}{2}', $infoString1, [Environment]::NewLine*2, $infoString2)
         }
     }
 
@@ -8883,6 +9166,11 @@ try {
     Write-Verbose('Locale:      ' + $winOperatingSystem.Locale + ' (hex -> int -> ' + [System.Convert]::ToInt32($winOperatingSystem.Locale, 16) + ')')
     Write-Verbose('Locale Name: ' + $currentLocale.DisplayName + ' (' + $currentLocale.Name + ')')
     Write-Verbose('Free Memory: ' + [Math]::Round($freeMemory / 1MB) + ' MB')
+    Write-Verbose('Script Root: ' + $PSScriptRoot)
+
+
+    # Check if the Automatic Curve Optimizer feature was enabled
+    Initialize-AutomaticCurveOptimizer
 
 
     # Check if we can use Write-VolumeCache to write the log file data to the disk
@@ -9052,7 +9340,7 @@ try {
         # yCruncher and yCruncher Old share the same setting in the config file, adjust for that
         # As do Prime95 and Prime95 Dev
         $settingTestProgramName = $(if ($testProgram.Name -eq 'ycruncher_old') { 'ycruncher' } elseif ($testProgram.Name -eq 'prime95_dev') { 'prime95' } else { $testProgram.Name })
-        $commandMode = (($settings[$settingTestProgramName].mode -Split ',\s*') -Join ',').ToUpperInvariant()
+        $commandMode = (($settings[$settingTestProgramName].mode -Split '\s*,\s*|\s+' | Where-Object { $_.Length -gt 0 }) -Join ',').ToUpperInvariant()
 
         # Generate the command line
         $data = @{
@@ -9294,7 +9582,7 @@ try {
         $coreTestOrderMode = 'custom'
 
         # Store the custom core test order array in an ArrayList
-        $settings.General.coreTestOrder -Split ',\s*' | ForEach-Object {
+        $settings.General.coreTestOrder -Split '\s*,\s*|\s+' | ForEach-Object {
             if ($_ -Match '^\d+$') {
                 [Void] $coreTestOrderCustom.Add([Int] $_)
             }
@@ -9461,25 +9749,33 @@ try {
     Write-ColorText('Test order of cores: .................. ' + $settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') { ' (' + $coreTestOrderMode.ToUpperInvariant() + ')' })) Cyan
     Write-ColorText('Number of iterations: ................. ' + $settings.General.maxIterations) Cyan
 
+
     # Print a message if we're ignoring certain cores
     if ($settings.General.coresToIgnore.Count -gt 0) {
         $coresToIgnoreString = (($settings.General.coresToIgnore | Sort-Object) -Join ', ')
         Write-ColorText('Ignored cores: ........................ ' + $coresToIgnoreString) Cyan
-        Write-ColorText('────────────────────────────────────────────────────────────────────────────────') Cyan
     }
+
+
+    # Automatic Curve Optimizer
+    if ($useCurveOptimizer) {
+        Write-ColorText('Automatic Curve Optimizer: ............ ENABLED') Cyan
+        Write-ColorText('Starting Curve Optimizer values: ...... ' + ($curveOptimizerStartingValues -Join ', ')) Cyan
+    }
+
 
     if ($settings.mode -eq 'CUSTOM') {
         Write-ColorText('') Cyan
         Write-ColorText('Custom Prime95 settings:') Cyan
         Write-ColorText('────────────────────────────────────────────────────────────────────────────────') Cyan
-        Write-ColorText('CpuSupportsAVX    = ' + $settings.Custom.CpuSupportsAVX) Cyan
-        Write-ColorText('CpuSupportsAVX2   = ' + $settings.Custom.CpuSupportsAVX2) Cyan
-        Write-ColorText('CpuSupportsFMA3   = ' + $settings.Custom.CpuSupportsFMA3) Cyan
-        Write-ColorText('CpuSupportsAVX512 = ' + $settings.Custom.CpuSupportsAVX512) Cyan
-        Write-ColorText('MinTortureFFT     = ' + $settings.Custom.MinTortureFFT) Cyan
-        Write-ColorText('MaxTortureFFT     = ' + $settings.Custom.MaxTortureFFT) Cyan
-        Write-ColorText('TortureMem        = ' + $settings.Custom.TortureMem) Cyan
-        Write-ColorText('TortureTime       = ' + $settings.Custom.TortureTime) Cyan
+        Write-ColorText('CpuSupportsAVX    = ' + $settings.Prime95Custom.CpuSupportsAVX) Cyan
+        Write-ColorText('CpuSupportsAVX2   = ' + $settings.Prime95Custom.CpuSupportsAVX2) Cyan
+        Write-ColorText('CpuSupportsFMA3   = ' + $settings.Prime95Custom.CpuSupportsFMA3) Cyan
+        Write-ColorText('CpuSupportsAVX512 = ' + $settings.Prime95Custom.CpuSupportsAVX512) Cyan
+        Write-ColorText('MinTortureFFT     = ' + $settings.Prime95Custom.MinTortureFFT) Cyan
+        Write-ColorText('MaxTortureFFT     = ' + $settings.Prime95Custom.MaxTortureFFT) Cyan
+        Write-ColorText('TortureMem        = ' + $settings.Prime95Custom.TortureMem) Cyan
+        Write-ColorText('TortureTime       = ' + $settings.Prime95Custom.TortureTime) Cyan
     }
 
     Write-Text('')
@@ -9678,7 +9974,7 @@ try {
         }
 
 
-        Write-AppEventLog -type 'script_started' -infoString $infoString
+        Write-AppEventLog -type 'script_started' -infoString1 $infoString
     }
 
 
@@ -9756,11 +10052,20 @@ try {
         # Check if all of the cores have thrown an error, and if so, abort
         # Only if the skipCoreOnError setting is set
         # Cores can show up multiple times in the $coreTestOrderArray, so we're only using a the unique entries
-        if ($settings.General.skipCoreOnError -and $numCoresWithError -gt 0 -and $numCoresWithError -eq $numUniqueAvailableCores) {
+        if (!$useCurveOptimizer -and $settings.General.skipCoreOnError -and $numCoresWithError -gt 0 -and $numCoresWithError -eq $numUniqueAvailableCores) {
             # Also close the stress test program process to not let it run unnecessarily
             Close-StressTestProgram
 
             Write-ColorText($timestamp + ' - All Cores have thrown an error, aborting!') Yellow
+            Exit-Script
+        }
+
+
+        # Show a different error message if we're using Automatic Curve Optimizer and all cores have reached their maximum value
+        if ($useCurveOptimizer -and $numCoresWithErrorAndMaxCoValue -gt 0 -and $numCoresWithErrorAndMaxCoValue -eq $numUniqueAvailableCores) {
+            Close-StressTestProgram
+
+            Write-ColorText($timestamp + ' - All Cores have reached the maximum Curve Optimizer value and thrown an error, aborting!') Yellow
             Exit-Script
         }
 
@@ -9856,22 +10161,25 @@ try {
         :LoopCoreRunner for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++) {
             Write-Debug('Trying to switch to a new core (' + ($coreIndex+1) + ' of ' + $numAvailableCores + ') [' + $coreIndex + ' of ' + ($numAvailableCores-1) + ']')
 
-            $startDateThisCore     = Get-Date
-            $estimatedEndDateCore  = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
-            $timestamp             = $startDateThisCore.ToString('HH:mm:ss')
-            $expectedAffinities    = $()
-            $actualCoreNumber      = [Int] $coreTestOrderArray[0]      # The coreTestOrderArray is reduced for each iteration, so this will always get the next core in line
-            $cpuNumbersArray       = @()
-            $allPassedFFTs         = [System.Collections.ArrayList]::new()
-            $uniquePassedFFTs      = [System.Collections.ArrayList]::new()
-            $allPassedTests        = [System.Collections.ArrayList]::new()
-            $uniquePassedTests     = [System.Collections.ArrayList]::new()
-            $proceedToNextCore     = $false
-            $fftSizeOverflow       = $false
-            $coreSupportsOnly1T    = $coresWithOneThread.Contains($actualCoreNumber)
-            $coreStartDifference   = New-TimeSpan -Start $scriptStartDate -End $startDateThisCore
-            $numCoresWithError     = $coresWithError.Count
-            $numCoresWithWheaError = $coresWithWheaError.Count
+            $startDateThisCore              = Get-Date
+            $estimatedEndDateCore           = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
+            $timestamp                      = $startDateThisCore.ToString('HH:mm:ss')
+            $expectedAffinities             = $()
+            $actualCoreNumber               = [Int] $coreTestOrderArray[0]      # The coreTestOrderArray is reduced for each iteration, so this will always get the next core in line
+            $cpuNumbersArray                = @()
+            $allPassedFFTs                  = [System.Collections.ArrayList]::new()
+            $uniquePassedFFTs               = [System.Collections.ArrayList]::new()
+            $allPassedTests                 = [System.Collections.ArrayList]::new()
+            $uniquePassedTests              = [System.Collections.ArrayList]::new()
+            $proceedToNextCore              = $false
+            $fftSizeOverflow                = $false
+            $coreSupportsOnly1T             = $coresWithOneThread.Contains($actualCoreNumber)
+            $coreStartDifference            = New-TimeSpan -Start $scriptStartDate -End $startDateThisCore
+            $numCoresWithError              = $coresWithError.Count
+            $numCoresWithWheaError          = $coresWithWheaError.Count
+            $numCoresWithIncreasedCoValue   = $coresWithIncreasedCurveOptimizerValue.Count
+            $numCoresWithErrorAndMaxCoValue = $coresWithErrorAndMaxCurveOptimizerValue.Count
+
 
             Write-Verbose('Still available cores:')
             Write-Verbose($coreTestOrderArray -Join ', ')
@@ -9969,14 +10277,26 @@ try {
                 continue
             }
 
+
             # Skip if this core is stored in the error core array and the flag is set
-            if ($settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
+            if (!$useCurveOptimizer -and $settings.General.skipCoreOnError -and $coresWithError -contains $actualCoreNumber) {
                 Write-Text($timestamp + ' - Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') has previously thrown an error, skipping')
 
                 # Remove this core from the array of still available cores
                 [Void] $coreTestOrderArray.RemoveAt(0)
                 continue
             }
+
+
+            # Also skip this core if the maximum Curve Optimizer value has been reached
+            if ($useCurveOptimizer -and $settings.General.skipCoreOnError -and $coresWithErrorAndMaxCurveOptimizerValue -contains $actualCoreNumber) {
+                Write-Text($timestamp + ' - Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') has reached the maximum CO value and has previously thrown an error, skipping')
+
+                # Remove this core from the array of still available cores
+                [Void] $coreTestOrderArray.RemoveAt(0)
+                continue
+            }
+
 
 
             # Apparently Aida64 doesn't like having the affinity set to 1
@@ -10083,7 +10403,7 @@ try {
 
 
             if ($canUseWindowsEventLog) {
-                Write-AppEventLog -type 'core_started' -infoString $coreString
+                Write-AppEventLog -type 'core_started' -infoString1 $coreString
             }
 
 
@@ -10352,7 +10672,7 @@ try {
                             $errorString  = 'Timestamp: ' + $lastWheaError.TimeCreated.ToString()
                             $errorString += [Environment]::NewLine + 'Message: ' + $lastWheaError.Message
                             $errorString += [Environment]::NewLine + 'Record Id: ' + $lastWheaError.RecordId.ToString()
-                            Write-AppEventLog -type 'core_whea' -infoString $coreString -infoString2 $errorString
+                            Write-AppEventLog -type 'core_whea' -infoString1 $coreString -infoString2 $errorString
                         }
 
                         # Store the core number in the array
@@ -10647,7 +10967,7 @@ try {
                             Write-Text('           All FFT sizes have been tested for this core, proceeding to the next one')
 
                             if ($canUseWindowsEventLog) {
-                                Write-AppEventLog -type 'core_finished' -infoString $coreString -infoString2 ('Test completed in ' + $runTimeStringCore)
+                                Write-AppEventLog -type 'core_finished' -infoString1 $coreString -infoString2 ('Test completed in ' + $runTimeStringCore)
                             }
 
                             continue LoopCoreRunner
@@ -10880,7 +11200,7 @@ try {
                             Write-Text('           All tests have been run for this core, proceeding to the next one')
 
                             if ($canUseWindowsEventLog) {
-                                Write-AppEventLog -type 'core_finished' -infoString $coreString -infoString2 ('Test completed in ' + $runTimeStringCore)
+                                Write-AppEventLog -type 'core_finished' -infoString1 $coreString -infoString2 ('Test completed in ' + $runTimeStringCore)
                             }
 
                             continue LoopCoreRunner
@@ -10901,42 +11221,92 @@ try {
                     Test-StressTestProgrammIsRunning $actualCoreNumber
                 }
 
-                # On error, the Prime95 process is not running anymore, so skip this core
+                # Some error happened in or with the stress test program
                 catch {
                     Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (#1)')
+
+                    # If we're using Automatic Curve Optimizer, increase the value
+                    if ($useCurveOptimizer) {
+                        Write-Debug('Increasing the Curve Optimizer value for core ' + $actualCoreNumber)
+
+                        # Limit the maximum value
+                        $incrementBy = [Int] $settings['AutomaticCurveOptimizer']['incrementBy']
+                        $maxCoValue  = [Int] $settings['AutomaticCurveOptimizer']['maxValue']
+                        $oldCoValue  = [Int] $curveOptimizerCurrentValues[$actualCoreNumber]
+                        $newCoValue  = [Int] [Math]::Min($oldCoValue + $incrementBy, $maxCoValue)
+
+                        Write-Debug('The new CO value: ' + $newCoValue + ' (old: ' + $oldCoValue + ')')
+
+                        Write-ColorText('Automatic Curve Optimizer is enabled') Yellow
+
+                        # Temporary increasement, will be overwritten on each start of an iteration
+                        $numCoresWithIncreasedCoValue++
+
+                        # Don't increase above the set maximum
+                        if ($oldCoValue -eq $maxCoValue) {
+                            Write-ColorText('Cannot increase the Curve Optimizer value for core ' + $actualCoreNumber + ' anymore! The maximum of ' + $maxCoValue + ' has been reached') Yellow
+
+                            [Void] $coresWithIncreasedCurveOptimizerValue.Add($actualCoreNumber)
+                            [Void] $coresWithErrorAndMaxCurveOptimizerValue.Add($actualCoreNumber)
+
+                            if ($settings.General.skipCoreOnError) {
+                                Write-ColorText('This core will now be skipped in the following iterations') Yellow
+                            }
+                        }
+                        else {
+                            $curveOptimizerCurrentValues[$actualCoreNumber] = $newCoValue
+                            [Void] $coresWithIncreasedCurveOptimizerValue.Add($actualCoreNumber)
+
+                            Write-ColorText('Increasing the Curve Optimizer value for core ' + $actualCoreNumber + ' from ' + $oldCoValue + ' to ' + $newCoValue) Yellow
+
+                            if ($newCoValue -eq $maxCoValue) {
+                                Write-ColorText('(This is the maximum set Curve Optimizer value, there will be no further increases)') Yellow
+                            }
+
+                            # Apply the new values
+                            Set-CurveOptimizerValues
+
+
+                            Write-AppEventLog -type 'core_co_value' -infoString1 $actualCoreNumber -infoString2 $oldCoValue -infoString3 $newCoValue
+                        }
+                    }
+
 
                     # There is an error message
                     if ($_.Exception -and $_.Exception.Message -eq 'StressTestError') {
                         # If the stopOnError flag is set, stop at this point
                         # But leave the stress test program open if possible
                         if ($settings.General.stopOnError) {
-                            Write-Text('')
-                            Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
-
-                            # Display the path to the log file
-                            if ($isPrime95) {
+                            # Only stop the testing process if we're not using Automatic Curve Optimizer
+                            if (!$useCurveOptimizer) {
                                 Write-Text('')
-                                Write-ColorText('Prime95''s results log file can be found at:') Cyan
-                                Write-ColorText($stressTestLogFilePath) Cyan
-                            }
-                            elseif ($isYCruncherWithLogging) {
-                                Write-Text('')
-                                Write-ColorText('y-cruncher''s log file can be found at:') Cyan
-                                Write-ColorText($stressTestLogFilePath) Cyan
-                            }
-                            elseif ($isLinpack) {
-                                Write-Text('')
-                                Write-ColorText('Linpack''s log file can be found at:') Cyan
-                                Write-ColorText($stressTestLogFilePath) Cyan
-                            }
+                                Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
-                            # And the path to the CoreCycler the log file for this run
-                            Write-Text('')
-                            Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
-                            Write-ColorText($logfileFullPath) Cyan
-                            Write-Text('')
+                                # Display the path to the log file
+                                if ($isPrime95) {
+                                    Write-Text('')
+                                    Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                                    Write-ColorText($stressTestLogFilePath) Cyan
+                                }
+                                elseif ($isYCruncherWithLogging) {
+                                    Write-Text('')
+                                    Write-ColorText('y-cruncher''s log file can be found at:') Cyan
+                                    Write-ColorText($stressTestLogFilePath) Cyan
+                                }
+                                elseif ($isLinpack) {
+                                    Write-Text('')
+                                    Write-ColorText('Linpack''s log file can be found at:') Cyan
+                                    Write-ColorText($stressTestLogFilePath) Cyan
+                                }
 
-                            Exit-Script
+                                # And the path to the CoreCycler the log file for this run
+                                Write-Text('')
+                                Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+                                Write-ColorText($logfileFullPath) Cyan
+                                Write-Text('')
+
+                                Exit-Script
+                            }
                         }
 
                         # y-cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
@@ -11092,7 +11462,7 @@ try {
             Write-Text('           Test completed in ' + $runTimeStringCore)
 
             if ($canUseWindowsEventLog) {
-                Write-AppEventLog -type 'core_finished' -infoString $coreString -infoString2 ('Test completed in ' + $runTimeStringCore)
+                Write-AppEventLog -type 'core_finished' -infoString1 $coreString -infoString2 ('Test completed in ' + $runTimeStringCore)
             }
         }   # End: :LoopCoreRunner for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++)
 
@@ -11147,6 +11517,20 @@ try {
 
             Write-Text('')
         }
+
+
+        # Show the starting and current Curve Optimizer values
+        if ($useCurveOptimizer -and $numCoresWithIncreasedCoValue -gt 0) {
+            $coCoresString    = ((0..($numPhysCores-1)) | ForEach-Object { ('C' + $_.ToString()).PadLeft(4, ' ') }) -Join ' |'
+            $startingCoString = ($curveOptimizerStartingValues | ForEach-Object { $_.ToString().PadLeft(4, ' ') }) -Join ' |'
+            $currentCoString  = ($curveOptimizerCurrentValues | ForEach-Object { $_.ToString().PadLeft(4, ' ') }) -Join ' |'
+
+            Write-ColorText('Curve Optimizer:') Cyan
+            Write-ColorText('Core            ' + $coCoresString) Cyan
+            Write-ColorText('Starting values ' + $startingCoString) Cyan
+            Write-ColorText('Current values  ' + $currentCoString) Cyan
+            Write-Text('')
+        }
     }   # End for ($iteration = 1; $iteration -le $settings.General.maxIterations; $iteration++)
 
 
@@ -11183,7 +11567,7 @@ catch {
         $errorString  = $Error | Out-String -ErrorAction Ignore
         $errorString += [Environment]::NewLine + ($_.Exception | Format-List -Force | Out-String -ErrorAction Ignore)
         $errorString += [Environment]::NewLine + ($_.InvocationInfo | Format-List -Force | Out-String -ErrorAction Ignore)
-        Write-AppEventLog -type 'script_error' -infoString2 $errorString
+        Write-AppEventLog -type 'script_error' -infoString1 $errorString
     }
 
     Exit-WithFatalError -text $_ -lineNumber (Get-ScriptLineNumber)
@@ -11232,7 +11616,7 @@ finally {
 
         $finalSummary = (Show-FinalSummary -ReturnText)
 
-        Write-AppEventLog -type 'script_terminated' -infoString $infoString -infoString2 $finalSummary
+        Write-AppEventLog -type 'script_terminated' -infoString1 $infoString -infoString2 $finalSummary
     }
 
 
