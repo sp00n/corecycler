@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.6.1
+    0.9.6.2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.6.1'
+$version = '0.9.6.2'
 
 
 # This defines the strict mode
@@ -9820,7 +9820,7 @@ try {
         # Randomized
         elseif ($coreTestOrderMode -eq 'random') {
             Write-Verbose('Random test order selected, building the test order array...')
-            [System.Collections.ArrayList] $coreTestOrderArray = ($coreTestOrderArray | Sort-Object { Get-Random })
+            [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object { Get-Random })
         }
 
         # Custom
@@ -9846,6 +9846,9 @@ try {
         Write-Debug('The number of cores with a WHEA error: ' + $numCoresWithWheaError)
 
 
+        if (@($coreTestOrderArray).Count -lt 1) {
+            Exit-WithFatalError('No valid core to test selected!')
+        }
 
 
         # Iterate over each core
