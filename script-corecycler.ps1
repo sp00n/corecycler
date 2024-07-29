@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.7.0alpha3
+    0.9.7.0alpha4
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.7.0alpha3'
+$version = '0.9.7.0alpha4'
 
 
 # This defines the strict mode
@@ -723,6 +723,14 @@ maxValue = 5
 #
 # Default: 1
 incrementBy = 1
+
+
+# Repeat the test on a core if it has thrown an error and the Curve Optimizer value was increased
+# Setting this to 1 will restart the test, until it has not thrown an error, or until the maximum CO value has been reached
+# With 0 the loop will continue to the next core in line as normal
+#
+# Default: 1
+repeatCoreOnError = 1
 
 
 
@@ -11423,7 +11431,7 @@ try {
                             Write-ColorText('Increasing the Curve Optimizer value for core ' + $actualCoreNumber + ' from ' + $oldCoValue + ' to ' + $newCoValue) Yellow
 
                             if ($newCoValue -eq $maxCoValue) {
-                                Write-ColorText('(This is the maximum set Curve Optimizer value, there will be no further increases)') Yellow
+                                Write-ColorText('This is the maximum set Curve Optimizer value, there will be no further increases') Yellow
                             }
 
                             # Apply the new values
@@ -11432,6 +11440,29 @@ try {
 
                             Write-AppEventLog -type 'core_co_value' -infoString1 $actualCoreNumber -infoString2 $oldCoValue -infoString3 $newCoValue
                         }
+
+
+                        # Make the loop repeat the same core if we're using Automatic Curve Optimizer and the flag is set
+                        if ($settings.AutomaticCurveOptimizer.repeatCoreOnError -eq 1) {
+                            # Check if we haven't reached the maximum Curve Optimizer value for this core yet
+                            if ($oldCoValue -ge $maxCoValue) {
+                                Write-ColorText('The old Curve Optimizer value was already at the limit, will not repeat this core') Yellow
+                            }
+                            else {
+                                Write-ColorText('The flag to repeat the core is set, so repeating the test') Yellow
+                                Write-Debug('Before: ' + $coreTestOrderArray)
+
+                                # Re-insert the core to the order array
+                                [Void] $coreTestOrderArray.Insert(0, $actualCoreNumber)
+
+                                Write-Debug('After:  ' + $coreTestOrderArray)
+                                
+                                # This sets the index to the one before this core, so it should fall on the same core again when we continue the loop
+                                $coreIndex--
+                            }
+                        }
+
+                        Write-Text('')
                     }
 
 
