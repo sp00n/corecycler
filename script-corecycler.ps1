@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.9.7.0alpha4
+    0.9.7.0alpha5
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -17,7 +17,7 @@
 
 
 # Our current version
-$version = '0.9.7.0alpha4'
+$version = '0.9.7.0alpha5'
 
 
 # This defines the strict mode
@@ -123,6 +123,7 @@ $startedIterations             = 0
 $completedIterations           = 0
 $numTestedCores                = 0
 $testedCoresArray              = @{}
+$numberOfStartedTests          = 0
 
 
 # Processor and system related variables
@@ -2665,22 +2666,22 @@ function Resume-Process {
 <#
 .DESCRIPTION
     Suspend the threads of a process
-.PARAMETER process
+.PARAMETER passedProcess
     [System.Diagnostics.Process] The process to suspend
 .OUTPUTS
     [Int] The number of suspended threads from this process. -1 if something failed
 #>
 function Suspend-ProcessThreads {
     param(
-        [Parameter(Mandatory=$true)] [System.Diagnostics.Process] $process
+        [Parameter(Mandatory=$true)] [System.Diagnostics.Process] $passedProcess
     )
 
-    if (!$process) {
+    if (!$passedProcess -or !($passedProcess | Get-Member Threads)) {
         return -2
     }
 
     Write-Verbose('Suspending threads for process: ') -NoNewline
-    Write-Verbose($process.Id.ToString() + ' - ' + $process.ProcessName.ToString()) -SkipIndentation
+    Write-Verbose($passedProcess.Id.ToString() + ' - ' + $passedProcess.ProcessName.ToString()) -SkipIndentation
 
     $numThreads = 0
     $suspendCounts = 0
@@ -2688,6 +2689,16 @@ function Suspend-ProcessThreads {
     $processedThreadsArray = @()
     $previousSuspendCountArray = @()
     $suspendErrors = @()
+
+
+    # For some reason the threads don't always seem to be able to read correctly when using the passed process
+    # So get it again
+    $process = Get-Process -InputObject $passedProcess
+
+    if (!$process -or !($process | Get-Member Threads)) {
+        return -3
+    }
+
 
     Write-Debug('           ID:') -NoNewline
 
@@ -2801,7 +2812,7 @@ function Suspend-ProcessThreads {
 <#
 .DESCRIPTION
     Resumes the suspended threads of a process
-.PARAMETER process
+.PARAMETER passedProcess
     [System.Diagnostics.Process] The process to resume
 .PARAMETER ignoreError
     [Bool] If set, will not throw an error. This may be needed if we want to resume a process that isn't suspended
@@ -2810,16 +2821,16 @@ function Suspend-ProcessThreads {
 #>
 function Resume-ProcessThreads {
     param(
-        [Parameter(Mandatory=$true)] [System.Diagnostics.Process] $process,
+        [Parameter(Mandatory=$true)] [System.Diagnostics.Process] $passedProcess,
         [Parameter(Mandatory=$false)] [Bool] $ignoreError
     )
 
-    if (!$process) {
+    if (!$passedProcess -or !($passedProcess | Get-Member Threads)) {
         return -2
     }
 
     Write-Verbose('Resuming threads for process: ') -NoNewline
-    Write-Verbose($process.Id.ToString() + ' - ' + $process.ProcessName.ToString()) -SkipIndentation
+    Write-Verbose($passedProcess.Id.ToString() + ' - ' + $passedProcess.ProcessName.ToString()) -SkipIndentation
 
     $numThreads = 0
     $resumeCounts = 0
@@ -2827,6 +2838,16 @@ function Resume-ProcessThreads {
     $processedThreadsArray = @()
     $previousSuspendCountArray = @()
     $resumeErrors = @()
+
+
+    # For some reason the threads don't always seem to be able to read correctly when using the passed process
+    # So get it again
+    $process = Get-Process -InputObject $passedProcess
+
+    if (!$process -or !($process | Get-Member Threads)) {
+        return -3
+    }
+
 
     Write-Debug('           ID:') -NoNewline
 
@@ -4969,11 +4990,81 @@ function Get-StressTestProcessInformation {
 
     # Try to get the threads of the stress test process that are actually responsible for the CPU load
     # The number of threads for the stress test process should be equal to $numberOfThreads
-    # Except for Aida64, which spawns 4 threads...
-    # Also, Aida64 doesn't seem to always immediately start all the stress tests
-    # It also depends on if we're starting on a core that supports only one thread (-> $overrideNumberOfThreads)
-    [Int] $defaultNumberOfThreads  = $(if ($isAida64) { 4 } else { $settings.General.numberOfThreads })
+    [Int] $defaultNumberOfThreads = $settings.General.numberOfThreads
+
+    # The number of worker threads also depend on if we're starting on a core that supports only one thread (-> $overrideNumberOfThreads)
     [Int] $expectedNumberOfThreads = $(if ($overrideNumberOfThreads -gt 0) { $overrideNumberOfThreads } else { $defaultNumberOfThreads })
+
+
+    # Expect for Aida64, which spawns different amount of worker threads for different tests
+    # Also, Aida64 doesn't seem to always immediately start all the stress tests
+    # The amount of threads depends on the selected test mode
+    #                                        │Threads per test
+    #                                        │ 1 Test                  │ 2 Tests                                 │ 3 Tests                     │ All 4 │
+    #                                        │ CACHE │     │     │     │ CACHE │ CACHE │ CACHE │     │     │     │ CACHE │ CACHE │ CACHE │     │ CACHE │
+    # CPUMask                                │       │ CPU │     │     │  CPU  │       │       │ CPU │ CPU │     │  CPU  │  CPU  │       │ CPU │  CPU  │
+    #                                        │       │     │ FPU │     │       │  FPU  │       │ FPU │     │ FPU │  FPU  │       │  FPU  │ FPU │  FPU  │
+    #                                        │       │     │     │ RAM │       │       │  RAM  │     │ RAM │ RAM │       │  RAM  │  RAM  │ RAM │  RAM  │
+    # ───────────────────────────────────────┼───────┼─────┼─────┼─────┼───────┼───────┼───────┼─────┼─────┼─────┼───────┼───────┼───────┼─────┼───────┤
+    # 0x00000004 [decimal  4, CPU 2]         │   4   │  1  │  2  │  2  │   4   │   5   │   5   │  2  │  2  │  3  │   5   │   5   │   6   │  3  │   6   │
+    # 0x0000000C [decimal 12, CPU 2 & 3]     │   7   │  2  │  3  │  3  │   8   │   9   │   9   │  4  │  4  │  5  │  10   │   8   │  11   │  6  │  12   │
+    # 0x0000001C [decimal 28, CPU 2 & 3 & 4] │  10   │     │     │     │       │       │       │     │     │     │       │       │       │     │       │
+    #
+    # CACHE                     4, 7 -> numberOfThreads * 3 + 1
+    #         CPU               1, 2 -> numberOfThreads
+    #               FPU         2, 3 -> numberOfThreads + 1
+    #                     RAM   2, 3 -> numberOfThreads + 1
+    #
+    # CACHE + CPU               4, 8 -> numberOfThreads * 3 + numberOfThreads
+    # CACHE       + FPU         5, 9 -> numberOfThreads * 3 + numberOfThreads + 1
+    #         CPU + FPU         2, 4 -> numberOfThreads + numberOfThreads
+    #         CPU       + RAM   2, 4 -> numberOfThreads + numberOfThreads
+    #               FPU + RAM   3, 5 -> numberOfThreads + numberOfThreads + 1
+    #
+    # CACHE + CPU + FPU         5,10 -> numberOfThreads * 3 + numberOfThreads + numberOfThreads
+    # CACHE + CPU       + RAM   5, 8 -> I can't make any sense of it
+    # CACHE       + FPU + RAM   6,11 ->
+    #         CPU + FPU + RAM   3, 6 ->
+    #
+    # CACHE + CPU + FPU + RAM   6,12 ->
+
+    # Use the observed amount of threads, hopefully they're always the same
+    # TODO: figure out the algorithm that determines the number of worker threads being deployed
+    $threadsForAida64 = @{
+        'CACHE'             = @(4, 7)
+        'CPU'               = @(1, 2)
+        'FPU'               = @(2, 3)
+        'RAM'               = @(2, 3)
+
+        'CACHE,CPU'         = @(4, 8)
+        'CACHE,FPU'         = @(5, 9)
+        'CPU,FPU'           = @(2, 4)
+        'CPU,RAM'           = @(2, 4)
+        'FPU,RAM'           = @(3, 5)
+
+        'CACHE,CPU,FPU'     = @(5, 10)
+        'CACHE,CPU,RAM'     = @(5, 8)
+        'CACHE,FPU,RAM'     = @(6, 11)
+        'CPU,FPU,RAM'       = @(3, 6)
+
+        'CACHE,CPU,FPU,RAM' = @(6, 12)
+    }
+
+    if ($isAida64) {
+        Write-Debug('Aida64 has been selected, using lookup table for the amount of worker threads')
+        $modeString = (($settings.Aida64.mode -Split '\s*,\s*' | Where-Object { $_.Length -gt 0 } | Sort-Object) -Join ',').ToUpperInvariant()
+
+        Write-Debug('The mode string: ' + $modeString)
+
+        $defaultIndex = $(if ($settings.General.numberOfThreads -eq 1) { 0 } else { 1 })
+        $index = $(if ($overrideNumberOfThreads -gt 0) { $(if ($overrideNumberOfThreads -eq 1) { 0 } else { 1 }) } else { $defaultIndex })
+
+        Write-Debug('The default index: ' + $defaultIndex)
+        Write-Debug('The final index:   ' + $index)
+
+        $expectedNumberOfThreads = $threadsForAida64[$modeString][$index]
+    }
+
 
     Write-Debug('The expected number of threads to find: ' + $expectedNumberOfThreads)
 
@@ -6096,17 +6187,8 @@ function Initialize-Aida64 {
         # We want to set our own CPU affinity mask
         'CPUMaskAuto=0'
 
-        # Aida64 seems to always start with at least 4 threads that use CPU power
-        # CPUMask
-        # 0x00000001 [decimal  1, CPU 0]         -> 4 threads
-        # 0x00000002 [decimal  2, CPU 1]         -> 4 threads
-        # 0x00000003 [decimal  3, CPU 0 & 1]     -> 7 threads
-        # 0x00000004 [decimal  4, CPU 2]         -> 4 threads
-        # 0x00000008 [decimal  8, CPU 3]         -> 4 threads
-        # 0x0000000C [decimal 12, CPU 2 & 3]     -> 7 threads
-        # 0x0000001C [decimal 28, CPU 2 & 3 & 4] -> 10 threads
-        # So we always set the affinity to just CPU 2
-        'CPUMask=0x00000004'
+        # Set the affinity to either one or two CPUs
+        ('CPUMask=' + $(if ($settings.General.numberOfThreads -gt 1) { '0x0000000C' } else { '0x00000004' }))
 
         # Use AVX?
         ('UseAVX=' + $settings.Aida64.useAVX)
@@ -8175,6 +8257,197 @@ function Test-StressTestProgrammIsRunning {
 
 <#
 .DESCRIPTION
+    Resolve the error that has been thrown by the Test-StressTestProgrammIsRunning function
+.PARAMETER checkType
+    [String] Which check to perform, TICK or LAST_ERROR_CHECK
+.PARAMETER actualCoreNumber
+    [Int] The core that is being tested
+.PARAMETER coreTestOrderArray
+    [System.Collections.ArrayList] The array of the cores being tested. We're modifying this if Automatic Curve Optimizer is activated
+.PARAMETER coreIndex
+    [Ref] The current core index. We're modifying this if Automatic Curve Optimizer is activated
+.PARAMETER ExceptionObj
+    The catch $_ object
+.PARAMETER ErrorObj
+    The catch $Error object
+.OUTPUTS
+    [Void]
+#>
+function Resolve-StressTestProgrammIsRunningError {
+    param (
+        [Parameter(Mandatory=$true)] [String] $checkType,
+        [Parameter(Mandatory=$true)] [Int] $actualCoreNumber,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()] [System.Collections.ArrayList] $coreTestOrderArray,
+        [Parameter(Mandatory=$true)] [Ref] $coreIndex,
+        [Parameter(Mandatory=$true)] $ExceptionObj,
+        [Parameter(Mandatory=$true)] $ErrorObj
+    )
+
+    Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (' + $checkType + ')')
+
+    # If we're using Automatic Curve Optimizer, increase the value
+    if ($useCurveOptimizer) {
+        Write-Debug('Increasing the Curve Optimizer value for core ' + $actualCoreNumber)
+
+        # Limit the maximum value
+        $incrementBy = [Int] $settings['AutomaticCurveOptimizer']['incrementBy']
+        $maxCoValue  = [Int] $settings['AutomaticCurveOptimizer']['maxValue']
+        $oldCoValue  = [Int] $curveOptimizerCurrentValues[$actualCoreNumber]
+        $newCoValue  = [Int] [Math]::Max($oldCoValue, [Math]::Min($oldCoValue + $incrementBy, $maxCoValue))
+
+        Write-Debug('The new CO value: ' + $newCoValue + ' (old: ' + $oldCoValue + ')')
+
+        Write-ColorText('Automatic Curve Optimizer is enabled') Yellow
+
+        # Temporary increasement, will be overwritten on each start of an iteration
+        $numCoresWithIncreasedCoValue++
+
+        # Don't increase above the set maximum
+        if ($oldCoValue -ge $maxCoValue) {
+            $reachedOrExceeded = $(if ($oldCoValue -gt $maxCoValue) { 'exceeded' } else { 'reached' })
+            Write-ColorText('Cannot increase the Curve Optimizer value for core ' + $actualCoreNumber + ' anymore! The maximum of ' + $maxCoValue + ' has been ' + $reachedOrExceeded) Yellow
+
+            [Void] $coresWithIncreasedCurveOptimizerValue.Add($actualCoreNumber)
+            [Void] $coresWithErrorAndMaxCurveOptimizerValue.Add($actualCoreNumber)
+
+            if ($settings.General.skipCoreOnError) {
+                Write-ColorText('This core will now be skipped in the following iterations') Yellow
+            }
+        }
+        else {
+            $curveOptimizerCurrentValues[$actualCoreNumber] = $newCoValue
+            [Void] $coresWithIncreasedCurveOptimizerValue.Add($actualCoreNumber)
+
+            Write-ColorText('Increasing the Curve Optimizer value for core ' + $actualCoreNumber + ' from ' + $oldCoValue + ' to ' + $newCoValue) Yellow
+
+            if ($newCoValue -eq $maxCoValue) {
+                Write-ColorText('This is the maximum set Curve Optimizer value, there will be no further increases') Yellow
+            }
+
+            # Apply the new values
+            Set-CurveOptimizerValues
+
+
+            Write-AppEventLog -type 'core_co_value' -infoString1 $actualCoreNumber -infoString2 $oldCoValue -infoString3 $newCoValue
+        }
+
+
+        # Make the loop repeat the same core if we're using Automatic Curve Optimizer and the flag is set
+        if ($settings.AutomaticCurveOptimizer.repeatCoreOnError -eq 1) {
+            # Check if we haven't reached the maximum Curve Optimizer value for this core yet
+            if ($oldCoValue -ge $maxCoValue) {
+                Write-ColorText('The old Curve Optimizer value was already at the limit, will not repeat this core') Yellow
+            }
+            else {
+                Write-ColorText('The flag to repeat the core is set, so repeating the test') Yellow
+                Write-Debug('Before: ' + $coreTestOrderArray)
+
+                # Re-insert the core to the order array
+                [Void] $coreTestOrderArray.Insert(0, $actualCoreNumber)
+
+                Write-Debug('After:  ' + $coreTestOrderArray)
+
+                # This sets the index to the one before this core, so it should fall on the same core again when we continue the loop
+                $coreIndex.Value--
+            }
+        }
+
+        Write-Text('')
+    }
+
+
+    # There is an error message
+    if ($ExceptionObj.Exception -and $ExceptionObj.Exception.Message -eq 'StressTestError') {
+
+        if ($checkType -eq 'LAST_ERROR_CHECK') {
+            # Try to close the stress test program process if it is still running
+            Write-Verbose('Trying to close the stress test program to re-start it')
+
+            # Set the flag to only stop the stress test program if possible
+            Close-StressTestProgram $true
+        }
+
+
+        # If the stopOnError flag is set, stop at this point
+        # But leave the stress test program open if possible
+        if ($settings.General.stopOnError) {
+            # Only stop the testing process if we're not using Automatic Curve Optimizer
+            if (!$useCurveOptimizer) {
+                Write-Text('')
+                Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
+
+                # Display the path to the log file
+                if ($isPrime95) {
+                    Write-Text('')
+                    Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                    Write-ColorText($stressTestLogFilePath) Cyan
+                }
+                elseif ($isYCruncherWithLogging) {
+                    Write-Text('')
+                    Write-ColorText('y-cruncher''s log file can be found at:') Cyan
+                    Write-ColorText($stressTestLogFilePath) Cyan
+                }
+                elseif ($isLinpack) {
+                    Write-Text('')
+                    Write-ColorText('Linpack''s log file can be found at:') Cyan
+                    Write-ColorText($stressTestLogFilePath) Cyan
+                }
+
+                # And the path to the CoreCycler the log file for this run
+                Write-Text('')
+                Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+                Write-ColorText($logfileFullPath) Cyan
+                Write-Text('')
+
+                Exit-Script
+            }
+        }
+
+        # y-cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
+        # And the process is still running of course
+        # And it is still using enough CPU power
+        elseif ($isYCruncherWithLogging -and !$settings.General.restartTestProgramForEachCore -and $ExceptionObj.Exception.InnerException.Message -notmatch 'PROCESSMISSING|CPULOAD') {
+            Write-Verbose('Running y-cruncher with the log wrapper and restartTestProgramForEachCore disabled')
+            Write-Verbose('And the process is still there resp. the process is still using enough CPU power')
+            Write-Verbose('Continue to the next core')
+        }
+
+        # If it's not y-cruncher with logging, or the flag to restart is set, try to close and restart the stress test program process if it is still running
+        else {
+            Write-Verbose('Trying to close the stress test program to re-start it')
+
+            # Set the flag to only stop the stress test program if possible
+            Close-StressTestProgram $true
+
+
+            # Try to restart the stress test program and continue with the next core
+            # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
+            # This will be taken care of in another routine
+            if (!$settings.General.restartTestProgramForEachCore) {
+                Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
+
+                $timestamp = Get-Date -Format HH:mm:ss
+                Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
+
+                # Start the stress test program again
+                # Set the flag to only start the stress test program if possible
+                Start-StressTestProgram $true
+            }
+        }
+    }   # End: if ($ExceptionObj.Exception -and $ExceptionObj.Exception.Message -eq 'StressTestError')
+
+    # Unknown error
+    else {
+        Write-ColorText('FATAL ERROR:') Red
+        Write-ErrorText $ErrorObj
+        Exit-WithFatalError -lineNumber (Get-ScriptLineNumber)
+    }
+}
+
+
+
+<#
+.DESCRIPTION
     Get the (new) entries from a log file and store them in a global variable
 .PARAMETER
     [Void]
@@ -8886,7 +9159,15 @@ function Write-AppEventLog {
 
     try {
         Write-Debug('Adding the Windows Event Log entry:')
-        Write-Debug($message)
+
+        if ($message) {
+            $messageArray = @($message -Split '\r?\n')
+
+            foreach ($line in $messageArray) {
+                Write-Debug('[EVENTLOG] ' + $line)
+            }
+        }
+
         [System.Diagnostics.EventLog]::WriteEntry($eventSource, $message, $entryType, $eventId, 0)
     }
     catch {
@@ -9510,7 +9791,7 @@ try {
         # yCruncher and yCruncher Old share the same setting in the config file, adjust for that
         # As do Prime95 and Prime95 Dev
         $settingTestProgramName = $(if ($testProgram.Name -eq 'ycruncher_old') { 'ycruncher' } elseif ($testProgram.Name -eq 'prime95_dev') { 'prime95' } else { $testProgram.Name })
-        $commandMode = (($settings[$settingTestProgramName].mode -Split '\s*,\s*' | Where-Object { $_.Length -gt 0 }) -Join ',').ToUpperInvariant()
+        $commandMode = (($settings[$settingTestProgramName].mode -Split '\s*,\s*' | Where-Object { $_.Length -gt 0 } | Sort-Object) -Join ',').ToUpperInvariant()
 
         # Generate the command line
         $data = @{
@@ -10507,9 +10788,14 @@ try {
             }
 
 
+            # All checks if this core can be tested have completed, we can now increase the number of started tests
+            $numberOfStartedTests++
+
+
             # If $settings.General.restartTestProgramForEachCore is set, restart the stress test program for each core
-            if ($settings.General.restartTestProgramForEachCore -and ($iteration -gt 1 -or $coreTestOrderArray.Count -lt $coresToTest.Count)) {
-                Write-Verbose('restartTestProgramForEachCore is set, restarting the test program...')
+            # Do not restart before the first core on the first iteration has been tested though
+            if ($settings.General.restartTestProgramForEachCore -and $numberOfStartedTests -gt 1) {
+                Write-Verbose('restartTestProgramForEachCore is set, restarting the stress test program...')
 
                 # Set the flag to only stop the stress test program if possible
                 Close-StressTestProgram $true
@@ -11386,14 +11672,27 @@ try {
 
 
 
-                # Check if the process is still using enough CPU process power
+                # Check if the stress test process is still running or if there has been an error
                 try {
                     Test-StressTestProgrammIsRunning $actualCoreNumber
                 }
 
                 # Some error happened in or with the stress test program
                 catch {
-                    Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (#1)')
+                    $params = @{
+                        'checkType'          = 'TICK'
+                        'actualCoreNumber'   = $actualCoreNumber
+                        'coreTestOrderArray' = $coreTestOrderArray
+                        'coreIndex'          = [Ref] $coreIndex
+                        'ExceptionObj'       = $_
+                        'ErrorObj'           = $Error
+                    }
+
+                    Resolve-StressTestProgrammIsRunningError @params
+
+
+                    <#
+                    Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (in tick)')
 
                     # If we're using Automatic Curve Optimizer, increase the value
                     if ($useCurveOptimizer) {
@@ -11456,7 +11755,7 @@ try {
                                 [Void] $coreTestOrderArray.Insert(0, $actualCoreNumber)
 
                                 Write-Debug('After:  ' + $coreTestOrderArray)
-                                
+
                                 # This sets the index to the one before this core, so it should fall on the same core again when we continue the loop
                                 $coreIndex--
                             }
@@ -11512,7 +11811,7 @@ try {
                             Write-Verbose('Continue to the next core')
                         }
 
-                        # Otherwise for Prime95 (and others), try to close and restart the stress test program process if it is still running
+                        # If it's not y-cruncher with logging, or the flag to restart is set, try to close and restart the stress test program process if it is still running
                         else {
                             Write-Verbose('Trying to close the stress test program to re-start it')
 
@@ -11542,6 +11841,7 @@ try {
                         Write-ErrorText $Error
                         Exit-WithFatalError -lineNumber (Get-ScriptLineNumber)
                     }
+                    #>
 
 
                     # Continue to the next core
@@ -11569,9 +11869,92 @@ try {
                 Test-StressTestProgrammIsRunning $actualCoreNumber
             }
 
-            # When an exception is thrown, the stress test process is not running anymore, so skip this core
+            # When an exception is thrown, the stress test process is not running anymore
             catch {
-                Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (#2)')
+                $params = @{
+                    'checkType'          = 'LAST_ERROR_CHECK'
+                    'actualCoreNumber'   = $actualCoreNumber
+                    'coreTestOrderArray' = $coreTestOrderArray
+                    'coreIndex'          = [Ref] $coreIndex
+                    'ExceptionObj'       = $_
+                    'ErrorObj'           = $Error
+                }
+
+                Resolve-StressTestProgrammIsRunningError @params
+
+
+                <#
+                Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (last error check)')
+
+                # If we're using Automatic Curve Optimizer, increase the value
+                if ($useCurveOptimizer) {
+                    Write-Debug('Increasing the Curve Optimizer value for core ' + $actualCoreNumber)
+
+                    # Limit the maximum value
+                    $incrementBy = [Int] $settings['AutomaticCurveOptimizer']['incrementBy']
+                    $maxCoValue  = [Int] $settings['AutomaticCurveOptimizer']['maxValue']
+                    $oldCoValue  = [Int] $curveOptimizerCurrentValues[$actualCoreNumber]
+                    $newCoValue  = [Int] [Math]::Max($oldCoValue, [Math]::Min($oldCoValue + $incrementBy, $maxCoValue))
+
+                    Write-Debug('The new CO value: ' + $newCoValue + ' (old: ' + $oldCoValue + ')')
+
+                    Write-ColorText('Automatic Curve Optimizer is enabled') Yellow
+
+                    # Temporary increasement, will be overwritten on each start of an iteration
+                    $numCoresWithIncreasedCoValue++
+
+                    # Don't increase above the set maximum
+                    if ($oldCoValue -ge $maxCoValue) {
+                        $reachedOrExceeded = $(if ($oldCoValue -gt $maxCoValue) { 'exceeded' } else { 'reached' })
+                        Write-ColorText('Cannot increase the Curve Optimizer value for core ' + $actualCoreNumber + ' anymore! The maximum of ' + $maxCoValue + ' has been ' + $reachedOrExceeded) Yellow
+
+                        [Void] $coresWithIncreasedCurveOptimizerValue.Add($actualCoreNumber)
+                        [Void] $coresWithErrorAndMaxCurveOptimizerValue.Add($actualCoreNumber)
+
+                        if ($settings.General.skipCoreOnError) {
+                            Write-ColorText('This core will now be skipped in the following iterations') Yellow
+                        }
+                    }
+                    else {
+                        $curveOptimizerCurrentValues[$actualCoreNumber] = $newCoValue
+                        [Void] $coresWithIncreasedCurveOptimizerValue.Add($actualCoreNumber)
+
+                        Write-ColorText('Increasing the Curve Optimizer value for core ' + $actualCoreNumber + ' from ' + $oldCoValue + ' to ' + $newCoValue) Yellow
+
+                        if ($newCoValue -eq $maxCoValue) {
+                            Write-ColorText('This is the maximum set Curve Optimizer value, there will be no further increases') Yellow
+                        }
+
+                        # Apply the new values
+                        Set-CurveOptimizerValues
+
+
+                        Write-AppEventLog -type 'core_co_value' -infoString1 $actualCoreNumber -infoString2 $oldCoValue -infoString3 $newCoValue
+                    }
+
+
+                    # Make the loop repeat the same core if we're using Automatic Curve Optimizer and the flag is set
+                    if ($settings.AutomaticCurveOptimizer.repeatCoreOnError -eq 1) {
+                        # Check if we haven't reached the maximum Curve Optimizer value for this core yet
+                        if ($oldCoValue -ge $maxCoValue) {
+                            Write-ColorText('The old Curve Optimizer value was already at the limit, will not repeat this core') Yellow
+                        }
+                        else {
+                            Write-ColorText('The flag to repeat the core is set, so repeating the test') Yellow
+                            Write-Debug('Before: ' + $coreTestOrderArray)
+
+                            # Re-insert the core to the order array
+                            [Void] $coreTestOrderArray.Insert(0, $actualCoreNumber)
+
+                            Write-Debug('After:  ' + $coreTestOrderArray)
+
+                            # This sets the index to the one before this core, so it should fall on the same core again when we continue the loop
+                            $coreIndex--
+                        }
+                    }
+
+                    Write-Text('')
+                }
 
 
                 # There is an error message
@@ -11585,33 +11968,36 @@ try {
 
                     # If the stopOnError flag is set, stop at this point
                     if ($settings.General.stopOnError) {
-                        Write-Text('')
-                        Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
-
-                        if ($isPrime95) {
-                            # Display the results.txt file name for Prime95 for this run
+                        # Only stop the testing process if we're not using Automatic Curve Optimizer
+                        if (!$useCurveOptimizer) {
                             Write-Text('')
-                            Write-ColorText('Prime95''s results log file can be found at:') Cyan
-                            Write-ColorText($stressTestLogFilePath) Cyan
-                        }
-                        elseif ($isYCruncherWithLogging) {
-                            Write-Text('')
-                            Write-ColorText('y-cruncher''s log file can be found at:') Cyan
-                            Write-ColorText($stressTestLogFilePath) Cyan
-                        }
-                        elseif ($isLinpack) {
-                            Write-Text('')
-                            Write-ColorText('Linpack''s log file can be found at:') Cyan
-                            Write-ColorText($stressTestLogFilePath) Cyan
-                        }
+                            Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
-                        # And the name of the log file for this run
-                        Write-Text('')
-                        Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
-                        Write-ColorText($logfileFullPath) Cyan
-                        Write-Text('')
+                            if ($isPrime95) {
+                                # Display the results.txt file name for Prime95 for this run
+                                Write-Text('')
+                                Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                                Write-ColorText($stressTestLogFilePath) Cyan
+                            }
+                            elseif ($isYCruncherWithLogging) {
+                                Write-Text('')
+                                Write-ColorText('y-cruncher''s log file can be found at:') Cyan
+                                Write-ColorText($stressTestLogFilePath) Cyan
+                            }
+                            elseif ($isLinpack) {
+                                Write-Text('')
+                                Write-ColorText('Linpack''s log file can be found at:') Cyan
+                                Write-ColorText($stressTestLogFilePath) Cyan
+                            }
 
-                        Exit-Script
+                            # And the name of the log file for this run
+                            Write-Text('')
+                            Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+                            Write-ColorText($logfileFullPath) Cyan
+                            Write-Text('')
+
+                            Exit-Script
+                        }
                     }
 
 
@@ -11636,6 +12022,12 @@ try {
                     Write-ErrorText $Error
                     Exit-WithFatalError -lineNumber (Get-ScriptLineNumber)
                 }
+                #>
+
+
+                # An error has been thrown, do not display the test completed summary
+                # Instead, continue to the next core right away
+                continue LoopCoreRunner
             }   # End: catch
 
 
