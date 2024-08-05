@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.0alpha1
+    0.10.0.0alpha2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.0.0alpha1'
+$version = '0.10.0.0alpha2'
 
 
 # This defines the strict mode
@@ -4640,9 +4640,9 @@ function Initialize-AutomaticTestMode {
 
 
     # The Automatic Test Mode without resuming from a reboot
+    # Get the Automatic Test Mode starting values from the settings
     if (!$voltageStartValuesString) {
-        # Get the Automatic Test Mode starting values from the settings
-        $voltageStartValuesString = $settings['AutomaticTestMode']['startValues'].Trim()
+        $voltageStartValuesString = $settings['AutomaticTestMode']['startValues']
 
         Write-Debug('The Automatic Test Mode starting values from the settings:')
         Write-Debug($voltageStartValuesString)
@@ -4668,6 +4668,7 @@ function Initialize-AutomaticTestMode {
         }
     }
 
+
     # The number of settings must equal the number of cores or be exactly one value
     if ($voltageStartValuesArray.Count -ne $numPhysCores) {
         # If it's only a single value, apply this value to each core
@@ -4678,11 +4679,18 @@ function Initialize-AutomaticTestMode {
         else {
             $msg  = 'The number of ' + $modeDescription + ' starting values needs to match the number of cores'
             $msg += [Environment]::NewLine + 'or be a single value for all cores!'
+            $msg += [Environment]::NewLine + '(' + $numPhysCores + ' cores found, but ' + $(if ($voltageStartValuesArray.Count -le $numPhysCores) { 'only ' } else { '' }) + $voltageStartValuesArray.Count + ' starting values)'
 
             Exit-WithFatalError -text $msg
         }
     }
 
+
+    # We can have only integer values at this point
+    $voltageStartValuesArray = $voltageStartValuesArray | ForEach-Object { [Int] $_ }
+
+
+    # Curve Optimizer has a limit
     if (!$isIntelProcessor) {
         if (@($voltageStartValuesArray | Where-Object { [Math]::Abs($_) -gt $limitForCoValues }).Count -gt 0) {
             Exit-WithFatalError -text ('Found invalid values (either higher or lower than +-' + $limitForCoValues + ')' + [Environment]::NewLine + $voltageStartValuesArray)
@@ -4759,6 +4767,10 @@ function Get-CurveOptimizerValues {
 
             if ($stdErr) {
                 $msg += [Environment]::NewLine + $stdErr
+            }
+
+            if ($stdOut) {
+                $msg += [Environment]::NewLine + $stdOut
             }
 
             throw($msg)
@@ -4841,6 +4853,10 @@ function Set-CurveOptimizerValues {
                 $msg += [Environment]::NewLine + $stdErr
             }
 
+            if ($stdOut) {
+                $msg += [Environment]::NewLine + $stdOut
+            }
+
             throw($msg)
         }
 
@@ -4907,6 +4923,10 @@ function Get-IntelVoltageOffset {
 
             if ($stdErr) {
                 $msg += [Environment]::NewLine + $stdErr
+            }
+
+            if ($stdOut) {
+                $msg += [Environment]::NewLine + $stdOut
             }
 
             throw($msg)
@@ -4982,6 +5002,10 @@ function Set-IntelVoltageOffset {
 
             if ($stdErr) {
                 $msg += [Environment]::NewLine + $stdErr
+            }
+
+            if ($stdOut) {
+                $msg += [Environment]::NewLine + $stdOut
             }
 
             throw($msg)
@@ -10146,6 +10170,10 @@ function Get-ProcessorCoresInformation {
 
         if ($stdErr) {
             $msg += [Environment]::NewLine + $stdErr
+        }
+
+        if ($stdOut) {
+            $msg += [Environment]::NewLine + $stdOut
         }
 
         throw($msg)
