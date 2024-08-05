@@ -243,6 +243,9 @@ The licenses of all included programs remain unaffected by this and retain their
   https://github.com/sp00n/WriteConsoleToWriteFileWrapperDll?tab=MIT-1-ov-file
   https://github.com/sp00n/WriteConsoleToWriteFileWrapperExe?tab=MIT-1-ov-file
 
+- APICID
+  https://github.com/sp00n/APICID?tab=MIT-1-ov-file
+
 - BoostTester.sp00n
   https://github.com/sp00n/BoostTester?tab=Unlicense-1-ov-file
 
@@ -251,6 +254,12 @@ The licenses of all included programs remain unaffected by this and retain their
 
 - PBO2Tuner
   https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29337788
+
+- pbotest
+  https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29350110
+
+- IntelVoltageControl
+  https://github.com/jamestut/IntelVoltageControl?tab=MIT-1-ov-file
 
 
 

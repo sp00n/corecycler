@@ -1,4 +1,12 @@
 <#
+.AUTHOR
+    sp00n
+.LINK
+    https://github.com/sp00n/corecycler
+.LICENSE
+    Creative Commons "CC BY-NC-SA"
+    https://creativecommons.org/licenses/by-nc-sa/4.0/
+    https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
 .DESCRIPTION
     This file is used to add a new Windows Event Log "Source", which is required to be able to use the Windows Event Log
     The name of this new Source is "CoreCycler"
@@ -6,8 +14,6 @@
     the main scrip width admin rights
 .PARAMETER shouldBeAdmin
     [Mixed] If set (to anything), assume that we are already admin
-.OUTPUTS
-    [Void]
 #>
 param(
     $shouldBeAdmin

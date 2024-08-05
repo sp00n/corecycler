@@ -2,6 +2,15 @@ In this directory are some helpful tools that you might find interesting.
 
 
 
+APICID.exe
+----------
+https://github.com/sp00n/APICID
+
+Simple tool to display the APIC ID for each logical core / virtual core.
+Helpful for linking the message in a WHEA Error entry to an actual core.
+
+
+
 BoostTester.exe
 ---------------
 https://github.com/jedi95/BoostTester
@@ -75,7 +84,7 @@ PBO2Tuner.exe -10 -10 -10 -10 -10 -10 -10 -10        // Set only CO values, all 
 
 
 
-PBOCli resp. pbotest
+pbocli resp. pbotest
 --------------------
 by PJVol from overclock.net
 https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29350110
@@ -95,3 +104,21 @@ pbotest.exe set -20 2 -15 -20 -19 -5
 
 Note the minus sign for negative Curve Optimizer values.
 You need to provide a value for each core in your processor, otherwise the tool will throw an error message.
+
+
+
+IntelVoltageControl
+-------------------
+https://github.com/jamestut/IntelVoltageControl
+
+This command line application allows setting up FIVR voltage offset directly from Microsoft Windows of some Intel CPUs,
+notably 4th gen (Haswell) and newer.
+Note that this software operates by writing to MSR 0x150, just like many undervolting utilities do.
+If other utilities cannot change the voltage offsets, then this software will not work either.
+
+Usage:
+To show all currently configured FIVR offsets:
+IntelVoltageControl.exe show
+
+Apply a -50mv voltage offset to the CPU (and to the CPU Cache, it is required to set both to the same value):
+IntelVoltageControl.exe set --commit 0 -50 2 -50

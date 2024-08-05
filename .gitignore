@@ -1,3 +1,4 @@
+.automode
 .updatecheck
 config.ini
 deploy.ps1
