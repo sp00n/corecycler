@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.0alpha2
+    0.10.0.0alpha3
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.0.0alpha2'
+$version = '0.10.0.0alpha3'
 
 
 # This defines the strict mode
@@ -56,6 +56,7 @@ $configsPath                   = 'configs'
 $configsPathAbsolute           = $PSScriptRoot + '\' + $configsPath + '\'
 $configDefaultPath             = $configsPathAbsolute + 'default.config.ini'
 $configUserPath                = $PSScriptRoot + '\config.ini'
+$customConfigPath              = $null
 $canUseLogFile                 = $false
 $logBuffer                     = [System.Collections.ArrayList]::new()
 $logLevel                      = 2
@@ -722,7 +723,12 @@ memory = 2GB
 # Also note that enabling this setting will require the script to be run with administrator privileges
 # And lastly, enabling it will set "skipCoreOnError" to 0 and "stopOnError" to 0 as long as the limit has not been reached
 #
-# IMPORTANT: This currently does not work for Ryzen 9000 (Zen 5) CPUs
+# IMPORTANT: This is currently untested for Ryzen 9000 (Zen 5) CPUs
+# IMPORTANT: The automatically adjusted Curve Optimizer / voltage offset values are NOT permanent, so after a regular reboot they
+#            will not be applied anymore
+#            If you want to permanently set these values, you will need to set them in the BIOS, or use a startup script to
+#            set them on every Windows start (see the .txt files for PBO2Tuner/pbocli resp. IntelVoltageControl in the /tools
+#            directory for an explanation of the various settings)
 #
 # Default: 0
 enableAutomaticAdjustment = 0
@@ -741,8 +747,12 @@ enableAutomaticAdjustment = 0
 #       -30 is a common minimum value for Curve Optimizer, sometimes even -50
 # Note: For Intel, the values are provided in millivolts, so e.g. -130 for an undervolt of -0.130v
 #
-# IMPORTANT: Use a negative sign if you want negative CO values / a negative voltage offset, not providing a
-#            negative sign will instead apply a positive CO / voltage offset!
+# IMPORTANT: Use a negative sign if you want negative CO values / a negative voltage offset, not providing a negative sign will
+#            instead apply a positive CO / voltage offset!
+# IMPORTANT: The automatically adjusted Curve Optimizer / voltage offset values are TEMPORARY, so after a regular reboot they
+#            will not be applied anymore
+#            If you want to permanently set these values, you will need to set them in the BIOS, or use a startup script to
+#            set them on every Windows start (see the text files in the /tools directory for an explanation of the various settings)
 #
 # Example for setting Curve Optimizer values for a Ryzen 5800X with 8 cores:
 # startValues = -15, -10, -15, -8, 2, -20, 0, -30
@@ -750,7 +760,7 @@ enableAutomaticAdjustment = 0
 # Example to assign a single Curve Optimizer value to all cores:
 # startValues = -20
 #
-# Example to assign a voltage offset of -0.120v (120mv) for Intel processors:
+# Example to assign a voltage offset of -0.120v (-120mv) for Intel processors:
 # startValues = -120
 #
 # Default: Default
@@ -1244,7 +1254,7 @@ $stressTestPrograms = @{
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
         'fullPathToLoadExe'   = $null
-        'command'             = 'cmd /C start /MIN "Linpack CoreCycler" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack CoreCycler''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; $logFilePath = ''%logFilePath%''; if (!([IO.File]::Exists($logFilePath))) { [IO.File]::WriteAllLines($logFilePath, (Get-Date -Format HH:mm:ss)) }; "%fullPathToLoadExe%" ''%configFilePath%'' | Tee-Object -FilePath $logFilePath -Append"'
+        'command'             = 'cmd /C start /MIN "Linpack CoreCycler" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack CoreCycler''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; $logFilePath = ''%logFilePath%''; if (!([IO.File]::Exists($logFilePath))) { [IO.File]::WriteAllLines($logFilePath, (Get-Date -Format HH:mm:ss)) }; & \"%fullPathToLoadExe%\" ''%configFilePath%'' | Tee-Object -FilePath $logFilePath -Append"'
         'windowBehaviour'     = 6
         'testModes'           = @(
             'SLOWEST'
@@ -4240,6 +4250,9 @@ function Get-Settings {
             if (Test-Path $customConfigPath -PathType Leaf) {
                 # Overwrite the already parsed settings
                 $userSettings = Import-Settings $customConfigPath
+
+                # Store the path in the global variable
+                $Script:customConfigPath = $customConfigPath
             }
             else {
                 Write-Text('Couldn''t find the custom config file, using the values from the config.ini!')
@@ -7703,13 +7716,13 @@ function Initialize-Linpack {
     # https://stackoverflow.com/questions/49345420/understanding-linpack-input-configuration
     # The first two lines apparently can be any text
     $configEntries = @(
-        'Linpack data file'     # This line is disregarded (can be anything)
-        $linpackStartString     # Text to display when starting Linpack
-        '1'                     # The number of tests (how many problem sizes appear in the next line). Leave this at 1
-        $problemSize            # The problem size, calculated from the memory size
-        $leadingDim             # Leading dimension of the array. It's advised to set this to the $problemSize+x, to get the closest larger integer value that is an odd multiple of 8
-        '9999999'               # Number of iterations per run (times to run a test ("trials"))
-        '4'                     # Alignment values in kilobytes (should be left at 4, but maybe increase it to 16 or 64 for large memory pages)
+        'CoreCycler Linpack data file'  # This line is disregarded (can be anything)
+        $linpackStartString             # Text to display when starting Linpack
+        '1'                             # The number of tests (how many problem sizes appear in the next line). Leave this at 1
+        $problemSize                    # The problem size, calculated from the memory size
+        $leadingDim                     # Leading dimension of the array. It's advised to set this to the $problemSize+x, to get the closest larger integer value that is an odd multiple of 8
+        '9999999'                       # Number of iterations per run (times to run a test ("trials"))
+        '4'                             # Alignment values in kilobytes (should be left at 4, but maybe increase it to 16 or 64 for large memory pages)
     )
 
     [System.IO.File]::WriteAllLines($configFile, $configEntries)
@@ -10604,6 +10617,67 @@ try {
     Get-Settings
 
 
+    # Dump the settings to the log file
+    Write-Debug('')
+    Write-Debug('-------------------------------- The config file -------------------------------')
+    Write-Debug($configUserPath)
+    Write-Debug('--------------------------------------------------------------------------------')
+    Write-Debug('')
+
+    $configFile = Get-ChildItem -Path $configUserPath
+    $reader = [System.IO.File]::OpenText($configFile)
+    $settingsString = $reader.ReadToEnd()
+    $settingsArray = @($settingsString -Split '\r?\n')
+    $reader.Close()
+
+    foreach ($line in $settingsArray) {
+        Write-Debug($line)
+    }
+
+    Write-Debug('')
+    Write-Debug('')
+
+
+    if ($customConfigPath) {
+        Write-Debug('---------------------------- The custom config file ----------------------------')
+        Write-Debug($customConfigPath)
+        Write-Debug('--------------------------------------------------------------------------------')
+        Write-Debug('')
+
+        $configFile = Get-ChildItem -Path $customConfigPath
+        $reader = [System.IO.File]::OpenText($configFile)
+        $settingsString = $reader.ReadToEnd()
+        $settingsArray = @($settingsString -Split '\r?\n')
+        $reader.Close()
+
+        foreach ($line in $settingsArray) {
+            Write-Debug($line)
+        }
+
+        Write-Debug('')
+        Write-Debug('')
+    }
+
+
+    Write-Debug('------------------------------ The parsed settings -----------------------------')
+
+    foreach ($section in $settings.GetEnumerator()) {
+        if (($null -ne $section.Value -and ![String]::IsNullOrWhiteSpace($section.Value)) -and $section.Value -is [Hashtable]) {
+            foreach ($setting in $section.Value.GetEnumerator()) {
+                Write-Debug('[' + $section.Name +'] ' + $setting.Name + ' = ' + $setting.Value)
+            }
+        }
+        else {
+            Write-Debug('[No Section] ' + $section.Name + ' = ' + $section.Value)
+        }
+
+        Write-Debug('')
+    }
+
+    Write-Debug('--------------------------------------------------------------------------------')
+    Write-Debug('')
+
+
     # Start a request to check for an update
     # As early as possible, so that it has time to finish the URL query while other things are being processed
     # The result of this job will be received later
@@ -10871,9 +10945,6 @@ try {
         if ($testProgram.Name -eq 'linpack') {
             $stressTestPrograms[$testProgram.Name]['fullPathToLoadExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processNameForLoad']
 
-            $Script:stressTestLogFileName = 'Linpack_' + $scriptStartDateTime + '_Version_' + $settings.Linpack.version + '_' + $settings.mode + '.log'
-            $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
-
             $data['%fileName%'] = ($testProgram.Value['processNameForLoad'] + '.' + $testProgram.Value['processNameExt'])
             $data.add('%fullPathToLoadExe%', $testProgram.Value['fullPathToLoadExe'] + '.' + $testProgram.Value['processNameExt'])
             $data.add('%logFilePath%', $stressTestLogFilePath)
@@ -10912,12 +10983,47 @@ try {
                 'FASTEST' = @{ 'amd' = 5; 'intel' = 5 }
             }
 
+
+            # Reduce Linpack to three settings?
+            # SSE  -> MKL_DEBUG_CPU_TYPE 1 / 0
+            # AVX  -> MKL_DEBUG_CPU_TYPE ?
+            # AVX2 -> MKL_DEBUG_CPU_TYPE 5
+
+            # Supported values for MKL_ENABLE_INSTRUCTIONS
+            # (used in Intel XTU)
+            # (only available in 2021+)
+            # SSE4_2
+            # AVX
+            # AVX2
+            #
+            # Possibly these are all the supported values for MKL_ENABLE_INSTRUCTIONS (taken from the linpack binary):
+            # It doesn't seem to work with on AMD at all
+            # Setting               Ryzen
+            # COMPATIBLE            113.7
+            # SSE2                  113.7
+            # SSSE3                 113.4
+            # SSE4_1                113.4
+            # SSE4_2                113.4
+            # AVX                   113.6
+            # AVX2                  113.3
+            # AVX512_MIC            113.1
+            # AVX512                113.9
+            # AVX512_MIC_E1         113.3
+            #
+            # On Intel 14th gen this works for SSE4_2, AVX, AVX2
+
             $processorType = $(if ($isIntelProcessor) { 'intel' } else { 'amd' })
 
             # Only version 2018 and 2019 support lower modes than FASTEST
             $linpackMode =  $(if ($settings.Linpack.version -eq '2018' -or $settings.Linpack.version -eq '2019') { $settings.Linpack.mode.ToUpperInvariant() } else { 'FASTEST' })
 
             $data.add('%MKL_DEBUG_CPU_TYPE%', '$env:MKL_DEBUG_CPU_TYPE = ' + $MKL_DEBUG_CPU_TYPES[$linpackMode][$processorType] + ';')
+
+
+            if ($isLinpack) {
+                $Script:stressTestLogFileName = 'Linpack_' + $scriptStartDateTime + '_Version_' + $settings.Linpack.version + '_' + $settings.mode + '.log'
+                $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+            }
         }
 
 
@@ -11176,11 +11282,18 @@ try {
 
         Write-Debug('Messages from the update background job:')
 
-        foreach ($message in $updateCheckResult['messages']) {
-            Write-Debug($message)
+        if (!$updateCheckResult -or !($updateCheckResult['messages'])) {
+            Write-Debug('No messages returned')
+        }
+        else {
+            foreach ($message in $updateCheckResult['messages']) {
+                Write-Debug($message)
+            }
+
+            $showUpdateAvailableMessage = $updateCheckResult['isNew']
+            Write-Debug('Is there an update available:       ' + $updateCheckResult['isNew'])
         }
 
-        $showUpdateAvailableMessage = $updateCheckResult['isNew']
 
         $updateEndTime = Get-Date
         $updateRunTime = $updateEndTime - $updateStartTime
@@ -11188,7 +11301,6 @@ try {
         Write-Debug('Update Check Started (User Time):   ' + $updateStartTime.ToString('HH:mm:ss'))
         Write-Debug('Update Check Ended (User Time):     ' + $updateEndTime.ToString('HH:mm:ss'))
         Write-Debug('Update Check Runtime (User Time):   ' + $updateRunTime.TotalSeconds)
-        Write-Debug('Is there an update available:       ' + $updateCheckResult['isNew'])
     }
 
 
@@ -11452,6 +11564,12 @@ try {
         Write-ColorText('│ ' + ('"' + $autoModeTaskPath + '" folder of the Task Scheduler Library.').PadRight(76, ' ') + ' │') Yellow DarkRed
         Write-ColorText('└─' + '────────────────────────────────────────────────────────────────────────────' + '─┘') Yellow DarkRed
         Write-Text('')
+        Write-ColorText('┌─' + '────────────────────────────────────────────────────────────────────────────' + '─┐') Yellow DarkMagenta
+        Write-ColorText('│ ' + 'Please note that the Curve Optimizer / voltage adjustments made here are not'.PadRight(76, ' ') + ' │') Yellow DarkMagenta
+        Write-ColorText('│ ' + 'permanent and will be reverted once you restart the computer.'.PadRight(76, ' ') + ' │') Yellow DarkMagenta
+        Write-ColorText('│ ' + 'So once you''ve found your final settings, you should add them to your BIOS.'.PadRight(76, ' ') + ' │') Yellow DarkMagenta
+        Write-ColorText('└─' + '────────────────────────────────────────────────────────────────────────────' + '─┘') Yellow DarkMagenta
+        Write-Text('')
         Write-Text('')
     }
 
@@ -11657,6 +11775,11 @@ try {
             # Start fresh
             $coreTestOrderArray = [System.Collections.ArrayList]::new()
 
+            # If we had added a core from CoreFromAutoMode, we will need to push it to the front here again
+            if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt 0) {
+                [Void] $coreTestOrderArray.Add($CoreFromAutoMode)
+            }
+
             # 0, $halfCores, 0+1, $halfCores+1, ...
             # TODO: Maybe find a better way to handle ignored cores, so that there's still an alternation, instead of just skipping it
             for ($i = 0; $i -lt $numPhysCores; $i++) {
@@ -11684,6 +11807,11 @@ try {
         elseif ($coreTestOrderMode -eq 'random') {
             Write-Verbose('Random test order selected, building the test order array...')
             [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object { Get-Random })
+
+            # If we had added a core from CoreFromAutoMode, we will need to push it to the front here again
+            if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt 0) {
+                [Void] $coreTestOrderArray.Insert(0, $CoreFromAutoMode)
+            }
         }
 
         # Custom
@@ -11717,24 +11845,24 @@ try {
         # Iterate over each core
         # Named for loop
         :LoopCoreRunner for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++) {
-            Write-Debug('Trying to switch to a new core (' + ($coreIndex+1) + ' of ' + $numAvailableCores + ') [' + $coreIndex + ' of ' + ($numAvailableCores-1) + ']')
+            Write-Debug('Trying to switch to a new core (' + ($coreIndex+1) + ' of ' + $numAvailableCores + ') [index ' + $coreIndex + ' of ' + ($numAvailableCores-1) + ']')
 
-            $startDateThisCore              = Get-Date
-            $estimatedEndDateCore           = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
-            $timestamp                      = $startDateThisCore.ToString('HH:mm:ss')
-            $expectedAffinities             = $()
-            $actualCoreNumber               = [Int] $coreTestOrderArray[0]      # The coreTestOrderArray is reduced for each iteration, so this will always get the next core in line
-            $cpuNumbersArray                = @()
-            $allPassedFFTs                  = [System.Collections.ArrayList]::new()
-            $uniquePassedFFTs               = [System.Collections.ArrayList]::new()
-            $allPassedTests                 = [System.Collections.ArrayList]::new()
-            $uniquePassedTests              = [System.Collections.ArrayList]::new()
-            $proceedToNextCore              = $false
-            $fftSizeOverflow                = $false
-            $coreSupportsOnly1T             = $coresWithOneThread.Contains($actualCoreNumber)
-            $coreStartDifference            = New-TimeSpan -Start $scriptStartDate -End $startDateThisCore
-            $numCoresWithError              = $coresWithError.Count
-            $numCoresWithWheaError          = $coresWithWheaError.Count
+            $startDateThisCore                   = Get-Date
+            $estimatedEndDateCore                = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
+            $timestamp                           = $startDateThisCore.ToString('HH:mm:ss')
+            $expectedAffinities                  = $()
+            $actualCoreNumber                    = [Int] $coreTestOrderArray[0]      # The coreTestOrderArray is reduced for each iteration, so this will always get the next core in line
+            $cpuNumbersArray                     = @()
+            $allPassedFFTs                       = [System.Collections.ArrayList]::new()
+            $uniquePassedFFTs                    = [System.Collections.ArrayList]::new()
+            $allPassedTests                      = [System.Collections.ArrayList]::new()
+            $uniquePassedTests                   = [System.Collections.ArrayList]::new()
+            $proceedToNextCore                   = $false
+            $fftSizeOverflow                     = $false
+            $coreSupportsOnly1T                  = $coresWithOneThread.Contains($actualCoreNumber)
+            $coreStartDifference                 = New-TimeSpan -Start $scriptStartDate -End $startDateThisCore
+            $numCoresWithError                   = $coresWithError.Count
+            $numCoresWithWheaError               = $coresWithWheaError.Count
             $numCoresWithIncreasedVoltageValue   = $coresWithIncreasedVoltageValue.Count
             $numCoresWithErrorAndMaxVoltageValue = $coresWithErrorAndMaxVoltageValue.Count
 
