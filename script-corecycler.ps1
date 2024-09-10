@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.0alpha3
+    0.10.0.0alpha4
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.0.0alpha3'
+$version = '0.10.0.0alpha4'
 
 
 # This defines the strict mode
@@ -723,7 +723,7 @@ memory = 2GB
 # Also note that enabling this setting will require the script to be run with administrator privileges
 # And lastly, enabling it will set "skipCoreOnError" to 0 and "stopOnError" to 0 as long as the limit has not been reached
 #
-# IMPORTANT: This is currently untested for Ryzen 9000 (Zen 5) CPUs
+# IMPORTANT: This currently does NOT work for Ryzen 9000 (Zen 5) CPUs :(
 # IMPORTANT: The automatically adjusted Curve Optimizer / voltage offset values are NOT permanent, so after a regular reboot they
 #            will not be applied anymore
 #            If you want to permanently set these values, you will need to set them in the BIOS, or use a startup script to
@@ -4561,9 +4561,30 @@ function Initialize-AutomaticTestMode {
         return
     }
 
+    Write-Debug('Initializing Automatic Test Mode')
+
+    # This currently does not work on Ryzen 9000 :(
+    # Maybe also Ryzen 8000?
+    if ( $processor.Name -match '.*AMD.*' -and $processor.Name -match '9\d{3}' ) {
+        Write-Text('')
+        Write-Text('')
+        Write-ColorText('┌───────────────────────────────────┤ ERROR ├──────────────────────────────────┐') Yellow DarkRed
+        Write-ColorText('│ ' + 'You have selected to use the Automatic Test Mode.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'Unfortunately this does not (yet) work with Ryzen 9000 processors, so please'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'disable the Automatic Test Mode in the config.ini file.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + ''.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'The detected processor:'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + $processor.Name.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('└──────────────────────────────────────────────────────────────────────────────┘') Yellow DarkRed
+        Write-Text('')
+        Write-Text('')
+        Write-ColorText('Exiting...') Red
+        Write-Text('')
+
+        Exit-Script
+    }
 
     # The Automatic Test Mode has been enabled, we require administrator privileges!
-    Write-Debug('Initializing Automatic Test Mode')
     Write-Debug('Are we admin: ' + $areWeAdmin)
 
 
@@ -8274,107 +8295,153 @@ function Test-StressTestProgrammIsRunning {
 
             # Note: For two threads, the processor time is actually 2x the measure time
             #       We're handling this by using the "factor" variables
-            $measureTime  = 100
-            $expectedTime = $measureTime * $factorForExpectedUsage      # 100 * 1 for 1 thread = 100ms or 100 * 2 = 200ms for 2 threads
-            $minTime      = $measureTime * $factorForMinProcessorTime   # 50% usage of the expected usage
-            $waitTime     = 2000
-            $maxChecks    = 3
+            do {
+                $measureTime  = 100
+                $expectedTime = $measureTime * $factorForExpectedUsage      # 100 * 1 for 1 thread = 100ms or 100 * 2 = 200ms for 2 threads
+                $minTime      = $measureTime * $factorForMinProcessorTime   # 50% usage of the expected usage
+                $waitTime     = 2000
+                $maxChecks    = 3
 
-            $cpuTime1 = $checkProcess.UserProcessorTime.TotalSeconds
-            Start-Sleep -Milliseconds $measureTime
-            $cpuTime2 = $checkProcess.UserProcessorTime.TotalSeconds
-            $measuredTime = [Math]::Round(($cpuTime2 - $cpuTime1) * 1000, 0)
+                try {
+                    $cpuTime1 = $checkProcess.UserProcessorTime.TotalSeconds
+                    Start-Sleep -Milliseconds $measureTime
+                    $cpuTime2 = $checkProcess.UserProcessorTime.TotalSeconds
+                }
 
-            # For 100% core usage, this should be 0.1 seconds time increase during 100 milliseconds
-            Write-Verbose($timestamp + ' - Checking CPU usage: ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
+                # We assume that the process doesn't exist anymore if this fails
+                catch {
+                    $timestamp = Get-Date -Format HH:mm:ss
 
-            if ($measuredTime -le $minTime) {
-                # For Prime95
-                if ($isPrime95) {
-                    # Look for a line with an "error" string in the new log entries
-                    $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' } | Select-Object -Last 1
+                    # Does the stress test process still exist?
+                    $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
-                    # Found the "error" string
-                    if ($errorResults) {
-                        # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-                        $stressTestError = $errorResults.Line
-                        $errorType = 'CALCULATIONERROR'
+                    Write-Debug($timestamp + ' - Checking for stress test errors')
+
+                    if (!$checkProcess) {
+                        $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t exist anymore.'
+                        $errorType = 'PROCESSMISSING'
+                        break
+                    }
+                    else {
+                        throw $_
                     }
                 }
 
+                $measuredTime = [Math]::Round(($cpuTime2 - $cpuTime1) * 1000, 0)
 
-                # For y-cruncher with logging enabled
-                elseif ($isYCruncherWithLogging) {
-                    # Look for a line with an "error" string in the new log entries
-                    $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
+                # For 100% core usage, this should be 0.1 seconds time increase during 100 milliseconds
+                Write-Verbose($timestamp + ' - Checking CPU usage: ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
 
-                    # Found the "error" string
-                    if ($errorResults) {
-                        # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-                        $stressTestError = $errorResults.Line
-                        $errorType = 'CALCULATIONERROR'
-                    }
-                }
+                if ($measuredTime -le $minTime) {
+                    # For Prime95
+                    if ($isPrime95) {
+                        # Look for a line with an "error" string in the new log entries
+                        $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' } | Select-Object -Last 1
 
-                # For Linpack
-                elseif ($isLinpack) {
-                    # Look for a line with a "fail" string in the new log entries
-                    $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
-
-                    # Found the "fail" string
-                    if ($errorResults) {
-                        # We don't need to check for a false alarm anymore, as we're already checking only new log entries
-                        $stressTestError = $errorResults.Line
-                        $errorType = 'CALCULATIONERROR'
-                    }
-                }
-
-
-
-                # Error string still not found
-                # This might have been a false alarm, wait a bit and try again
-                if (!$stressTestError) {
-                    # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
-                    for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
-                        $timestamp = Get-Date -Format HH:mm:ss
-                        Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
-
-                        # Let's use the wait time as the measure time!
-                        $measureTime = $waitTime
-                        $cpuTime1 = $checkProcess.UserProcessorTime.TotalSeconds
-                        Start-Sleep -Milliseconds $measureTime
-                        $cpuTime2 = $checkProcess.UserProcessorTime.TotalSeconds
-                        $measuredTime = [Math]::Round(($cpuTime2 - $cpuTime1) * 1000, 0)
-
-                        $expectedTime = $measureTime * $factorForExpectedUsage
-                        $minTime      = $measureTime * $factorForMinProcessorTime
-
-                        $timestamp = Get-Date -Format HH:mm:ss
-                        Write-Verbose($timestamp + ' - Checking CPU usage again (#' + $curCheck + '): ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
-
-                        # If we have recovered, break and continue with stresss testing
-                        if ($measuredTime -ge $minTime) {
-                            Write-Verbose('           The process seems to have recovered, continuing with stress testing')
-                            break
+                        # Found the "error" string
+                        if ($errorResults) {
+                            # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                            $stressTestError = $errorResults.Line
+                            $errorType = 'CALCULATIONERROR'
                         }
+                    }
 
-                        else {
-                            if ($curCheck -lt $maxChecks) {
-                                Write-Verbose('           Still not enough usage (#' + $curCheck + ')')
+
+                    # For y-cruncher with logging enabled
+                    elseif ($isYCruncherWithLogging) {
+                        # Look for a line with an "error" string in the new log entries
+                        $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
+
+                        # Found the "error" string
+                        if ($errorResults) {
+                            # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                            $stressTestError = $errorResults.Line
+                            $errorType = 'CALCULATIONERROR'
+                        }
+                    }
+
+                    # For Linpack
+                    elseif ($isLinpack) {
+                        # Look for a line with a "fail" string in the new log entries
+                        $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
+
+                        # Found the "fail" string
+                        if ($errorResults) {
+                            # We don't need to check for a false alarm anymore, as we're already checking only new log entries
+                            $stressTestError = $errorResults.Line
+                            $errorType = 'CALCULATIONERROR'
+                        }
+                    }
+
+
+
+                    # Error string still not found
+                    # This might have been a false alarm, wait a bit and try again
+                    if (!$stressTestError) {
+                        # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
+                        for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
+                            $timestamp = Get-Date -Format HH:mm:ss
+                            Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
+
+                            # Let's use the wait time as the measure time!
+                            try {
+                                $measureTime = $waitTime
+                                $cpuTime1 = $checkProcess.UserProcessorTime.TotalSeconds
+                                Start-Sleep -Milliseconds $measureTime
+                                $cpuTime2 = $checkProcess.UserProcessorTime.TotalSeconds
+                                $measuredTime = [Math]::Round(($cpuTime2 - $cpuTime1) * 1000, 0)
+
+                                $expectedTime = $measureTime * $factorForExpectedUsage
+                                $minTime      = $measureTime * $factorForMinProcessorTime
                             }
 
-                            # Reached the maximum amount of checks for the CPU usage
+                            # We assume that the process doesn't exist anymore if this fails
+                            catch {
+                                $timestamp = Get-Date -Format HH:mm:ss
+
+                                # Does the stress test process still exist?
+                                $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
+
+                                Write-Debug($timestamp + ' - Checking for stress test errors')
+
+                                if (!$checkProcess) {
+                                    $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t exist anymore.'
+                                    $errorType = 'PROCESSMISSING'
+                                }
+                                else {
+                                    throw $_
+                                }
+
+                                break
+                            }
+
+                            $timestamp = Get-Date -Format HH:mm:ss
+                            Write-Verbose($timestamp + ' - Checking CPU usage again (#' + $curCheck + '): ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
+
+                            # If we have recovered, break and continue with stresss testing
+                            if ($measuredTime -ge $minTime) {
+                                Write-Verbose('           The process seems to have recovered, continuing with stress testing')
+                                break
+                            }
+
                             else {
-                                Write-Verbose('           Still not enough usage, throw an error')
+                                if ($curCheck -lt $maxChecks) {
+                                    Write-Verbose('           Still not enough usage (#' + $curCheck + ')')
+                                }
 
-                                # We don't care about an error string here anymore
-                                $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $measuredTime + 'ms instead of the expected ' + $expectedTime + 'ms)'
-                                $errorType = 'CPULOAD'
+                                # Reached the maximum amount of checks for the CPU usage
+                                else {
+                                    Write-Verbose('           Still not enough usage, throw an error')
+
+                                    # We don't care about an error string here anymore
+                                    $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $measuredTime + 'ms instead of the expected ' + $expectedTime + 'ms)'
+                                    $errorType = 'CPULOAD'
+                                }
                             }
                         }
                     }
                 }
-            }
+            } while (0)
         }
 
 
@@ -10943,6 +11010,11 @@ try {
 
         # Special handling for Linpack
         if ($testProgram.Name -eq 'linpack') {
+            if ($isLinpack) {
+                $Script:stressTestLogFileName = 'Linpack_' + $scriptStartDateTime + '_Version_' + $settings.Linpack.version + '_' + $settings.mode + '.log'
+                $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
+            }
+
             $stressTestPrograms[$testProgram.Name]['fullPathToLoadExe'] = $testProgram.Value['absolutePath'] + $testProgram.Value['processNameForLoad']
 
             $data['%fileName%'] = ($testProgram.Value['processNameForLoad'] + '.' + $testProgram.Value['processNameExt'])
@@ -11018,12 +11090,6 @@ try {
             $linpackMode =  $(if ($settings.Linpack.version -eq '2018' -or $settings.Linpack.version -eq '2019') { $settings.Linpack.mode.ToUpperInvariant() } else { 'FASTEST' })
 
             $data.add('%MKL_DEBUG_CPU_TYPE%', '$env:MKL_DEBUG_CPU_TYPE = ' + $MKL_DEBUG_CPU_TYPES[$linpackMode][$processorType] + ';')
-
-
-            if ($isLinpack) {
-                $Script:stressTestLogFileName = 'Linpack_' + $scriptStartDateTime + '_Version_' + $settings.Linpack.version + '_' + $settings.mode + '.log'
-                $Script:stressTestLogFilePath = $logFilePathAbsolute + $stressTestLogFileName
-            }
         }
 
 
@@ -12933,7 +12999,7 @@ try {
                     'checkType'          = 'LAST_ERROR_CHECK'
                     'actualCoreNumber'   = $actualCoreNumber
                     'coreTestOrderArray' = $coreTestOrderArray
-                    'coreIndex'          = $coreIndex
+                    'coreIndex'          = [Ref] $coreIndex
                     'ExceptionObj'       = $_
                     'ErrorObj'           = $Error
                 }
