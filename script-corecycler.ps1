@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.0alpha4
+    0.10.0.0alpha5
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.0.0alpha4'
+$version = '0.10.0.0alpha5'
 
 
 # This defines the strict mode
@@ -4644,7 +4644,7 @@ function Initialize-AutomaticTestMode {
 
     # This flag indicates that the .automode file existed and the startup scheduled task was run
     # So we had a crash while the script was running
-    if ($CoreFromAutoMode -and $CoreFromAutoMode -gt -1) {
+    if (-not [String]::IsNullOrWhiteSpace($CoreFromAutoMode) -and [Int]$CoreFromAutoMode -gt -1) {
         Write-Debug('The CoreFromAutoMode variable was passed from the command line: ' + $CoreFromAutoMode)
 
         # The setting for the automatic resume must also be activated
@@ -9238,7 +9238,7 @@ function Test-AutomaticTestModeIncrease {
                 }
             }
 
-            Write-ColorText('Increasing the ' + $autoModeDescription + ' value' + $forCore + ' from ' + $oldValueStr + ' to ' + $newValueStr) Yellow
+            Write-ColorText('Modifying the ' + $autoModeDescription + ' value' + $forCore + ' from ' + $oldValueStr + ' to ' + $newValueStr) Yellow
 
             if ($newValue -eq $maxValue) {
                 Write-ColorText('This is the maximum set ' + $autoModeDescription + ' value, there will be no further increases') Yellow
@@ -11747,7 +11747,7 @@ try {
 
 
     # Add the previously tested core from before the reboot if we're in Automatic Test Mode with resume
-    if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt 0) {
+    if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt -1) {
         Write-Text('')
         Write-ColorText('Apparently the computer crashed in the last run while testing core ' + $CoreFromAutoMode) Red
         Write-ColorText('Trying to resume the test process') Red
@@ -11842,7 +11842,7 @@ try {
             $coreTestOrderArray = [System.Collections.ArrayList]::new()
 
             # If we had added a core from CoreFromAutoMode, we will need to push it to the front here again
-            if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt 0) {
+            if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt -1) {
                 [Void] $coreTestOrderArray.Add($CoreFromAutoMode)
             }
 
@@ -11875,7 +11875,7 @@ try {
             [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object { Get-Random })
 
             # If we had added a core from CoreFromAutoMode, we will need to push it to the front here again
-            if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt 0) {
+            if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt -1) {
                 [Void] $coreTestOrderArray.Insert(0, $CoreFromAutoMode)
             }
         }

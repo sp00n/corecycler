@@ -152,20 +152,22 @@ class AutoModeResumeFailedException: System.Exception {
 
 # The main functionality
 try {
-    Write-Text('')
-    Write-Text('┌────────────────────────────────────────────┐')
-    Write-Text('│    CoreCycler Auto Mode Recovery Script    │')
-    Write-Text('└────────────────────────────────────────────┘')
-    Write-Text('')
-    Write-Text('Recovering from an unexpected exit (crash/reboot)')
-    Write-Text('')
-
     $startDate = Get-Date
+    $formatDate = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $curTimeStamp = Get-Date -UFormat %s -Millisecond 0
 
     # Limit the maximum time between when the test was started and when the resume script was started
     $limitTimestamp = $curTimeStamp - $maxTimeLimit
 
+
+    Write-Text('')
+    Write-Text('┌────────────────────────────────────────────┐')
+    Write-Text('│    CoreCycler Auto Mode Recovery Script    │')
+    Write-Text('└────────────────────────────────────────────┘')
+    Write-Text('')
+    Write-Text($formatDate)
+    Write-Text('Recovering from an unexpected exit (crash/reboot)')
+    Write-Text('')
 
 
     # We need to be admin to use the Auto Test Mode
@@ -180,7 +182,7 @@ try {
     if (!(Test-Path $autoModeFile -PathType Leaf)) {
         Write-Text('The .automode file does not exist!')
         Write-Text('The file is needed to be able to continue the testing process, aborting.')
-        Write-Text('(' + $autoModeFile + ')')
+        Write-Text('(Looking for: ' + $autoModeFile + ')')
         Write-Text('')
 
         Remove-StartupTask
@@ -248,7 +250,10 @@ try {
 
 
     # Start the script now
-    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/C', ('"' + $scriptRoot + '\Run CoreCycler.bat"'), $coreTested)
+    Write-Text('Command:')
+    Write-Text('Start-Process -PassThru -FilePath ''cmd.exe'' -ArgumentList @(''/C'', (''"' + $scriptRoot + '\Run CoreCycler.bat"''), ' + $coreTested + ')')
+
+    $process = Start-Process -PassThru -FilePath 'cmd.exe' -ArgumentList @('/C', ('"' + $scriptRoot + '\Run CoreCycler.bat"'), $coreTested)
 }
 
 # Don't throw an error
