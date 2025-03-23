@@ -1903,7 +1903,7 @@ $ChangeConsoleModeDefinition = @'
             // The handle to our console
             IntPtr handle = GetStdHandle(STD_INPUT_HANDLE);
 
-            return SetConsoleMode(handle, modeToSet);   
+            return SetConsoleMode(handle, modeToSet);
         }
 
 
@@ -5732,7 +5732,7 @@ function Get-StressTestProcessInformation {
     if ($stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) {
         Write-VerboseText('The process performing the stress test is NOT the same as the main window!')
         Write-VerboseText('Searching for process "' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + '"...')
-        
+
 
         for ($i = 1; $i -le 30; $i++) {
             $timestamp = Get-Date -Format HH:mm:ss
@@ -9991,7 +9991,7 @@ function Test-EventLogService {
     # The service itself may not be available
     try {
         $eventLogService = Get-Service 'EventLog'
-        
+
         if (!($eventLogService | Get-Member Status) -or $eventLogService.Status -ne 'Running' ) {
             Write-VerboseText('The Event Log service is not available')
             $Script:eventLogAvailable = $false
