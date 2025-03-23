@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.0alpha5
+    0.10.0.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.0.0alpha5'
+$version = '0.10.0.0'
 
 
 # This defines the strict mode
@@ -74,10 +74,12 @@ $updateCheckJob                = $null
 $updateCheckResult             = @{}
 $showUpdateAvailableMessage    = $false
 $settings                      = $null
+$eventLogAvailable             = $false
 $canUseWindowsEventLog         = $false
 $storedWheaError               = $null
 $selectedStressTestProgram     = $null
 $useAutomaticRuntimePerCore    = $false
+$consoleMode                   = $null
 $windowProcess                 = $null
 $windowProcessId               = $null
 $windowProcessMainWindowHandle = $null
@@ -523,6 +525,8 @@ FFTSize = Huge
 # with the least used instruction sets for low loads, you would need to switch to "YCRUNCHER_OLD" as the stress test
 # Also note that if you use "YCRUNCHER_OLD", you will also need to adapt the "tests" setting, as the old version uses different names
 #
+# Furthermore the "12-BD2 ~ Miyu" test mode is named "11-BD1 ~ Miyu" in "YCRUNCHER_OLD"
+#
 # Default: 04-P4P
 mode = 04-P4P
 
@@ -723,7 +727,7 @@ memory = 2GB
 # Also note that enabling this setting will require the script to be run with administrator privileges
 # And lastly, enabling it will set "skipCoreOnError" to 0 and "stopOnError" to 0 as long as the limit has not been reached
 #
-# IMPORTANT: This currently does NOT work for Ryzen 9000 (Zen 5) CPUs :(
+# IMPORTANT: This currently does NOT work for Ryzen 8000 and 9000 (Zen 5) CPUs :(
 # IMPORTANT: The automatically adjusted Curve Optimizer / voltage offset values are NOT permanent, so after a regular reboot they
 #            will not be applied anymore
 #            If you want to permanently set these values, you will need to set them in the BIOS, or use a startup script to
@@ -1170,6 +1174,7 @@ $stressTestPrograms = @{
             '05-A64 ~ Kasumi'
             '08-NHM ~ Ushio'
             '11-SNB ~ Hina'
+            '12-BD2 ~ Miyu'
             '13-HSW ~ Airi'
             '14-BDW ~ Kurumi'
             '17-ZN1 ~ Yukina'
@@ -1216,6 +1221,7 @@ $stressTestPrograms = @{
             '04-P4P'
             '05-A64 ~ Kasumi'
             '08-NHM ~ Ushio'
+            '11-BD1 ~ Miyu'
             '11-SNB ~ Hina'
             '13-HSW ~ Airi'
             '14-BDW ~ Kurumi'
@@ -1224,7 +1230,6 @@ $stressTestPrograms = @{
             '20-ZN3 ~ Yuzuki'
 
             # The following settings seem to be designed for Intel CPUs and don't run on Ryzen CPUs
-            '11-BD1 ~ Miyu'
             '17-SKX ~ Kotori'
             '18-CNL ~ Shinoa'
 
@@ -1254,7 +1259,7 @@ $stressTestPrograms = @{
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
         'fullPathToLoadExe'   = $null
-        'command'             = 'cmd /C start /MIN "Linpack CoreCycler" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack CoreCycler''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; $logFilePath = ''%logFilePath%''; if (!([IO.File]::Exists($logFilePath))) { [IO.File]::WriteAllLines($logFilePath, (Get-Date -Format HH:mm:ss)) }; & \"%fullPathToLoadExe%\" ''%configFilePath%'' | Tee-Object -FilePath $logFilePath -Append"'
+        'command'             = 'cmd /C start /MIN "Linpack CoreCycler ' + $version + '" powershell.exe -Command "$Host.UI.RawUI.WindowTitle = ''Linpack CoreCycler ' + $version + '''; $PSDefaultParameterValues[''*:Encoding''] = ''utf8''; $env:OMP_NUM_THREADS = %OMP_NUM_THREADS%; %MKL_DEBUG_CPU_TYPE% $env:OMP_PLACES = ''CORES''; $env:OMP_PROC_BIND = ''SPREAD''; $env:MKL_DYNAMIC = ''FALSE''; $logFilePath = ''%logFilePath%''; if (!([IO.File]::Exists($logFilePath))) { [IO.File]::WriteAllLines($logFilePath, (Get-Date -Format HH:mm:ss)) }; & \"%fullPathToLoadExe%\" ''%configFilePath%'' | Tee-Object -FilePath $logFilePath -Append"'
         'windowBehaviour'     = 6
         'testModes'           = @(
             'SLOWEST'
@@ -1266,7 +1271,7 @@ $stressTestPrograms = @{
         'availableTests'      = @()
         'defaultTests'        = @()
         'windowNames'         = @(
-            '^Linpack CoreCycler$'
+            '^Linpack CoreCycler ' + $version + '$'
         )
     }
 }
@@ -1810,11 +1815,12 @@ $WindowFlashDefinition = @'
 '@
 
 
-# Definition to disabled the cloe button on the console window
+# Definition to disable the close button on the console window
 # Only works if run in a separate window, not within Windows Terminal
 $ConsoleWindowMenuDefinition = @'
     using System;
     using System.Runtime.InteropServices;
+
     public class ConsoleWindowMenu {
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr GetConsoleWindow();
@@ -1839,6 +1845,111 @@ $ConsoleWindowMenuDefinition = @'
 '@
 
 
+# Definition to change the console mode for terminal windows
+# Used to disable the "QuickEdit Mode" feature
+# This works only for a cmd window, but that's fine, since within Windows Terminal marking text doesn't stop the script execution
+# Sources: https://mazeez.dev/posts/quick-edit-mode
+#          https://github.com/rprichard/winpty/blob/master/misc/ConinMode.ps1
+$ChangeConsoleModeDefinition = @'
+    using System;
+    using System.Runtime.InteropServices;
+
+    public class ChangeConsoleMode {
+        public const int STD_INPUT_HANDLE = -10;             // The standard input device. Initially, this is the console input buffer, CONIN$
+
+
+        // The various mode bitmask variables
+        public const uint ENABLE_PROCESSED_INPUT = 0x0001;
+        public const uint ENABLE_LINE_INPUT      = 0x0002;
+        public const uint ENABLE_ECHO_INPUT      = 0x0004;
+        public const uint ENABLE_MOUSE_INPUT     = 0x0010;
+        public const uint ENABLE_INSERT_MODE     = 0x0020;
+        public const uint ENABLE_QUICK_EDIT_MODE = 0x0040;   // To enable this mode, use ENABLE_QUICK_EDIT_MODE | ENABLE_EXTENDED_FLAGS
+        public const uint ENABLE_EXTENDED_FLAGS  = 0x0080;   // Calling only this disables the QuickEdit Mode
+        public const uint ENABLE_AUTO_POSITION   = 0x0100;
+
+
+        // We need to get the handle for the console output, not the console window or main window handle
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr GetStdHandle(int nStdHandle);
+
+
+        // This gets the current console mode
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+
+        // This sets the new mode
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
+
+        // Get the current mode
+        public static uint GetMode()
+        {
+            // The handle to our console
+            IntPtr handle = GetStdHandle(STD_INPUT_HANDLE);
+
+            uint currentMode;
+
+            GetConsoleMode(handle, out currentMode);
+            return currentMode;
+        }
+
+
+        // Set a specific mode
+        public static bool SetMode(uint modeToSet)
+        {
+            // The handle to our console
+            IntPtr handle = GetStdHandle(STD_INPUT_HANDLE);
+
+            return SetConsoleMode(handle, modeToSet);   
+        }
+
+
+        // Disable the QuickEdit Mode
+        public static bool DisableQuickEdit()
+        {
+            // Quick Edit mode freezes the app to let users select text
+            // We don't want that. We want the app to run smoothly in the background
+            // - https://stackoverflow.com/q/4453692
+            // - https://stackoverflow.com/a/4453779
+            // - https://stackoverflow.com/a/30517482
+
+
+            // The handle to our console
+            IntPtr handle = GetStdHandle(STD_INPUT_HANDLE);
+
+
+            // Get the previous (current) console mode
+            uint previousMode;
+            GetConsoleMode(handle, out previousMode);
+
+
+            // Set the mode, but without the flag to enable the quick edit
+            return SetConsoleMode(handle, previousMode & ~ENABLE_QUICK_EDIT_MODE);
+        }
+
+
+        // Enable the QuickEdit Mode
+        public static bool EnableQuickEdit()
+        {
+            // The handle to our console
+            IntPtr handle = GetStdHandle(STD_INPUT_HANDLE);
+
+
+            // Get the previous (current) console mode
+            uint previousMode;
+            GetConsoleMode(handle, out previousMode);
+
+
+            // Set the mode with the flag to enable the quick edit
+            return SetConsoleMode(handle, previousMode | ENABLE_QUICK_EDIT_MODE);
+        }
+    }
+'@
+
+
 
 # Make the external code definitions available to PowerShell
 Add-Type -ErrorAction Stop -Name PowerUtil -Namespace Windows -MemberDefinition $PowerUtilDefinition
@@ -1846,6 +1957,7 @@ Add-Type -ErrorAction Stop -TypeDefinition $ShutdownBlockDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $GetWindowsDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $WindowFlashDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ConsoleWindowMenuDefinition
+Add-Type -ErrorAction Stop -TypeDefinition $ChangeConsoleModeDefinition
 $SendMessage = Add-Type -ErrorAction Stop -TypeDefinition $SendMessageDefinition -PassThru
 Add-Type -ErrorAction Stop -TypeDefinition $SetThreadHandlerDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $SetSuspendAndResumeWithDebugDefinition
@@ -2025,9 +2137,7 @@ function Write-ColorText {
 .OUTPUTS
     [Void]
 #>
-function Write-Verbose {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '')]
-
+function Write-VerboseText {
     param(
         [Parameter(Mandatory=$true)] $text,
         [Parameter(Mandatory=$false)] [Switch] $NoNewline,
@@ -2072,7 +2182,7 @@ function Write-Verbose {
 .OUTPUTS
     [Void]
 #>
-function Write-Debug {
+function Write-DebugText {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '')]
 
     param(
@@ -2190,7 +2300,7 @@ function Get-ByteValueFromString {
     [UInt64] $finalValue = 0
     $null = $string -Match '(?-i)((?<tb>\d+(\.\d+)*)\s*tb)*\s*((?<gb>\d+(\.\d+)*)\s*gb)*\s*((?<mb>\d+(\.\d+)*)\s*mb)*\s*((?<kb>\d+(\.\d+)*)\s*kb)*\s*((?<tib>\d+(\.\d+)*)\s*tib)*\s*((?<gib>\d+(\.\d+)*)\s*gib)*\s*((?<mib>\d+(\.\d+)*)\s*mib)*\s*((?<kib>\d+(\.\d+)*)\s*kib)*\s*((?<b>\d+(\.\d+)*)\s*b)*'
 
-    Write-Debug('Convert to bytes from string:        ' + $string)
+    Write-DebugText('Convert to bytes from string:        ' + $string)
 
     # Is it using the short notation, or is it a raw value?
     $isShortNotation = ($Matches['tb'] -or $Matches['gb'] -or $Matches['mb'] -or $Matches['kb'] -or $Matches['tib'] -or $Matches['gib'] -or $Matches['mib'] -or $Matches['kib'] -or $Matches['b'])
@@ -2202,9 +2312,9 @@ function Get-ByteValueFromString {
         [UInt64] $byteValue    = [UInt64] $Matches['b']
         [UInt64] $finalValue   = $byteValueSi + $byteValueIec + $byteValue
 
-        Write-Debug('Byte value from SI notation  (1000): ' + $byteValueSi)
-        Write-Debug('Byte value from IEC notation (1024): ' + $byteValueIec)
-        Write-Debug('Single byte value:                   ' + $byteValue)
+        Write-DebugText('Byte value from SI notation  (1000): ' + $byteValueSi)
+        Write-DebugText('Byte value from IEC notation (1024): ' + $byteValueIec)
+        Write-DebugText('Single byte value:                   ' + $byteValue)
     }
 
     # No short notation, treat it as a raw byte value
@@ -2216,7 +2326,7 @@ function Get-ByteValueFromString {
         }
     }
 
-    Write-Debug('Converted to final byte value:       ' + $finalValue)
+    Write-DebugText('Converted to final byte value:       ' + $finalValue)
 
     return $finalValue
 }
@@ -2283,16 +2393,16 @@ function Get-LinpackLeadingDimensionValue {
     # The leading dimension should be divisible by 8 or 16 (the problem size doesn't need to)
     [UInt64] $leadingDimensionSize = [Math]::Ceiling($problemSize / $divisorShouldMatch) * $divisorShouldMatch
 
-    Write-Debug('Problem size:                ' + $problemSize)
-    Write-Debug('Use AVX:                     ' + $usesAvx)
+    Write-DebugText('Problem size:                ' + $problemSize)
+    Write-DebugText('Use AVX:                     ' + $usesAvx)
 
     while ($true) {
-        Write-Debug('Checking leading dimension:  ' + $leadingDimensionSize) -NoNewline
-        Write-Debug(' ║ % ' + $divisorShouldMatch    + ' == 0: ' + ($leadingDimensionSize % $divisorShouldMatch -eq 0).ToString().PadRight(5, ' ')    + (' (' + ($leadingDimensionSize % $divisorShouldMatch)    + ')').PadLeft(5, ' ')) -NoNewline -SkipIndentation
-        Write-Debug(' ║ % ' + $divisorShouldNotMatch + ' != 0: ' + ($leadingDimensionSize % $divisorShouldNotMatch -ne 0).ToString().PadRight(5, ' ') + (' (' + ($leadingDimensionSize % $divisorShouldNotMatch) + ')').PadLeft(5, ' ')) -SkipIndentation
+        Write-DebugText('Checking leading dimension:  ' + $leadingDimensionSize) -NoNewline
+        Write-DebugText(' ║ % ' + $divisorShouldMatch    + ' == 0: ' + ($leadingDimensionSize % $divisorShouldMatch -eq 0).ToString().PadRight(5, ' ')    + (' (' + ($leadingDimensionSize % $divisorShouldMatch)    + ')').PadLeft(5, ' ')) -NoNewline -SkipIndentation
+        Write-DebugText(' ║ % ' + $divisorShouldNotMatch + ' != 0: ' + ($leadingDimensionSize % $divisorShouldNotMatch -ne 0).ToString().PadRight(5, ' ') + (' (' + ($leadingDimensionSize % $divisorShouldNotMatch) + ')').PadLeft(5, ' ')) -SkipIndentation
 
         if ($leadingDimensionSize % $divisorShouldMatch -eq 0 -and $leadingDimensionSize % $divisorShouldNotMatch -ne 0) {
-            Write-Debug('The final leading dimension: ' + $leadingDimensionSize)
+            Write-DebugText('The final leading dimension: ' + $leadingDimensionSize)
             return $leadingDimensionSize
         }
 
@@ -2747,7 +2857,7 @@ function Suspend-Process {
     $checkProcess = Get-Process -Id $process.Id -ErrorAction Ignore
 
     if (!$checkProcess) {
-        Write-Debug('The process to suspend doesn''t exist, skipping')
+        Write-DebugText('The process to suspend doesn''t exist, skipping')
         return $false
     }
 
@@ -2790,7 +2900,7 @@ function Resume-Process {
     $checkProcess = Get-Process -Id $process.Id -ErrorAction Ignore
 
     if (!$checkProcess) {
-        Write-Debug('The process to resume doesn''t exist, skipping')
+        Write-DebugText('The process to resume doesn''t exist, skipping')
         return $false
     }
 
@@ -2827,8 +2937,8 @@ function Suspend-ProcessThreads {
         return -2
     }
 
-    Write-Verbose('Suspending threads for process: ') -NoNewline
-    Write-Verbose($passedProcess.Id.ToString() + ' - ' + $passedProcess.ProcessName.ToString()) -SkipIndentation
+    Write-VerboseText('Suspending threads for process: ') -NoNewline
+    Write-VerboseText($passedProcess.Id.ToString() + ' - ' + $passedProcess.ProcessName.ToString()) -SkipIndentation
 
     $numThreads = 0
     $suspendCounts = 0
@@ -2847,7 +2957,7 @@ function Suspend-ProcessThreads {
     }
 
 
-    Write-Debug('           ID:') -NoNewline
+    Write-DebugText('           ID:') -NoNewline
 
     $process.Threads | ForEach-Object {
         $currentThreadId = $_.Id
@@ -2862,8 +2972,8 @@ function Suspend-ProcessThreads {
         $numThreads++
         $openedThreadsArray += $currentThreadId
 
-        #Write-Debug('  - Suspending thread with id: ' + $currentThreadId) -NoNewline
-        Write-Debug(' - ' + $currentThreadId) -NoNewline -SkipIndentation
+        #Write-DebugText('  - Suspending thread with id: ' + $currentThreadId) -NoNewline
+        Write-DebugText(' - ' + $currentThreadId) -NoNewline -SkipIndentation
 
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread
         # Do we also need Wow64SuspendThread?
@@ -2872,23 +2982,23 @@ function Suspend-ProcessThreads {
         $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         [Void] [ThreadHandler]::CloseHandle($currentThreadHandle)
 
-        #Write-Debug(' ... Returned suspend count was: ' + $returnedPreviousSuspendCount) -NoNewline -SkipIndentation
+        #Write-DebugText(' ... Returned suspend count was: ' + $returnedPreviousSuspendCount) -NoNewline -SkipIndentation
 
         # $returnedPreviousSuspendCount should be 0 if the thread is suspended now
         # If it > 0, then there is more than one suspended "state" on the thread. All of these need to be resumed to fully resume the thread/process
         # If it is -1, the operation has failed
         if ($returnedPreviousSuspendCount -ge 0) {
-            #Write-Debug(' ... Thread suspended') -SkipIndentation
-            Write-Debug(' ok') -NoNewline -SkipIndentation
+            #Write-DebugText(' ... Thread suspended') -SkipIndentation
+            Write-DebugText(' ok') -NoNewline -SkipIndentation
         }
 
         # We don't care about failed suspend calls at this point, just collect the errors
         if ($returnedPreviousSuspendCount -eq -1) {
-            #Write-Debug(' ... Failed to suspend the thread!') -SkipIndentation
-            Write-Debug(' failed!') -NoNewline -SkipIndentation
+            #Write-DebugText(' ... Failed to suspend the thread!') -SkipIndentation
+            Write-DebugText(' failed!') -NoNewline -SkipIndentation
 
             if ($errorCode -gt 0) {
-                #Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                #Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
                 $errorResult = Get-DotNetErrorMessage $errorCode
 
                 $errorEntry = $errorResult
@@ -2922,26 +3032,26 @@ function Suspend-ProcessThreads {
     }
 
     # End the -NoNewline
-    Write-Debug('') -SkipIndentation
+    Write-DebugText('') -SkipIndentation
 
-    # Write-Debug('Threads that were opened:     ' + ($openedThreadsArray -Join ', '))
-    # Write-Debug('Threads that were processed:  ' + ($processedThreadsArray -Join ', '))
-    # Write-Debug('Suspend counts (should be 0): ' + ($previousSuspendCountArray -Join ', '))
+    # Write-DebugText('Threads that were opened:     ' + ($openedThreadsArray -Join ', '))
+    # Write-DebugText('Threads that were processed:  ' + ($processedThreadsArray -Join ', '))
+    # Write-DebugText('Suspend counts (should be 0): ' + ($previousSuspendCountArray -Join ', '))
 
     # At least one of the threads already had a suspended state
     # if (($previousSuspendCountArray | Measure-Object -Maximum).Maximum -gt 0) {
-    #     Write-Debug('           There was a thread with a previous suspend count larger than 0, which means')
-    #     Write-Debug('           a thread of the process was already suspended (curious, but not an error)')
+    #     Write-DebugText('           There was a thread with a previous suspend count larger than 0, which means')
+    #     Write-DebugText('           a thread of the process was already suspended (curious, but not an error)')
     # }
 
     # An error happened, but don't throw
     if ($suspendErrors.Count -gt 0) {
-        Write-Verbose('    There was an error while trying to suspend a thread!')
+        Write-VerboseText('    There was an error while trying to suspend a thread!')
 
         $suspendErrors | ForEach-Object {
-            Write-Verbose('    - Thread ID:     ' + $_['threadId'])
-            Write-Verbose('    - Error Code:    ' + $_['errorCode'])
-            Write-Verbose('    - Error Message: ' + $_['errorMessage'])
+            Write-VerboseText('    - Thread ID:     ' + $_['threadId'])
+            Write-VerboseText('    - Error Code:    ' + $_['errorCode'])
+            Write-VerboseText('    - Error Message: ' + $_['errorMessage'])
         }
     }
 
@@ -2976,8 +3086,8 @@ function Resume-ProcessThreads {
         return -2
     }
 
-    Write-Verbose('Resuming threads for process: ') -NoNewline
-    Write-Verbose($passedProcess.Id.ToString() + ' - ' + $passedProcess.ProcessName.ToString()) -SkipIndentation
+    Write-VerboseText('Resuming threads for process: ') -NoNewline
+    Write-VerboseText($passedProcess.Id.ToString() + ' - ' + $passedProcess.ProcessName.ToString()) -SkipIndentation
 
     $numThreads = 0
     $resumeCounts = 0
@@ -2996,7 +3106,7 @@ function Resume-ProcessThreads {
     }
 
 
-    Write-Debug('           ID:') -NoNewline
+    Write-DebugText('           ID:') -NoNewline
 
     $process.Threads | ForEach-Object {
         $currentThreadId = $_.Id
@@ -3011,8 +3121,8 @@ function Resume-ProcessThreads {
         $numThreads++
         $openedThreadsArray += $currentThreadId
 
-        #Write-Debug('  - Resuming thread with id: ' + $currentThreadId) -NoNewline
-        Write-Debug(' - ' + $currentThreadId) -NoNewline -SkipIndentation
+        #Write-DebugText('  - Resuming thread with id: ' + $currentThreadId) -NoNewline
+        Write-DebugText(' - ' + $currentThreadId) -NoNewline -SkipIndentation
 
         # $returnedPreviousSuspendCount should be 1 if the thread is resumed now
         # If it > 1, then there is more than one suspended "state" on the thread. All of these need to be resumed to fully resume the thread/process
@@ -3026,19 +3136,19 @@ function Resume-ProcessThreads {
 
         [Void] [ThreadHandler]::CloseHandle($currentThreadHandle)
 
-        #Write-Debug(' ... Returned suspend count was: ' + $returnedPreviousSuspendCount) -NoNewline -SkipIndentation
+        #Write-DebugText(' ... Returned suspend count was: ' + $returnedPreviousSuspendCount) -NoNewline -SkipIndentation
 
         if ($returnedPreviousSuspendCount -gt -1) {
-            #Write-Debug(' ... Thread resumed') -SkipIndentation
-            Write-Debug(' ok') -NoNewline -SkipIndentation
+            #Write-DebugText(' ... Thread resumed') -SkipIndentation
+            Write-DebugText(' ok') -NoNewline -SkipIndentation
         }
 
         if (!$ignoreError -and $returnedPreviousSuspendCount -eq -1) {
-            #Write-Debug(' ... Failed to resume the thread!') -SkipIndentation
-            Write-Debug(' failed!') -NoNewline -SkipIndentation
+            #Write-DebugText(' ... Failed to resume the thread!') -SkipIndentation
+            Write-DebugText(' failed!') -NoNewline -SkipIndentation
 
             if ($errorCode -gt 0) {
-                #Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                #Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
                 $errorResult = Get-DotNetErrorMessage $errorCode
 
                 $errorEntry = $errorResult
@@ -3075,28 +3185,28 @@ function Resume-ProcessThreads {
     }
 
     # End the -NoNewline
-    Write-Debug('') -SkipIndentation
+    Write-DebugText('') -SkipIndentation
 
 
-    # Write-Debug('Threads that were opened:     ' + ($openedThreadsArray -Join ', '))
-    # Write-Debug('Threads that were processed:  ' + ($processedThreadsArray -Join ', '))
-    # Write-Debug('Suspend counts (should be 1): ' + ($previousSuspendCountArray -Join ', '))
+    # Write-DebugText('Threads that were opened:     ' + ($openedThreadsArray -Join ', '))
+    # Write-DebugText('Threads that were processed:  ' + ($processedThreadsArray -Join ', '))
+    # Write-DebugText('Suspend counts (should be 1): ' + ($previousSuspendCountArray -Join ', '))
 
 
     # At least one of the threads already had a suspended state
     # if (($previousSuspendCountArray | Measure-Object -Maximum).Maximum -gt 1) {
-    #     Write-Debug('           There was a thread with a previous suspend count larger than 1, which means')
-    #     Write-Debug('           a thread of the process was already suspended (curious, but not an error)')
+    #     Write-DebugText('           There was a thread with a previous suspend count larger than 1, which means')
+    #     Write-DebugText('           a thread of the process was already suspended (curious, but not an error)')
     # }
 
     # An error happened
     if ($resumeErrors.Count -gt 0) {
-        Write-Verbose('    There was an error while trying to resume a thread!')
+        Write-VerboseText('    There was an error while trying to resume a thread!')
 
         $resumeErrors | ForEach-Object {
-            Write-Verbose('    - Thread ID:     ' + $_['threadId'])
-            Write-Verbose('    - Error Code:    ' + $_['errorCode'])
-            Write-Verbose('    - Error Message: ' + $_['errorMessage'])
+            Write-VerboseText('    - Thread ID:     ' + $_['threadId'])
+            Write-VerboseText('    - Error Code:    ' + $_['errorCode'])
+            Write-VerboseText('    - Error Message: ' + $_['errorMessage'])
         }
 
         # Do we want to exit at this point?
@@ -3136,10 +3246,10 @@ function Suspend-ProcessWithDebugMethod {
     $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 
     if (!$result) {
-        Write-Debug('Failed to suspend process!')
+        Write-DebugText('Failed to suspend process!')
 
         if ($errorCode -gt 0) {
-            Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+            Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
             $errorResult = Get-DotNetErrorMessage $errorCode
 
             throw('Failed to suspend process.' + [Environment]::NewLine + 'Error code: ' + $errorResult.errorCode + '. Error message: ' + $errorResult.errorMessage)
@@ -3177,10 +3287,10 @@ function Resume-ProcessWithDebugMethod {
     $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 
     if (!$ignoreError -and !$result) {
-        Write-Debug('Failed to resume suspended process!')
+        Write-DebugText('Failed to resume suspended process!')
 
         if ($errorCode -gt 0) {
-            Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+            Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
             $errorResult = Get-DotNetErrorMessage $errorCode
 
             throw('Failed to resume suspended process.' + [Environment]::NewLine + 'Error code: ' + $errorResult.errorCode + '. Error message: ' + $errorResult.errorMessage)
@@ -3212,7 +3322,7 @@ function Get-CpuFrequency {
     )
 
     $timestamp1 = Get-Date -Format HH:mm:ss
-    Write-Debug($timestamp1 + ' - Starting Get-CpuFrequency')
+    Write-DebugText($timestamp1 + ' - Starting Get-CpuFrequency')
 
     # We need two snapshots to be able to calculate an average over the time passed
     # We could also use a Start-Sleep function call to increase the timespan, without one it seems to be around 10ms
@@ -3233,7 +3343,7 @@ function Get-CpuFrequency {
     # Error check, if the base values are the same, let's do another query
     for ($i = 0; $i -lt 10; $i++) {
         if ($PercentProcessorPerformanceDiff -lt 1000 -or $PercentProcessorPerformance_BaseDiff -lt 1000) {
-            Write-Debug('The difference in processor performance is too low, repeating the query (' + $i + ')')
+            Write-DebugText('The difference in processor performance is too low, repeating the query (' + $i + ')')
 
             Start-Sleep -Milliseconds 50
             $snapshot2 = Get-CimInstance -Query ('SELECT * from Win32_PerfRawData_Counters_ProcessorInformation WHERE Name LIKE "0,' + $cpuNumber + '"')
@@ -3254,11 +3364,11 @@ function Get-CpuFrequency {
         'Percent'          = [Math]::Round($PercentProcessorPerformance, 2)
     }
 
-    Write-Debug('CurrentFrequency: ' + $returnObj.CurrentFrequency)
-    Write-Debug('Percent:          ' + $returnObj.Percent)
+    Write-DebugText('CurrentFrequency: ' + $returnObj.CurrentFrequency)
+    Write-DebugText('Percent:          ' + $returnObj.Percent)
 
     $timestamp2 = Get-Date -Format HH:mm:ss
-    Write-Debug($timestamp2 + ' - Ended Get-CpuFrequency')
+    Write-DebugText($timestamp2 + ' - Ended Get-CpuFrequency')
 
     return $returnObj
 }
@@ -3331,7 +3441,7 @@ function Start-UpdateCheckBackgroundJob {
         [Parameter(Mandatory=$false)] $updateSettings
     )
 
-    Write-Debug('Starting the update check background job')
+    Write-DebugText('Starting the update check background job')
 
     if (!$updateSettings) {
         $updateSettings = $settings.Update
@@ -3341,8 +3451,8 @@ function Start-UpdateCheckBackgroundJob {
         $startTime = Get-Date
         $messages = [System.Collections.ArrayList] @()
 
-        # Wrap Write-Debug to add to $messages instead, since we're in a job
-        function Write-Debug {
+        # Wrap Write-DebugText to add to $messages instead, since we're in a job
+        function Write-DebugText {
             [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '')]
 
             param(
@@ -3353,8 +3463,8 @@ function Start-UpdateCheckBackgroundJob {
         }
 
 
-        Write-Debug('Checking for updates...')
-        Write-Debug('Started: ' + $startTime.ToString('HH:mm:ss'))
+        Write-DebugText('Checking for updates...')
+        Write-DebugText('Started: ' + $startTime.ToString('HH:mm:ss'))
 
         $updateCheckUrl        = $args[0]
         $updateCheckFile       = $args[1]
@@ -3395,7 +3505,7 @@ function Start-UpdateCheckBackgroundJob {
         # Get the current version int value
         $null = $currentVersionString -Match '(?-i)(?<major>\d+)\.(?<minor>\d+)\.(?<revision>\d+)\.(?<build>\d+)(?<string>[aA-zZ0-9_\.\-]*)'
 
-        Write-Debug('The current version string:   ' + $currentVersionString)
+        Write-DebugText('The current version string:   ' + $currentVersionString)
 
         $currentVersion['major']    = $(if ($Matches['major'])    { $Matches['major'] }    else { 0 })
         $currentVersion['minor']    = $(if ($Matches['minor'])    { $Matches['minor'] }    else { 0 })
@@ -3407,16 +3517,16 @@ function Start-UpdateCheckBackgroundJob {
         # E.g. 0.9.5.3alpha1 would become 9005002, which makes it equal to 0.9.5.2
         # This is to prevent that 0.9.5.3alpha1 would not register an available update for the final 0.9.5.3 (without string)
         [UInt64] $currentVersionInt = [UInt64] $currentVersion['major'] * 1000000000000 + [UInt64] $currentVersion['minor'] * 1000000000 + [UInt64] $currentVersion['revision'] * 1000000 + [UInt64] $currentVersion['build'] * 1000 + $currentVersion['string']
-        Write-Debug('Int value of current version: ' + $currentVersionInt)
+        Write-DebugText('Int value of current version: ' + $currentVersionInt)
 
 
         # Check the stored .updatecheck file
         if (!(Test-Path $updateCheckFile -PathType Leaf)) {
-            Write-Debug('The .updatecheck file doesn''t exist, initiate online check')
+            Write-DebugText('The .updatecheck file doesn''t exist, initiate online check')
             $doOnlineCheck = $true
         }
         else {
-            Write-Debug('Reading the .updatecheck file:')
+            Write-DebugText('Reading the .updatecheck file:')
 
             $reader = [System.IO.File]::OpenText($updateCheckFile)
             $updateCheckContentString = $reader.ReadToEnd()
@@ -3425,7 +3535,7 @@ function Start-UpdateCheckBackgroundJob {
             $updateCheckContent = @($updateCheckContentString -Split '\r?\n')
 
             foreach ($line in $updateCheckContent) {
-                Write-Debug($line)
+                Write-DebugText($line)
             }
 
             # 0 should be the timestamp
@@ -3449,29 +3559,29 @@ function Start-UpdateCheckBackgroundJob {
                     }
 
 
-                    Write-Debug('Last checked timestamp:   ' + $lastCheckedTime)
-                    Write-Debug('Last checked version int: ' + $lastCheckedVersionInt)
-                    Write-Debug('Last checked version str: ' + $lastCheckedVersionStr)
-                    Write-Debug('Last checked URL:         ' + $lastCheckedUrl)
+                    Write-DebugText('Last checked timestamp:   ' + $lastCheckedTime)
+                    Write-DebugText('Last checked version int: ' + $lastCheckedVersionInt)
+                    Write-DebugText('Last checked version str: ' + $lastCheckedVersionStr)
+                    Write-DebugText('Last checked URL:         ' + $lastCheckedUrl)
 
                     [UInt64] $curTimeStamp = Get-Date -UFormat %s -Millisecond 0
                     [UInt64] $sinceLastCheck = $curTimeStamp - $lastCheckedTime
                     [UInt64] $maxSeconds = $updateSettings.updateCheckFrequency * 60 * 60
 
-                    Write-Debug('Current timestamp:        ' + $curTimeStamp)
-                    Write-Debug('Time since last check:    ' + $sinceLastCheck + 's (' + [Math]::Round($sinceLastCheck/60/60, 3)  + 'h)')
-                    Write-Debug('Check interval:           ' + $maxSeconds + 's (' + [Math]::Round($maxSeconds/60/60, 3)  + 'h)')
+                    Write-DebugText('Current timestamp:        ' + $curTimeStamp)
+                    Write-DebugText('Time since last check:    ' + $sinceLastCheck + 's (' + [Math]::Round($sinceLastCheck/60/60, 3)  + 'h)')
+                    Write-DebugText('Check interval:           ' + $maxSeconds + 's (' + [Math]::Round($maxSeconds/60/60, 3)  + 'h)')
 
                     if ($sinceLastCheck -gt $maxSeconds) {
-                        Write-Debug('The check interval time has been exceeded, initiate a new online check')
+                        Write-DebugText('The check interval time has been exceeded, initiate a new online check')
                         $doOnlineCheck = $true
                     }
                     else {
-                        Write-Debug('The check interval time has not yet been exceeded, do not initiate a new online check')
+                        Write-DebugText('The check interval time has not yet been exceeded, do not initiate a new online check')
                     }
                 }
                 catch {
-                    Write-Debug($_)
+                    Write-DebugText($_)
                 }
             }
         }
@@ -3480,13 +3590,13 @@ function Start-UpdateCheckBackgroundJob {
         # Don't do the online check
         # Because the interval time hasn't passed yet
         if (!$doOnlineCheck) {
-            Write-Debug('Not performing an online check')
+            Write-DebugText('Not performing an online check')
 
             # But check if the stored information points to a newer version
             if ($lastCheckedVersionInt -gt $currentVersionInt) {
-                Write-Debug('The stored information points to a newer version')
-                Write-Debug('This version: ' + $currentVersionInt)
-                Write-Debug('New version:  ' + $lastCheckedVersionInt)
+                Write-DebugText('The stored information points to a newer version')
+                Write-DebugText('This version: ' + $currentVersionInt)
+                Write-DebugText('New version:  ' + $lastCheckedVersionInt)
 
                 $returnObj['isNew']    = $true
                 $returnObj['version']  = $lastCheckedVersionStr
@@ -3496,9 +3606,9 @@ function Start-UpdateCheckBackgroundJob {
             $endTime = Get-Date
             $runTime = $endTime - $startTime
 
-            Write-Debug('Background Job Started:             ' + $startTime.ToString('HH:mm:ss'))
-            Write-Debug('Background Job Ended:               ' + $endTime.ToString('HH:mm:ss'))
-            Write-Debug('Background Job Runtime:             ' + $runTime.TotalSeconds)
+            Write-DebugText('Background Job Started:             ' + $startTime.ToString('HH:mm:ss'))
+            Write-DebugText('Background Job Ended:               ' + $endTime.ToString('HH:mm:ss'))
+            Write-DebugText('Background Job Runtime:             ' + $runTime.TotalSeconds)
 
             $returnObj['messages'] = $messages
 
@@ -3543,18 +3653,18 @@ function Start-UpdateCheckBackgroundJob {
         $global:ProgressPreference = $originalProgressPreference
         [System.Net.ServicePointManager]::MaxServicePointIdleTime = $oriIdleTime
 
-        Write-Debug('Web request status code: ' + $statusCode)
+        Write-DebugText('Web request status code: ' + $statusCode)
 
 
         # Couldn't get the releases
         if (!$content) {
-            Write-Debug('No content found for the request!')
+            Write-DebugText('No content found for the request!')
 
             # But maybe the stored file already contains a newer version info
             if ($lastCheckedVersionInt -gt $currentVersionInt) {
-                Write-Debug('But the already stored information points to a newer version')
-                Write-Debug('This version: ' + $currentVersionInt)
-                Write-Debug('New version:  ' + $lastCheckedVersionInt)
+                Write-DebugText('But the already stored information points to a newer version')
+                Write-DebugText('This version: ' + $currentVersionInt)
+                Write-DebugText('New version:  ' + $lastCheckedVersionInt)
 
                 $returnObj['isNew']    = $true
                 $returnObj['version']  = $lastCheckedVersionStr
@@ -3564,9 +3674,9 @@ function Start-UpdateCheckBackgroundJob {
             $endTime = Get-Date
             $runTime = $endTime - $startTime
 
-            Write-Debug('Background Job Started:             ' + $startTime.ToString('HH:mm:ss'))
-            Write-Debug('Background Job Ended:               ' + $endTime.ToString('HH:mm:ss'))
-            Write-Debug('Background Job Runtime:             ' + $runTime.TotalSeconds)
+            Write-DebugText('Background Job Started:             ' + $startTime.ToString('HH:mm:ss'))
+            Write-DebugText('Background Job Ended:               ' + $endTime.ToString('HH:mm:ss'))
+            Write-DebugText('Background Job Runtime:             ' + $runTime.TotalSeconds)
 
             $returnObj['messages'] = $messages
 
@@ -3579,9 +3689,9 @@ function Start-UpdateCheckBackgroundJob {
         $lastReleaseEntry = @()
 
         foreach ($release in $releases) {
-            # Write-Debug('$release[draft]: ' + $release.draft)
-            # Write-Debug('$release[prerelease]: ' + $release.prerelease)
-            # Write-Debug('Both False: ' + ($release.draft -ne $true -and $release.prerelease -ne $true))
+            # Write-DebugText('$release[draft]: ' + $release.draft)
+            # Write-DebugText('$release[prerelease]: ' + $release.prerelease)
+            # Write-DebugText('Both False: ' + ($release.draft -ne $true -and $release.prerelease -ne $true))
 
             if (!$release -or !($release | Get-Member tag_name)) {
                 continue
@@ -3599,14 +3709,14 @@ function Start-UpdateCheckBackgroundJob {
                 continue
             }
 
-            Write-Debug('Found our first real release!')
+            Write-DebugText('Found our first real release!')
 
             $lastReleaseEntry = $release
             break
         }
 
 
-        Write-Debug('Tag name of last release:  ' + $lastReleaseEntry.tag_name)
+        Write-DebugText('Tag name of last release:  ' + $lastReleaseEntry.tag_name)
 
         $lastReleaseString = $lastReleaseEntry.tag_name
 
@@ -3619,29 +3729,29 @@ function Start-UpdateCheckBackgroundJob {
 
         [UInt64] $lastReleaseInt = [UInt64] $lastRelease['major'] * 1000000000000 + [UInt64] $lastRelease['minor'] * 1000000000 + [UInt64] $lastRelease['revision'] * 1000000 + [UInt64] $lastRelease['build'] * 1000
 
-        Write-Debug('Int value of last release: ' + $lastReleaseInt)
+        Write-DebugText('Int value of last release: ' + $lastReleaseInt)
 
         if ($lastReleaseInt -gt $currentVersionInt) {
-            Write-Debug('New Version found! ' + $lastReleaseString + ' - ' + $lastReleaseInt)
+            Write-DebugText('New Version found! ' + $lastReleaseString + ' - ' + $lastReleaseInt)
 
             $returnObj['isNew'] = $true
             $returnObj['url'] = $lastReleaseEntry.html_url
             $returnObj['version'] = $lastReleaseString
         }
         else {
-            Write-Debug('No new version found')
+            Write-DebugText('No new version found')
         }
 
-        Write-Debug('Writing the .updatecheck file')
+        Write-DebugText('Writing the .updatecheck file')
 
         [System.IO.File]::WriteAllLines($updateCheckFile, [string]::Join([Environment]::NewLine, (Get-Date -UFormat %s -Millisecond 0), $lastReleaseInt, $lastReleaseString, $lastReleaseEntry.html_url))
 
         $endTime = Get-Date
         $runTime = $endTime - $startTime
 
-        Write-Debug('Background Job Started:             ' + $startTime.ToString('HH:mm:ss'))
-        Write-Debug('Background Job Ended:               ' + $endTime.ToString('HH:mm:ss'))
-        Write-Debug('Background Job Runtime:             ' + $runTime.TotalSeconds)
+        Write-DebugText('Background Job Started:             ' + $startTime.ToString('HH:mm:ss'))
+        Write-DebugText('Background Job Ended:               ' + $endTime.ToString('HH:mm:ss'))
+        Write-DebugText('Background Job Runtime:             ' + $runTime.TotalSeconds)
 
         $returnObj['messages'] = $messages
         return $returnObj
@@ -3663,7 +3773,7 @@ function Start-UpdateCheckBackgroundJob {
                 [Decimal] 'frequency' The check frequency, if available
 #>
 function Get-InitialUpdateCheckSetting {
-    Write-Debug('Trying to get the initial update check settings')
+    Write-DebugText('Trying to get the initial update check settings')
 
     $returnObj = @{
         'enabled'   = $enableUpdateCheck
@@ -3692,13 +3802,13 @@ function Get-InitialUpdateCheckSetting {
 
         if ($foundCustomConfigFile -and $Matches[1]) {
             $configPathTemp = $PSScriptRoot + '\' + $Matches[1].Trim(' ', '"', '''', [Char]0x09)
-            Write-Debug('Custom config file: ' + $configPathTemp)
+            Write-DebugText('Custom config file: ' + $configPathTemp)
 
             if (Test-Path $configPathTemp -PathType Leaf) {
                 $configPath = $configPathTemp
             }
             else {
-                Write-Debug($configPathTemp + ' not found, using the values from the config.ini')
+                Write-DebugText($configPathTemp + ' not found, using the values from the config.ini')
             }
         }
     }
@@ -3730,8 +3840,8 @@ function Get-InitialUpdateCheckSetting {
         }
     }
 
-    Write-Debug('Initial Update Check Enabled:   ' + $returnObj['enabled'])
-    Write-Debug('Initial Update Check Frequency: ' + $returnObj['frequency'])
+    Write-DebugText('Initial Update Check Enabled:   ' + $returnObj['enabled'])
+    Write-DebugText('Initial Update Check Frequency: ' + $returnObj['frequency'])
 
     return $returnObj
 }
@@ -3745,7 +3855,7 @@ function Get-InitialUpdateCheckSetting {
     [HashTable] The parsed content from the .automode file
 #>
 function Get-AutoModeFileContent {
-    Write-Debug('Parsing the .automode file')
+    Write-DebugText('Parsing the .automode file')
 
     if (!(Test-Path $autoModeFile -PathType Leaf)) {
         throw 'Could not find the .automode file!'
@@ -3790,7 +3900,7 @@ function Set-AutoModeFile {
         [Parameter(Mandatory=$true)] [Int] $coreNumber
     )
 
-    Write-Debug('Creating the .automode file')
+    Write-DebugText('Creating the .automode file')
 
     [UInt64] $curTimeStamp = Get-Date -UFormat %s -Millisecond 0
 
@@ -3820,7 +3930,7 @@ function Set-AutoModeFile {
     [Void]
 #>
 function Remove-AutoModeFile {
-    Write-Debug('Removing the .automode file')
+    Write-DebugText('Removing the .automode file')
 
     if (Test-Path $autoModeFile -PathType Leaf) {
         Remove-Item -Path $autoModeFile
@@ -3837,10 +3947,10 @@ function Remove-AutoModeFile {
     [Void]
 #>
 function Add-AutoModeScheduledTask {
-    Write-Debug('Trying to add the Auto Mode startup task "' + $autoModeTaskPath + '\' + $autoModeTaskName + '"')
+    Write-DebugText('Trying to add the Auto Mode startup task "' + $autoModeTaskPath + '\' + $autoModeTaskName + '"')
 
     if (!$areWeAdmin) {
-        Write-Debug('We are not admin, aborting')
+        Write-DebugText('We are not admin, aborting')
 
         Write-ColorText('FATAL ERROR: Could not add the scheduled startup task for the Automatic Mode, aborting!') Red
         Exit-WithFatalError
@@ -3867,7 +3977,7 @@ function Add-AutoModeScheduledTask {
 
         $null = Register-ScheduledTask -Force -TaskName $autoModeTaskName -TaskPath $autoModeTaskPath -InputObject $task
 
-        Write-Debug('Added the Automatic Test Mode startup task')
+        Write-DebugText('Added the Automatic Test Mode startup task')
     }
     catch {
         Write-ColorText('FATAL ERROR: Could not add the scheduled startup task for the Automatic Mode, aborting!') Red
@@ -3886,7 +3996,7 @@ function Add-AutoModeScheduledTask {
     [Void]
 #>
 function Remove-AutoModeScheduledTask {
-    Write-Debug('Removing the startup task "' + $autoModeTaskPath + '\' + $autoModeTaskName + '"')
+    Write-DebugText('Removing the startup task "' + $autoModeTaskPath + '\' + $autoModeTaskName + '"')
 
     # Do not throw an error if it doesn't exist or we aren't addmin
     Unregister-ScheduledTask -TaskName $autoModeTaskName -TaskPath $autoModeTaskPath -Confirm:$false -ErrorAction Ignore
@@ -4190,7 +4300,7 @@ function Import-Settings {
     [Void]
 #>
 function Get-Settings {
-    Write-Debug('Getting the settings')
+    Write-DebugText('Getting the settings')
 
     $logFilePrefix = 'CoreCycler'
 
@@ -4228,6 +4338,7 @@ function Get-Settings {
 
     # Couldn't get the a valid content from the config.ini, create the file with the default values
     catch {
+        Write-DebugText('Error when reading the user settings')
         Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
 
         if (!(Test-Path $configDefaultPath -PathType Leaf)) {
@@ -4278,6 +4389,7 @@ function Get-Settings {
 
     # Couldn't get the a valid content from the config.ini, replace it with the default
     catch {
+        Write-DebugText('Couldn''t get valid settings from config.ini')
         Write-ColorText('WARNING: config.ini corrupted, replacing with default values!') Yellow
         Write-ColorText($_) Yellow
 
@@ -4312,8 +4424,8 @@ function Get-Settings {
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
             }
             else {
-                # Write-Verbose('Setting is empty!')
-                # Write-Verbose('[' + $sectionEntry.Name + '][' + $userSetting.Name + ']: ' + $userSetting.Value)
+                # Write-VerboseText('Setting is empty!')
+                # Write-VerboseText('[' + $sectionEntry.Name + '][' + $userSetting.Name + ']: ' + $userSetting.Value)
             }
         }
     }
@@ -4362,7 +4474,27 @@ function Get-Settings {
     # The selected mode for y-cruncher = the binary to execute
     # Override the variables
     if ($isYCruncher -or $isYCruncherOld) {
-        $yCruncherBinary = $stressTestPrograms[$settings.General.stressTestProgram]['testModes'] | Where-Object -FilterScript { $_.ToLowerInvariant() -eq $settings.yCruncher.mode.ToLowerInvariant() }
+        # Allow shortcuts for y-cruncher
+        if (!($Script:stressTestPrograms[$settings.General.stressTestProgram]['testModes'] -contains $settings.mode)) {
+            Write-VerboseText('The settings mode from the config.ini was not found: ' + $settings.mode)
+
+            $testModes = $Script:stressTestPrograms[$settings.General.stressTestProgram]['testModes']
+
+            if ($settings.mode.Length -ge 2) {
+                $possibleMatchedMode = $testModes -Like $settings.mode + '*'
+
+                # Override the mode
+                # y-cruncher cannot have more than one entry, so we can also override the modeString here
+                if ($possibleMatchedMode) {
+                    Write-VerboseText('But have found the long form: ' + $possibleMatchedMode)
+
+                    $settings.mode = $possibleMatchedMode.ToUpperInvariant()
+                }
+            }
+        }
+
+
+        $yCruncherBinary = $stressTestPrograms[$settings.General.stressTestProgram]['testModes'] | Where-Object -FilterScript { $_.ToLowerInvariant() -eq $settings.mode.ToLowerInvariant() }
         $Script:stressTestPrograms[$settings.General.stressTestProgram]['processName']        = $yCruncherBinary
         $Script:stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] = $yCruncherBinary
         $Script:stressTestPrograms[$settings.General.stressTestProgram]['fullPathToExe']      = $stressTestPrograms[$settings.General.stressTestProgram]['absolutePath'] + $yCruncherBinary
@@ -4450,14 +4582,14 @@ function Get-Settings {
 
     # If we're resuming the script, we want to re-use the same CoreCycler log file
     if ($settings['AutomaticTestMode']['enableAutomaticAdjustment'] -gt 0 -and $settings['AutomaticTestMode']['enableResumeAfterUnexpectedExit'] -gt 0 -and $CoreFromAutoMode -gt -1) {
-        Write-Debug('Automatic Test Mode with resume seems to be active, checking')
+        Write-DebugText('Automatic Test Mode with resume seems to be active, checking')
 
         try {
             $autoModeInfo = Get-AutoModeFileContent
 
-            Write-Debug('Setting the main log file to the one from the previous run:')
-            Write-Debug('logFileCoreCycler: ' + $autoModeInfo['logFileCoreCycler'])
-            #Write-Debug('logFileStressTest: ' + $autoModeInfo['logFileStressTest'])
+            Write-DebugText('Setting the main log file to the one from the previous run:')
+            Write-DebugText('logFileCoreCycler: ' + $autoModeInfo['logFileCoreCycler'])
+            #Write-DebugText('logFileStressTest: ' + $autoModeInfo['logFileStressTest'])
 
             $Script:logFileName     = Split-Path -Path $autoModeInfo['logFileCoreCycler'] -Leaf
             $Script:logFileFullPath = $autoModeInfo['logFileCoreCycler']
@@ -4465,8 +4597,8 @@ function Get-Settings {
         }
         catch {
             # Some error with the .automode file, ignore at this point
-            Write-Debug('Could not re-use the previous log file:')
-            Write-Debug($_)
+            Write-DebugText('Could not re-use the previous log file:')
+            Write-DebugText($_)
         }
     }
 
@@ -4516,7 +4648,7 @@ function Get-Settings {
     }
 
 
-    Write-Debug('Settings parsed')
+    Write-DebugText('Settings parsed')
 }
 
 
@@ -4561,17 +4693,16 @@ function Initialize-AutomaticTestMode {
         return
     }
 
-    Write-Debug('Initializing Automatic Test Mode')
+    Write-DebugText('Initializing Automatic Test Mode')
 
-    # This currently does not work on Ryzen 9000 :(
-    # Maybe also Ryzen 8000?
-    if ( $processor.Name -match '.*AMD.*' -and $processor.Name -match '9\d{3}' ) {
+    # This currently does not work on Ryzen 8000 and 9000 :(
+    if ($processor.Name -match '.*AMD.*' -and ($processor.Name -match '8\d{3}' -or $processor.Name -match '9\d{3}')) {
         Write-Text('')
         Write-Text('')
         Write-ColorText('┌───────────────────────────────────┤ ERROR ├──────────────────────────────────┐') Yellow DarkRed
         Write-ColorText('│ ' + 'You have selected to use the Automatic Test Mode.'.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('│ ' + 'Unfortunately this does not (yet) work with Ryzen 9000 processors, so please'.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('│ ' + 'disable the Automatic Test Mode in the config.ini file.'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'Unfortunately this does not (yet) work with Ryzen 8000 & 9000 processors,'.PadRight(76, ' ') + ' │') Yellow DarkRed
+        Write-ColorText('│ ' + 'so please disable the Automatic Test Mode in the config.ini file.'.PadRight(76, ' ') + ' │') Yellow DarkRed
         Write-ColorText('│ ' + ''.PadRight(76, ' ') + ' │') Yellow DarkRed
         Write-ColorText('│ ' + 'The detected processor:'.PadRight(76, ' ') + ' │') Yellow DarkRed
         Write-ColorText('│ ' + $processor.Name.PadRight(76, ' ') + ' │') Yellow DarkRed
@@ -4585,7 +4716,7 @@ function Initialize-AutomaticTestMode {
     }
 
     # The Automatic Test Mode has been enabled, we require administrator privileges!
-    Write-Debug('Are we admin: ' + $areWeAdmin)
+    Write-DebugText('Are we admin: ' + $areWeAdmin)
 
 
     if (!$areWeAdmin) {
@@ -4604,7 +4735,7 @@ function Initialize-AutomaticTestMode {
         $title    = 'Open CoreCycler with administrator privileges?'
         $question = ' '
         $choices  = @(
-            [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', 'Ooen the script with admin rights')
+            [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', 'Open the script with admin rights')
             [System.Management.Automation.Host.ChoiceDescription]::new('&No', 'Abort')
         )
         $decision = $Host.UI.PromptForChoice($title, $question, $choices, 0)
@@ -4631,7 +4762,7 @@ function Initialize-AutomaticTestMode {
         }
     }
     else {
-        Write-Debug('We have admin rights, proceeding')
+        Write-DebugText('We have admin rights, proceeding')
     }
 
 
@@ -4645,17 +4776,17 @@ function Initialize-AutomaticTestMode {
     # This flag indicates that the .automode file existed and the startup scheduled task was run
     # So we had a crash while the script was running
     if (-not [String]::IsNullOrWhiteSpace($CoreFromAutoMode) -and [Int]$CoreFromAutoMode -gt -1) {
-        Write-Debug('The CoreFromAutoMode variable was passed from the command line: ' + $CoreFromAutoMode)
+        Write-DebugText('The CoreFromAutoMode variable was passed from the command line: ' + $CoreFromAutoMode)
 
         # The setting for the automatic resume must also be activated
         if ($settings.AutomaticTestMode.enableResumeAfterUnexpectedExit -lt 1) {
-            Write-Debug('However the automatic resume test process setting is not active (anymore?)')
+            Write-DebugText('However the automatic resume test process setting is not active (anymore?)')
         }
 
         # We are in Automatic Test Mode with automatic resume after unexpected exit
         # So we're going to use the voltage values from the .automode file
         else {
-            Write-Debug('We''ll try to resume the test process with the voltage values from the .automode file')
+            Write-DebugText('We''ll try to resume the test process with the voltage values from the .automode file')
 
             $Script:CoreFromAutoMode = [Int] $CoreFromAutoMode
 
@@ -4666,9 +4797,9 @@ function Initialize-AutomaticTestMode {
             # The value(s) from the .automode file
             $voltageStartValuesString = $autoModeInfo['voltageInfo'].Trim()
 
-            Write-Debug('The Automatic Test Mode starting values from the .automode file:')
-            Write-Debug('We will increase this value because of the crash')
-            Write-Debug($voltageStartValuesString)
+            Write-DebugText('The Automatic Test Mode starting values from the .automode file:')
+            Write-DebugText('We will increase this value because of the crash')
+            Write-DebugText($voltageStartValuesString)
         }
     }
 
@@ -4678,8 +4809,8 @@ function Initialize-AutomaticTestMode {
     if (!$voltageStartValuesString) {
         $voltageStartValuesString = $settings['AutomaticTestMode']['startValues']
 
-        Write-Debug('The Automatic Test Mode starting values from the settings:')
-        Write-Debug($voltageStartValuesString)
+        Write-DebugText('The Automatic Test Mode starting values from the settings:')
+        Write-DebugText($voltageStartValuesString)
     }
 
 
@@ -4745,21 +4876,21 @@ function Initialize-AutomaticTestMode {
 
 
     if ($useAutomaticTestModeWithResume) {
-        Write-Verbose('Automatic Test Mode with resuming after unexpected exit enabled')
+        Write-VerboseText('Automatic Test Mode with resuming after unexpected exit enabled')
 
         # Add the Scheduled Task that will restart the script after an unexpected exit and on the following reboot (resp. login)
         Add-AutoModeScheduledTask
     }
     else {
-        Write-Verbose('Automatic Test Mode enabled')
+        Write-VerboseText('Automatic Test Mode enabled')
 
         # But not the automatic resume, so remove the scheduled task and file
         Remove-AutoModeScheduledTask
         Remove-AutoModeFile
     }
 
-    Write-Verbose('The starting value(s):')
-    Write-Verbose($voltageStartValuesArray)
+    Write-VerboseText('The starting value(s):')
+    Write-VerboseText($voltageStartValuesArray)
 }
 
 
@@ -4774,7 +4905,7 @@ function Initialize-AutomaticTestMode {
 #>
 function Get-CurveOptimizerValues {
     try {
-        Write-Debug('Trying to query for the Curve Optimizer values')
+        Write-DebugText('Trying to query for the Curve Optimizer values')
 
         $getCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $getCoValuesProcessInfo.FileName = $pboCliTool
@@ -4822,8 +4953,8 @@ function Get-CurveOptimizerValues {
         # Try to parse the the CO values
         $coArray = @(($stdOut -Split '\s+') | Where-Object { $_ -Match '\-?\d+' } | ForEach-Object { [Int] $_ } )
 
-        Write-Debug('The queried and parsed Curve Optimizer values:')
-        Write-Debug($coArray)
+        Write-DebugText('The queried and parsed Curve Optimizer values:')
+        Write-DebugText($coArray)
 
         if ($coArray.Count -ne $numPhysCores) {
             throw('Found ' + $coArray.Count + ' entries instead of the expected ' + $numPhysCores + ':' + [Environment]::NewLine + $coArray)
@@ -4853,12 +4984,12 @@ function Get-CurveOptimizerValues {
 #>
 function Set-CurveOptimizerValues {
     try {
-        Write-Debug('Trying to set the Curve Optimizer values:')
+        Write-DebugText('Trying to set the Curve Optimizer values:')
 
         $coString = $voltageCurrentValues -Join ' '
         $argumentString = 'set ' + $coString
 
-        Write-Verbose($coString)
+        Write-VerboseText($coString)
 
         $setCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $setCoValuesProcessInfo.FileName = $pboCliTool
@@ -4910,8 +5041,8 @@ function Set-CurveOptimizerValues {
             throw('Returned value was empty')
         }
 
-        Write-Debug('Curve Optimizer values successfuly set to:')
-        Write-Debug($stdOut)
+        Write-DebugText('Curve Optimizer values successfuly set to:')
+        Write-DebugText($stdOut)
     }
     catch {
         throw('Could not set the Curve Optimizer values!' + [Environment]::NewLine + $_)
@@ -4930,7 +5061,7 @@ function Set-CurveOptimizerValues {
 #>
 function Get-IntelVoltageOffset {
     try {
-        Write-Debug('Trying to query for the Intel voltage offset values')
+        Write-DebugText('Trying to query for the Intel voltage offset values')
 
         $getIntelOffsetValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $getIntelOffsetValuesProcessInfo.FileName = $intelCliTool
@@ -4979,8 +5110,8 @@ function Get-IntelVoltageOffset {
         # We're only interested in the "Plane 0", which is the CPU core voltage
         $coreVoltage = ($stdOut -Split '\r?\n') | Where-Object { $_ -Match 'Plane 0: (\-?\d+\.?\d*)' } | ForEach-Object { [Int][Math]::Round($Matches[1]) }
 
-        Write-Debug('The queried and parsed Intel voltage offset value:')
-        Write-Debug($coreVoltage)
+        Write-DebugText('The queried and parsed Intel voltage offset value:')
+        Write-DebugText($coreVoltage)
 
         # Create an array for each core, maybe in the future we can set the voltage offset individually
         return @($coreVoltage) * $numPhysCores
@@ -5002,14 +5133,14 @@ function Get-IntelVoltageOffset {
 #>
 function Set-IntelVoltageOffset {
     try {
-        Write-Debug('Trying to set the Intel voltage offset value:')
+        Write-DebugText('Trying to set the Intel voltage offset value:')
 
         # 0 = Core voltage offset
         # 2 = CPU Cache voltage offset
         # Both values need to be set and need to be the same value
         $argumentString = 'set --allow-overvolt --commit 0 ' + $voltageCurrentValues[0] + ' 2 ' + $voltageCurrentValues[0]
 
-        Write-Verbose($argumentString)
+        Write-VerboseText($argumentString)
 
         $setIntelOffsetValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $setIntelOffsetValuesProcessInfo.FileName = $intelCliTool
@@ -5061,8 +5192,8 @@ function Set-IntelVoltageOffset {
             throw('Returned value was empty')
         }
 
-        Write-Debug('Intel voltage offset values successfuly set:')
-        Write-Debug('"' + $stdOut + '"')
+        Write-DebugText('Intel voltage offset values successfuly set:')
+        Write-DebugText('"' + $stdOut + '"')
     }
     catch {
         throw('Could not set the Intel voltage offset values!' + [Environment]::NewLine + $_)
@@ -5254,19 +5385,19 @@ function Get-TortureWeakValue {
     [Void]
 #>
 function Send-CommandToAida64 {
-    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseConsistentWhitespace', '')]  # The $SendMessage::PostMessage calls fire a "Use space after a comma" error if using MORE than one space...
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseConsistentWhitespace', '')]  # The $SendMessage::PostMessage lines cause a "Use space after a comma" error if using MORE than one space...
     param(
         [Parameter(Mandatory=$true)] [String] $command
     )
 
     # No windowProcessMainWindowHandle? No good!
     if (!$windowProcessMainWindowHandle -or [String]::IsNullOrWhiteSpace($windowProcessMainWindowHandle)) {
-        Write-Verbose('Could not get the windowProcessMainWindowHandle!')
+        Write-VerboseText('Could not get the windowProcessMainWindowHandle!')
         return
     }
 
     $timestamp = Get-Date -Format HH:mm:ss
-    Write-Verbose($timestamp + ' - Trying to send the "' + $command + '" command to Aida64')
+    Write-VerboseText($timestamp + ' - Trying to send the "' + $command + '" command to Aida64')
 
     if ($command.ToLowerInvariant() -eq 'start') {
         $KEY = $SendMessage::KEY_S
@@ -5337,9 +5468,9 @@ function Get-StressTestProcessInformation {
     $Script:stressTestThreadIds           = $null
 
 
-    Write-Verbose('Trying to get the stress test program main window handle')
-    Write-Verbose('Looking for these window names:')
-    Write-Verbose(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', '))
+    Write-VerboseText('Trying to get the stress test program main window handle')
+    Write-VerboseText('Looking for these window names:')
+    Write-VerboseText(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', '))
 
     # Try to to get the window and the stress test
     for ($i = 1; $i -le 30; $i++) {
@@ -5353,20 +5484,23 @@ function Get-StressTestProcessInformation {
 
         if ($windowObj -and ($windowObj | Get-Member WinTitle)) {
             Start-Sleep -Milliseconds 250
-            Write-Verbose($timestamp + ' - Window found')
+            Write-VerboseText($timestamp + ' - Window found')
 
             # This is the process object for the stress test. They may be the same, but not necessarily (e.g. Aida64)
             $thisStressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
             break
         }
         else {
-            Write-Verbose($timestamp + ' - ... no window found for these names...')
+            Write-VerboseText($timestamp + ' - ... no window found for these names...')
         }
     }
 
 
     # Still no main window found
     if (!($windowObj -and ($windowObj | Get-Member WinTitle))) {
+        Write-VerboseText('Window not found by title, looking process name instead:')
+        Write-VerboseText($stressTestPrograms[$settings.General.stressTestProgram]['processName'])
+
         # Check if the process for the main window exists
         $checkProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
 
@@ -5381,35 +5515,56 @@ function Get-StressTestProcessInformation {
 
     # Yeah, we can't find anything, throw that error
     if (!($windowObj -and ($windowObj | Get-Member WinTitle))) {
-        Write-ColorText('FATAL ERROR: Could not find a window instance for the stress test program!') Red
-        Write-ColorText('Was looking for these window names:') Red
-        Write-ColorText(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', ')) Yellow
+        if ($stopOnStressTestProcessNotFound) {
+            # I could dump all of the window names here, but I'd rather not due to privacy reasons
+            Write-ColorText('FATAL ERROR: Could not find a window instance for the stress test program!') Red
+            Write-ColorText('Was looking for these window names:') Red
+            Write-ColorText(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', ')) Yellow
 
-        if ($checkProcess) {
-            Write-ColorText('However, found a process with the process name "' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '":') Red
+            if ($checkProcess) {
+                Write-ColorText('However, found a process with the process name "' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '":') Red
 
-            $checkProcess | ForEach-Object {
-                Write-ColorText(' - ProcessName:  ' + $_.ProcessName) Yellow
-                Write-ColorText('   Process Path: ' + $_.Path) Yellow
-                Write-ColorText('   Process Id:   ' + $_.Id) Yellow
+                $checkProcess | ForEach-Object {
+                    Write-ColorText(' - ProcessName:  ' + $_.ProcessName) Yellow
+                    Write-ColorText('   Process Path: ' + $_.Path) Yellow
+                    Write-ColorText('   Process Id:   ' + $_.Id) Yellow
+                    Write-ColorText('   Window Title: ' + $_.MainWindowTitle) Yellow
+                }
+            }
+
+            Exit-WithFatalError -lineNumber (Get-ScriptLineNumber)
+        }
+        else {
+            Write-VerboseText('Could not find the window instance for the stress test program!')
+
+            Write-VerboseText('Was looking for these window names:')
+            Write-VerboseText(($stressTestPrograms[$settings.General.stressTestProgram]['windowNames'] -Join ', '))
+
+            if ($checkProcess) {
+                Write-VerboseText('However, found a process with the process name "' + $stressTestPrograms[$settings.General.stressTestProgram]['processName'] + '":')
+
+                $checkProcess | ForEach-Object {
+                    Write-VerboseText(' - ProcessName:  ' + $_.ProcessName)
+                    Write-VerboseText('   Process Path: ' + $_.Path)
+                    Write-VerboseText('   Process Id:   ' + $_.Id)
+                    Write-VerboseText('   Window Title: ' + $_.MainWindowTitle)
+                }
             }
         }
-
-        # I could dump all of the window names here, but I'd rather not due to privacy reasons
-        Exit-WithFatalError -lineNumber (Get-ScriptLineNumber)
     }
 
 
-    Write-Verbose('Found the following window(s) with these names:')
+    Write-VerboseText('Found the following window(s) with these names:')
 
     $windowObj | ForEach-Object {
         $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
-        Write-Verbose(' - WinTitle:          ' + $_.WinTitle)
-        Write-Verbose('   MainWindowHandle:  ' + $_.MainWindowHandle)
-        Write-Verbose('   ProcessId:         ' + $_.ProcessId)
-        Write-Verbose('   Process Path:      ' + $_.ProcessPath)
-        Write-Verbose('   Process Path (PS): ' + $path)
+        Write-VerboseText(' - WinTitle:          ' + $_.WinTitle)
+        Write-VerboseText('   MainWindowHandle:  ' + $_.MainWindowHandle)
+        Write-VerboseText('   ProcessId:         ' + $_.ProcessId)
+        Write-VerboseText('   Process Path:      ' + $_.ProcessPath)
+        Write-VerboseText('   Process Path (PS): ' + $path)
     }
+
 
     # There might be another window open with the same name as the stress test program (e.g. an Explorer window)
     # Select the correct one
@@ -5417,20 +5572,20 @@ function Get-StressTestProcessInformation {
 
     # If we're running the wrapper for y-cruncher to capture the output, we need to check the commandline
     if ($isYCruncherWithLogging) {
-        Write-Verbose('enableYCruncherLoggingWrapper has been set, special handling')
+        Write-VerboseText('enableYCruncherLoggingWrapper has been set, special handling')
 
         $searchForProcess = '*"' + $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '"*'
 
-        Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
+        Write-VerboseText('Filtering the windows for "' + $searchForProcess + '":')
 
         $filteredWindowObj = $windowObj | Where-Object {
             $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.ProcessId)" | Select-Object CommandLine).CommandLine
             $hasMatch = $commandLine -like $searchForProcess
 
-            Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
-            Write-Verbose('   searchForProcess:  ' + $searchForProcess)
-            Write-Verbose('   CommandLine:       ' + $commandLine)
-            Write-Verbose('   hasMatch:          ' + $hasMatch)
+            Write-VerboseText(' - ProcessId:         ' + $_.ProcessId)
+            Write-VerboseText('   searchForProcess:  ' + $searchForProcess)
+            Write-VerboseText('   CommandLine:       ' + $commandLine)
+            Write-VerboseText('   hasMatch:          ' + $hasMatch)
 
             # Return true if the window was identified successfully, so that filteredWindowObj will be the current object
             return $hasMatch
@@ -5439,21 +5594,21 @@ function Get-StressTestProcessInformation {
 
     # Also for Linpack we need to check the command line
     elseif ($isLinpack) {
-        Write-Verbose('Linpack has been selected, special handling')
+        Write-VerboseText('Linpack has been selected, special handling')
 
         $searchForProcess = '*"' + $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt'] + '"*'
 
-        Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
+        Write-VerboseText('Filtering the windows for "' + $searchForProcess + '":')
 
         $filteredWindowObj = $windowObj | Where-Object {
             $cimProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($_.ProcessId)"
             $commandLine = ($cimProcess | Select-Object CommandLine).CommandLine
             $hasMatch = $commandLine -like $searchForProcess
 
-            Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
-            Write-Verbose('   searchForProcess:  ' + $searchForProcess)
-            Write-Verbose('   CommandLine:       ' + $commandLine)
-            Write-Verbose('   hasMatch:          ' + $hasMatch)
+            Write-VerboseText(' - ProcessId:         ' + $_.ProcessId)
+            Write-VerboseText('   searchForProcess:  ' + $searchForProcess)
+            Write-VerboseText('   CommandLine:       ' + $commandLine)
+            Write-VerboseText('   hasMatch:          ' + $hasMatch)
 
             # Return true if the window was identified successfully, so that filteredWindowObj will be the current object
             return $hasMatch
@@ -5462,7 +5617,7 @@ function Get-StressTestProcessInformation {
 
     # Regular y-cruncher or other stress test programs
     else {
-        Write-Verbose('Filtering the windows for "' + $searchForProcess + '":')
+        Write-VerboseText('Filtering the windows for "' + $searchForProcess + '":')
 
         $filteredWindowObj = $windowObj | Where-Object {
             #(Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path -Match $searchForProcess
@@ -5478,15 +5633,15 @@ function Get-StressTestProcessInformation {
     # There's apparently no way to get this window by its name then
     # Search for the executable and select it's parent window instead
     if (!$filteredWindowObj) {
-        Write-Debug('Couldn''t find the window process, it may be buried inside the Windows Terminal')
-        Write-Debug('Looking for the stress test process instead...')
+        Write-DebugText('Couldn''t find the window process, it may be buried inside the Windows Terminal')
+        Write-DebugText('Looking for the stress test process instead...')
 
         # Look for any instances of that process that are run from the CoreCycler directory
         # Need to escape the backslashes
         $searchForProcessWql = ($stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']).Replace('\', '\\')
 
-        Write-Debug('Looking for the process where the ExecutablePath is:')
-        Write-Debug($searchForProcessWql)
+        Write-DebugText('Looking for the process where the ExecutablePath is:')
+        Write-DebugText($searchForProcessWql)
 
         $cimStressTestProcesses = Get-CimInstance Win32_Process -Filter "ExecutablePath = '$searchForProcessWql'"
 
@@ -5502,11 +5657,11 @@ function Get-StressTestProcessInformation {
                 $hasMatch = $_.ProcessId -eq $parentProcess.ProcessId
 
                 if ($hasMatch) {
-                    Write-Verbose('Found a matching main window:')
-                    Write-Verbose(' - ProcessId:         ' + $_.ProcessId)
-                    Write-Verbose('   Process Path:      ' + $_.ProcessPath)
-                    Write-Verbose('   WinTitle:          ' + $_.WinTitle)
-                    Write-Verbose('   MainWindowHandle:  ' + $_.MainWindowHandle)
+                    Write-VerboseText('Found a matching main window:')
+                    Write-VerboseText(' - ProcessId:         ' + $_.ProcessId)
+                    Write-VerboseText('   Process Path:      ' + $_.ProcessPath)
+                    Write-VerboseText('   WinTitle:          ' + $_.WinTitle)
+                    Write-VerboseText('   MainWindowHandle:  ' + $_.MainWindowHandle)
                 }
 
                 return $hasMatch
@@ -5520,24 +5675,33 @@ function Get-StressTestProcessInformation {
     }
 
 
-    Write-Debug('Found the following windows:')
+    Write-DebugText('Found the following windows:')
 
     $filteredWindowObj | ForEach-Object {
         $path = (Get-Process -Id $_.ProcessId -ErrorAction Ignore).Path
-        Write-Verbose(' - WinTitle:          ' + $_.WinTitle)
-        Write-Verbose('   MainWindowHandle:  ' + $_.MainWindowHandle)
-        Write-Verbose('   ProcessId:         ' + $_.ProcessId)
-        Write-Verbose('   Process Path:      ' + $_.ProcessPath)
-        Write-Verbose('   Process Path (PS): ' + $path)
+        Write-VerboseText(' - WinTitle:          ' + $_.WinTitle)
+        Write-VerboseText('   MainWindowHandle:  ' + $_.MainWindowHandle)
+        Write-VerboseText('   ProcessId:         ' + $_.ProcessId)
+        Write-VerboseText('   Process Path:      ' + $_.ProcessPath)
+        Write-VerboseText('   Process Path (PS): ' + $path)
     }
 
 
     # No window found!
     if (!$filteredWindowObj) {
-        Write-ColorText('FATAL ERROR: Could not find the correct stress test window!') Red
-        Write-ColorText('No window found that matches "' + $searchForProcess + '"') Red
-        Exit-WithFatalError
+        if ($stopOnStressTestProcessNotFound) {
+            Write-ColorText('FATAL ERROR: Could not find the correct stress test window!') Red
+            Write-ColorText('No window found that matches "' + $searchForProcess + '"') Red
+            Exit-WithFatalError
+        }
+
+        # Not found anything, just return if the flag to not stop is set
+        else {
+            return
+        }
     }
+
+
 
 
     # Multiple processes found with the same name AND process name
@@ -5566,17 +5730,29 @@ function Get-StressTestProcessInformation {
     # Also, the process performing the stress test can actually be different to the main window of the stress test program
     # If so, search for it as well
     if ($stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ne $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad']) {
-        Write-Verbose('The process performing the stress test is NOT the same as the main window!')
-        Write-Verbose('Searching for the stress test process id...')
+        Write-VerboseText('The process performing the stress test is NOT the same as the main window!')
+        Write-VerboseText('Searching for process "' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + '"...')
+        
 
-        try {
-            Write-Verbose('Searching for "' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + '"...')
-            $thisStressTestProcess   = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Stop
-            $thisStressTestProcessId = $thisStressTestProcess.Id
+        for ($i = 1; $i -le 30; $i++) {
+            $timestamp = Get-Date -Format HH:mm:ss
+            $thisStressTestProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
 
-            Write-Verbose('Found with ID: ' + $thisStressTestProcessId)
+            if ($thisStressTestProcess) {
+                $thisStressTestProcessId = $thisStressTestProcess.Id
+                Write-VerboseText($timestamp + ' - Found with ID: ' + $thisStressTestProcessId)
+
+                break
+            }
+            else {
+                Write-VerboseText($timestamp + ' - ... not found')
+            }
+
+            Start-Sleep -Milliseconds 250
         }
-        catch {
+
+
+        if (!$thisStressTestProcessId) {
             $message = 'Could not determine the stress test program process ID! (looking for ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + ')'
 
             # Only throw an error if the flag to do so was set
@@ -5585,20 +5761,20 @@ function Get-StressTestProcessInformation {
                 Exit-WithFatalError -text $message
             }
             else {
-                Write-Verbose($message)
+                Write-VerboseText($message)
             }
         }
     }
 
     # The stress test and the main window are the same process
     else {
-        Write-Verbose('The process performing the stress test is the same as the main window')
+        Write-VerboseText('The process performing the stress test is the same as the main window')
 
         $thisStressTestProcess   = $thisWindowProcess
         $thisStressTestProcessId = $thisWindowProcess.Id
     }
 
-    Write-Debug('The stress test process id: ' + $thisStressTestProcessId)
+    Write-DebugText('The stress test process id: ' + $thisStressTestProcessId)
 
 
     # Try to get the threads of the stress test process that are actually responsible for the CPU load
@@ -5664,32 +5840,32 @@ function Get-StressTestProcessInformation {
     }
 
     if ($isAida64) {
-        Write-Debug('Aida64 has been selected, using lookup table for the amount of worker threads')
+        Write-DebugText('Aida64 has been selected, using lookup table for the amount of worker threads')
         $modeString = (($settings.Aida64.mode -Split '\s*,\s*' | Where-Object { $_.Length -gt 0 } | Sort-Object) -Join ',').ToUpperInvariant()
 
-        Write-Debug('The mode string: ' + $modeString)
+        Write-DebugText('The mode string: ' + $modeString)
 
         $defaultIndex = $(if ($settings.General.numberOfThreads -eq 1) { 0 } else { 1 })
         $index = $(if ($overrideNumberOfThreads -gt 0) { $(if ($overrideNumberOfThreads -eq 1) { 0 } else { 1 }) } else { $defaultIndex })
 
-        Write-Debug('The default index: ' + $defaultIndex)
-        Write-Debug('The final index:   ' + $index)
+        Write-DebugText('The default index: ' + $defaultIndex)
+        Write-DebugText('The final index:   ' + $index)
 
         $expectedNumberOfThreads = $threadsForAida64[$modeString][$index]
     }
 
 
-    Write-Debug('The expected number of threads to find: ' + $expectedNumberOfThreads)
+    Write-DebugText('The expected number of threads to find: ' + $expectedNumberOfThreads)
 
     if ($expectedNumberOfThreads -lt 1) {
-        Write-Debug('Not looking for the threads (because -1)')
+        Write-DebugText('Not looking for the threads (because -1)')
     }
 
 
     # Only execute this if we actually expect threads to find
     if ($expectedNumberOfThreads -gt 0 -and $overrideNumberOfThreads -ne -1) {
         # Get the threads that are running the stress test
-        Write-Debug('Trying to get the threads that are running the stress test')
+        Write-DebugText('Trying to get the threads that are running the stress test')
 
         # We assume that these are threads with the ThreadState = "Running" and are using CPU power
         # This is not always true however, Aida64 spawns 4 threads, of which two are "Running" and two are "Ready"
@@ -5708,7 +5884,7 @@ function Get-StressTestProcessInformation {
             }
 
             for ($i=1; $i -le $maxIterationsPerLoop; $i++) {
-                Write-Debug('Trying to get the threads (loop: ' + $loop + ' - iteration: ' + $i + ')')
+                Write-DebugText('Trying to get the threads (loop: ' + $loop + ' - iteration: ' + $i + ')')
 
                 # There seems to be some caching involved, which sometimes prevents this from getting the correct thread states
                 # So we're using a job to get around this issue
@@ -5737,11 +5913,11 @@ function Get-StressTestProcessInformation {
                 $numFound = $thisStressTestThreads.Count
 
                 if ($numFound -ne $expectedNumberOfThreads) {
-                    Write-Debug('Incorrect number of threads found (' + $numFound + ' instead of ' + $expectedNumberOfThreads + '), trying again [' + $i + ']')
+                    Write-DebugText('Incorrect number of threads found (' + $numFound + ' instead of ' + $expectedNumberOfThreads + '), trying again [' + $i + ']')
                     Start-Sleep -Milliseconds 500
                 }
                 else {
-                    Write-Debug('Found the expected number of threads (' + $numFound + ' = ' + $expectedNumberOfThreads + ')')
+                    Write-DebugText('Found the expected number of threads (' + $numFound + ' = ' + $expectedNumberOfThreads + ')')
                     break LoopGetThreads
                 }
             }
@@ -5749,12 +5925,12 @@ function Get-StressTestProcessInformation {
 
             $thisStressTestThreadIds = $thisStressTestThreads | ForEach-Object { $_.Id }
 
-            Write-Verbose('Thread IDs found that are running the stress test: ' + $thisStressTestThreadIds)
+            Write-VerboseText('Thread IDs found that are running the stress test: ' + $thisStressTestThreadIds)
 
             # Aida64 needs special treatment :x
             # Some of the threads seem to be in a "Wait" state even if it's running?
             if ($thisStressTestThreads.Count -ne $expectedNumberOfThreads -and $isAida64) {
-                Write-Debug('Loop ' + $loop + ' unsuccessful, waiting a bit for the next')
+                Write-DebugText('Loop ' + $loop + ' unsuccessful, waiting a bit for the next')
                 Start-Sleep -Milliseconds 2000
             }
         }
@@ -5764,7 +5940,7 @@ function Get-StressTestProcessInformation {
             Write-ColorText('FATAL ERROR: Incorrect number of threads found that could be running the stress test!') Red
             Write-ColorText('             Found ' + $thisStressTestThreads.Count + ' threads, but expected ' + $expectedNumberOfThreads) Red
 
-            Write-Debug('The process id:                      ' + $thisStressTestProcess.Id)
+            Write-DebugText('The process id:                      ' + $thisStressTestProcess.Id)
 
             if ($thisStressTestProcess -and $thisStressTestProcess.Threads -and @($thisStressTestProcess.Threads).Count -gt 0) {
                 $threads       = $thisStressTestProcess.Threads | Sort-Object -Property Id
@@ -5789,14 +5965,14 @@ function Get-StressTestProcessInformation {
                     $possibleStressTestThreadsString = $possibleStressTestThreads | Format-Table 'Id', 'ThreadState', 'TotalProcessorTime', 'WaitReason', 'ProcessorAffinity' | Out-String
                 }
 
-                Write-Debug('The stress test thread ids:          ' + $threadIds)
-                Write-Debug('The possible stress test thread ids: ' + $possibleStressTestThreadsIds)
+                Write-DebugText('The stress test thread ids:          ' + $threadIds)
+                Write-DebugText('The possible stress test thread ids: ' + $possibleStressTestThreadsIds)
 
-                Write-Debug('All of the threads of the process:')
-                Write-Debug($threadsString)
+                Write-DebugText('All of the threads of the process:')
+                Write-DebugText($threadsString)
 
-                Write-Debug('All of the possible stress test threads of the process:')
-                Write-Debug($possibleStressTestThreadsString)
+                Write-DebugText('All of the possible stress test threads of the process:')
+                Write-DebugText($possibleStressTestThreadsString)
             }
 
             Exit-WithFatalError
@@ -5813,17 +5989,17 @@ function Get-StressTestProcessInformation {
     $Script:stressTestThreads             = $thisStressTestThreads
     $Script:stressTestThreadIds           = $thisStressTestThreadIds
 
-    Write-Verbose('Main window handle:       ' + $Script:windowProcessMainWindowHandle)
-    Write-Verbose('Main window process name: ' + $Script:windowProcess.ProcessName)
-    Write-Verbose('Main window process ID:   ' + $Script:windowProcessId)
+    Write-VerboseText('Main window handle:       ' + $Script:windowProcessMainWindowHandle)
+    Write-VerboseText('Main window process name: ' + $Script:windowProcess.ProcessName)
+    Write-VerboseText('Main window process ID:   ' + $Script:windowProcessId)
 
     if ($Script:stressTestProcess) {
-        Write-Verbose('Stress test process name: ' + $Script:stressTestProcess.ProcessName)
-        Write-Verbose('Stress test process ID:   ' + $Script:stressTestProcessId)
-        Write-Verbose('Stress test thread IDs:   ' + $Script:stressTestThreadIds)
+        Write-VerboseText('Stress test process name: ' + $Script:stressTestProcess.ProcessName)
+        Write-VerboseText('Stress test process ID:   ' + $Script:stressTestProcessId)
+        Write-VerboseText('Stress test thread IDs:   ' + $Script:stressTestThreadIds)
     }
     else {
-        Write-Verbose('Stress test process:      Not found (but flag is set to ignore)')
+        Write-VerboseText('Stress test process:      Not found (but flag is set to ignore)')
     }
 }
 
@@ -5842,8 +6018,8 @@ function Test-Prime95 {
     $p95Type = $settings.General.stressTestProgram
 
     # Check if the prime95.exe exists
-    Write-Verbose('Checking if prime95.exe exists at:')
-    Write-Verbose($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt'])
+    Write-VerboseText('Checking if prime95.exe exists at:')
+    Write-VerboseText($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt'])
 
     if (!(Test-Path ($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt']) -PathType Leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Prime95!') Red
@@ -5869,7 +6045,7 @@ function Test-Prime95 {
 function Get-Prime95Version {
     # This may be prime95 or prime95_dev
     $p95Type = $settings.General.stressTestProgram
-    Write-Verbose('Checking the Prime95 version...')
+    Write-VerboseText('Checking the Prime95 version...')
     $itemVersionInfo = (Get-Item ($stressTestPrograms[$p95Type]['fullPathToExe'] + '.' + $stressTestPrograms[$p95Type]['processNameExt'])).VersionInfo
 
     $p95Version = $(
@@ -5878,8 +6054,8 @@ function Get-Prime95Version {
         $itemVersionInfo.ProductBuildPart
     )
 
-    Write-Verbose('Prime95 Version:')
-    Write-Verbose($p95Version)
+    Write-VerboseText('Prime95 Version:')
+    Write-VerboseText($p95Version)
 
     return $p95Version
 }
@@ -5932,11 +6108,11 @@ function Initialize-Prime95 {
     }
 
 
-    Write-Debug('isMaxPrime95_30_6:  ' + $isMaxPrime95_30_6)
-    Write-Debug('isMaxPrime95_30_9:  ' + $isMaxPrime95_30_9)
-    Write-Debug('isMaxPrime95_30_19: ' + $isMaxPrime95_30_19)
-    Write-Debug('isNewerPrime95:     ' + $isNewerPrime95)
-    Write-Debug('useOnlyPrimeTxt:    ' + $useOnlyPrimeTxt)
+    Write-DebugText('isMaxPrime95_30_6:  ' + $isMaxPrime95_30_6)
+    Write-DebugText('isMaxPrime95_30_9:  ' + $isMaxPrime95_30_9)
+    Write-DebugText('isMaxPrime95_30_19: ' + $isMaxPrime95_30_19)
+    Write-DebugText('isNewerPrime95:     ' + $isNewerPrime95)
+    Write-DebugText('useOnlyPrimeTxt:    ' + $useOnlyPrimeTxt)
 
 
     # Set various global variables we need for Prime95
@@ -6224,7 +6400,7 @@ function Initialize-Prime95 {
     # The provided FFT sizes may not exist in the FFT test array, so we look for the next (min) or previous (max) FFT size
     if (!($FFTSizes[$cpuTestMode] -contains $minFFTSize)) {
         Write-ColorText('WARNING: The selected minimum FFT size (' + $minFFTSize/1024 + 'K) does not exist for the selected mode!') Yellow
-        Write-Verbose('The FFTSizes array does not include the current min FFT size, searching for the next size')
+        Write-VerboseText('The FFTSizes array does not include the current min FFT size, searching for the next size')
 
         $Script:minFFTSize = $FFTSizes[$cpuTestMode] | ForEach-Object {
             if ($_ -gt $minFFTSize) {
@@ -6238,14 +6414,14 @@ function Initialize-Prime95 {
         }
 
 
-        Write-Verbose('Found the new min FFT size: ' + $Script:minFFTSize)
+        Write-VerboseText('Found the new min FFT size: ' + $Script:minFFTSize)
         Write-ColorText('Trying to find the next possible value... set to ' + $Script:minFFTSize/1024 + 'K') Yellow
         Write-ColorText('') Yellow
     }
 
     if (!($FFTSizes[$cpuTestMode] -contains $maxFFTSize)) {
         Write-ColorText('WARNING: The selected maximum FFT size (' + $maxFFTSize/1024 + 'K) does not exist for the selected mode!') Yellow
-        Write-Verbose('The FFTSizes array does not include the current max FFT size, searching for the previous size')
+        Write-VerboseText('The FFTSizes array does not include the current max FFT size, searching for the previous size')
 
         $Script:maxFFTSize = ($FFTSizes[$cpuTestMode] | Sort-Object -Descending) | ForEach-Object {
             if ($maxFFTSize -gt $_) {
@@ -6256,12 +6432,12 @@ function Initialize-Prime95 {
 
         # The max size cannot be smaller then the min size
         if ($Script:maxFFTSize -lt $Script:minFFTSize) {
-            Write-Verbose('The maximum FFT size cannot be smaller than the mimimum size, setting it to the same value')
-            Write-Verbose('-> ' + $Script:maxFFTSize/1024 + 'K to ' + $Script:minFFTSize/1024 + 'K')
+            Write-VerboseText('The maximum FFT size cannot be smaller than the mimimum size, setting it to the same value')
+            Write-VerboseText('-> ' + $Script:maxFFTSize/1024 + 'K to ' + $Script:minFFTSize/1024 + 'K')
             $Script:maxFFTSize = $Script:minFFTSize
         }
 
-        Write-Verbose('Found the new max FFT size: ' + $Script:maxFFTSize)
+        Write-VerboseText('Found the new max FFT size: ' + $Script:maxFFTSize)
         Write-ColorText('Trying to find the previous possible value... set to ' + $Script:maxFFTSize/1024 + 'K') Yellow
         Write-ColorText('') Yellow
     }
@@ -6277,16 +6453,16 @@ function Initialize-Prime95 {
     $FFTSizeString = $settings.Prime95.FFTSize.ToUpperInvariant() -Replace '\s', ''
 
 
-    Write-Debug('')
-    Write-Debug('Checking the FFT Sizes to test:')
-    Write-Debug('FFTSizeString: ' + $FFTSizeString)
-    Write-Debug('cpuTestMode:   ' + $cpuTestMode)
-    Write-Debug('minFFTSize:    ' + $minFFTSize)
-    Write-Debug('maxFFTSize:    ' + $maxFFTSize)
-    Write-Debug('startKey:      ' + $startKey)
-    Write-Debug('endKey:        ' + $endKey)
-    Write-Debug('The selected fftSubarray to test:')
-    Write-Debug($Script:fftSubarray)
+    Write-DebugText('')
+    Write-DebugText('Checking the FFT Sizes to test:')
+    Write-DebugText('FFTSizeString: ' + $FFTSizeString)
+    Write-DebugText('cpuTestMode:   ' + $cpuTestMode)
+    Write-DebugText('minFFTSize:    ' + $minFFTSize)
+    Write-DebugText('maxFFTSize:    ' + $maxFFTSize)
+    Write-DebugText('startKey:      ' + $startKey)
+    Write-DebugText('endKey:        ' + $endKey)
+    Write-DebugText('The selected fftSubarray to test:')
+    Write-DebugText($Script:fftSubarray)
 
 
     # The Prime95 results.txt file name and path for this run
@@ -6494,7 +6670,7 @@ function Start-Prime95 {
         [Parameter(Mandatory=$false)] $overrideNumberOfThreads
     )
 
-    Write-Verbose('Starting Prime95')
+    Write-VerboseText('Starting Prime95')
 
     # Minimized to the tray
     #$processId = Start-Process -FilePath $stressTestPrograms['prime95']['fullPathToExe'] -ArgumentList '-t' -PassThru -WindowStyle Hidden
@@ -6508,8 +6684,8 @@ function Start-Prime95 {
     $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
     $windowBehaviour = $(if ($stressTestProgramWindowToForeground) { 1 } else { $windowBehaviour })
 
-    Write-Debug('Trying to start the stress test with the command:')
-    Write-Debug($command)
+    Write-DebugText('Trying to start the stress test with the command:')
+    Write-DebugText($command)
 
     $processId = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
@@ -6537,14 +6713,14 @@ function Start-Prime95 {
 
             $Script:processCounterPathTime = $processCounterPathId -Replace $counterNames['SearchString'], $counterNames['ReplaceString']
 
-            Write-Verbose('The Performance Process Counter Path for the ID:')
-            Write-Verbose($processCounterPathId)
-            Write-Verbose('The Performance Process Counter Path for the Time:')
-            Write-Verbose($processCounterPathTime)
+            Write-VerboseText('The Performance Process Counter Path for the ID:')
+            Write-VerboseText($processCounterPathId)
+            Write-VerboseText('The Performance Process Counter Path for the Time:')
+            Write-VerboseText($processCounterPathTime)
         }
         catch {
-            Write-Debug('Could not query the process path')
-            Write-Debug('Error: ' + $_)
+            Write-DebugText('Could not query the process path')
+            Write-DebugText('Error: ' + $_)
         }
     }
 }
@@ -6560,7 +6736,7 @@ function Start-Prime95 {
     [Void]
 #>
 function Close-Prime95 {
-    Write-Verbose('Trying to close Prime95')
+    Write-VerboseText('Trying to close Prime95')
 
     # If there is no windowProcessMainWindowHandle id
     # Try to get it
@@ -6573,51 +6749,51 @@ function Close-Prime95 {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
         if (!$windowProcess) {
-            Write-Verbose('The window process wasn''t found, no need to close it')
+            Write-VerboseText('The window process wasn''t found, no need to close it')
         }
         else {
             # The process may be suspended
             $null = Resume-Process -process $windowProcess -ignoreError $true
 
-            Write-Verbose('Trying to gracefully close Prime95')
-            Write-Debug('The window process main window handle: ' + $windowProcessMainWindowHandle)
+            Write-VerboseText('Trying to gracefully close Prime95')
+            Write-DebugText('The window process main window handle: ' + $windowProcessMainWindowHandle)
 
             # Send the message to close the main window
             # The window may still be blocked from the stress test process being closed, so repeat if necessary
             try {
                 for ($i = 1; $i -le 5; $i++) {
-                    Write-Debug('Try ' + $i)
+                    Write-DebugText('Try ' + $i)
                     [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
 
                     # We've send the close request, let's wait a second for it to actually exit
                     if ($windowProcess -and !$windowProcess.HasExited) {
                         $timestamp = Get-Date -Format HH:mm:ss
-                        Write-Verbose($timestamp + ' - Sent the close message, waiting for Prime95 to exit')
+                        Write-VerboseText($timestamp + ' - Sent the close message, waiting for Prime95 to exit')
                         $null = $windowProcess.WaitForExit(1000)
                     }
 
                     $hasExited = $windowProcess.HasExited
-                    Write-Verbose('         - ... has exited: ' + $hasExited)
+                    Write-VerboseText('         - ... has exited: ' + $hasExited)
 
                     if ($windowProcess.HasExited) {
-                        Write-Verbose('The main window has exited')
+                        Write-VerboseText('The main window has exited')
 
                         # But is the process still there?
                         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
                         if (!$windowProcess) {
-                            Write-Verbose('The main window has truly exited')
+                            Write-VerboseText('The main window has truly exited')
                             break
                         }
                         else {
-                            Write-Verbose('The main window is still there, trying again')
+                            Write-VerboseText('The main window is still there, trying again')
                         }
                     }
                 }
             }
             catch {
-                Write-Verbose('Could not gracefully close Prime95, proceeding to kill the process')
-                Write-Debug('Error: ' + $_)
+                Write-VerboseText('Could not gracefully close Prime95, proceeding to kill the process')
+                Write-DebugText('Error: ' + $_)
             }
         }
     }
@@ -6627,14 +6803,14 @@ function Close-Prime95 {
     $windowProcess = Get-Process $processName -ErrorAction Ignore
 
     if ($windowProcess) {
-        Write-Verbose('Could not gracefully close Prime95, killing the process')
+        Write-VerboseText('Could not gracefully close Prime95, killing the process')
 
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
         Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
-        Write-Verbose('Prime95 closed')
+        Write-VerboseText('Prime95 closed')
     }
 }
 
@@ -6650,8 +6826,8 @@ function Close-Prime95 {
 #>
 function Initialize-Aida64 {
     # Check if the aida64.exe exists
-    Write-Verbose('Checking if aida64.exe exists at:')
-    Write-Verbose($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt'])
+    Write-VerboseText('Checking if aida64.exe exists at:')
+    Write-VerboseText($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt'])
 
     if (!(Test-Path ($stressTestPrograms['aida64']['fullPathToExe'] + '.' + $stressTestPrograms['aida64']['processNameExt']) -PathType Leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Aida64!') Red
@@ -6678,13 +6854,13 @@ function Initialize-Aida64 {
     $pathBackup   = $stressTestPrograms['aida64']['processPath'] + '\aida64.exe.manifest.bak'
 
     if ((Test-Path $pathManifest -PathType Leaf)) {
-        Write-Verbose('Trying to rename the aida64.exe.manifest file so that we can start AIDA64 as a regular user')
+        Write-VerboseText('Trying to rename the aida64.exe.manifest file so that we can start AIDA64 as a regular user')
 
         if (!(Move-Item -Path $pathManifest -Destination $pathBackup -PassThru)) {
             Exit-WithFatalError -text ('Could not rename the aida64.exe.manifest file!')
         }
 
-        Write-Verbose('Successfully renamed to aida64.exe.manifest.bak')
+        Write-VerboseText('Successfully renamed to aida64.exe.manifest.bak')
     }
 
     # The Aida64 log file name and path for this run
@@ -6847,23 +7023,23 @@ function Start-Aida64 {
         [Parameter(Mandatory=$false)] $overrideNumberOfThreads
     )
 
-    Write-Verbose('Starting Aida64')
-    Write-Verbose('The flag to only start the stress test process is: ' + $startOnlyStressTestProcess)
+    Write-VerboseText('Starting Aida64')
+    Write-VerboseText('The flag to only start the stress test process is: ' + $startOnlyStressTestProcess)
 
     # Check if the main window process exists
     $checkWindowProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processName'] -ErrorAction Ignore
 
     if ($checkWindowProcess) {
-        Write-Debug('The main window for Aida64 still exists')
+        Write-DebugText('The main window for Aida64 still exists')
     }
     else {
-        Write-Debug('The main window for Aida64 doesn''t exist')
+        Write-DebugText('The main window for Aida64 doesn''t exist')
     }
 
 
     if ($startOnlyStressTestProcess -and $checkWindowProcess) {
-        Write-Verbose('The flag to only start the stress test process was set, and the main window still exists')
-        Write-Verbose('Only trying to re-start the stress test')
+        Write-VerboseText('The flag to only start the stress test process was set, and the main window still exists')
+        Write-VerboseText('Only trying to re-start the stress test')
     }
 
 
@@ -6873,13 +7049,13 @@ function Start-Aida64 {
     # a) Set the flag to only start the test process, and hope we're still on the correct tab in the main application
     # b) Close the application and re-start it
     if (!$startOnlyStressTestProcess -and $checkWindowProcess) {
-        Write-Verbose('The flag to only start the stress test process was not set, but the main window still exists!')
+        Write-VerboseText('The flag to only start the stress test process was not set, but the main window still exists!')
 
         # Let's go with simply trying to start the stress test, this is faster
         # Also, we don't need to reload the config, as the number of stress test threads stays the same for both 1 and 2 threads
         # Because Aida64 launches 4 threads anyway
-        Write-Verbose('We''ll try to restart the stress test process using the existing main window.')
-        Write-Debug('Setting the startOnlyStressTestProcess flag to $true to try to start the stress test process')
+        Write-VerboseText('We''ll try to restart the stress test process using the existing main window.')
+        Write-DebugText('Setting the startOnlyStressTestProcess flag to $true to try to start the stress test process')
         $startOnlyStressTestProcess = $true
     }
 
@@ -6887,8 +7063,8 @@ function Start-Aida64 {
     # Start Aida64's main window process if $startOnlyStressTestProcess is not set, or if the main window process wasn't found
     if (!$startOnlyStressTestProcess -or !$checkWindowProcess) {
         if ($startOnlyStressTestProcess -and !$checkWindowProcess) {
-            Write-Verbose('The flag to only start the stress test process was set, but couldn''t find the main window!')
-            Write-Verbose('Starting the main window process')
+            Write-VerboseText('The flag to only start the stress test process was set, but couldn''t find the main window!')
+            Write-VerboseText('Starting the main window process')
         }
 
         # This doesn't steal the focus
@@ -6896,8 +7072,8 @@ function Start-Aida64 {
         $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
         $windowBehaviour = $(if ($stressTestProgramWindowToForeground) { 1 } else { $windowBehaviour })
 
-        Write-Debug('Trying to start the stress test with the command:')
-        Write-Debug($command)
+        Write-DebugText('Trying to start the stress test with the command:')
+        Write-DebugText($command)
 
         $processId = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
@@ -6938,12 +7114,12 @@ function Start-Aida64 {
             $timestamp = Get-Date -Format HH:mm:ss
 
             if ($stressTestProcess) {
-                Write-Verbose($timestamp + ' - ... stress test process found')
+                Write-VerboseText($timestamp + ' - ... stress test process found')
                 Write-Text($timestamp + ' - Aida64 started')
                 break LoopStartProcess
             }
             else {
-                Write-Verbose($timestamp + ' - ... stress test process not found yet')
+                Write-VerboseText($timestamp + ' - ... stress test process not found yet')
             }
 
             Start-Sleep -Milliseconds 250
@@ -6954,8 +7130,8 @@ function Start-Aida64 {
     if (!$checkWindowProcess -or !$stressTestProcess) {
         # If $startOnlyStressTestProcess was set, try again without the flag
         if ($startOnlyStressTestProcess) {
-            Write-Verbose('Couldn''t start the main window or stress test process')
-            Write-Verbose('Close all processes and try again from scratch')
+            Write-VerboseText('Couldn''t start the main window or stress test process')
+            Write-VerboseText('Close all processes and try again from scratch')
             Close-Aida64
             Start-Aida64 $false $overrideNumberOfThreads
             return
@@ -6984,14 +7160,14 @@ function Start-Aida64 {
 
             $Script:processCounterPathTime = $processCounterPathId -Replace $counterNames['SearchString'], $counterNames['ReplaceString']
 
-            Write-Verbose('The Performance Process Counter Path for the ID:')
-            Write-Verbose($processCounterPathId)
-            Write-Verbose('The Performance Process Counter Path for the Time:')
-            Write-Verbose($processCounterPathTime)
+            Write-VerboseText('The Performance Process Counter Path for the ID:')
+            Write-VerboseText($processCounterPathId)
+            Write-VerboseText('The Performance Process Counter Path for the Time:')
+            Write-VerboseText($processCounterPathTime)
         }
         catch {
-            Write-Debug('Could not query the process path')
-            Write-Debug('Error: ' + $_)
+            Write-DebugText('Could not query the process path')
+            Write-DebugText('Error: ' + $_)
         }
     }
 }
@@ -7020,13 +7196,13 @@ function Close-Aida64 {
         }
     }
     else {
-        Write-Verbose('Trying to close Aida64')
+        Write-VerboseText('Trying to close Aida64')
     }
 
-    Write-Verbose('The flag to only close the Aida64 stress test process is: ' + $closeOnlyStressTest)
+    Write-VerboseText('The flag to only close the Aida64 stress test process is: ' + $closeOnlyStressTest)
 
     if (!$closeOnlyStressTest) {
-        Write-Debug('Trying to close the whole Aida64 program')
+        Write-DebugText('Trying to close the whole Aida64 program')
     }
 
 
@@ -7045,7 +7221,7 @@ function Close-Aida64 {
     # We could just kill it, but this leaves behind a tray icon and an error message the next time Aida is opened
     # Instead, we send a keystroke command to the Aida64 window. Funky!
     if ($stressTestProcessId) {
-        Write-Verbose('The Aida64 stress test process id is set, assuming the process exists as well')
+        Write-VerboseText('The Aida64 stress test process id is set, assuming the process exists as well')
 
         $thisStressTestProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
@@ -7054,12 +7230,12 @@ function Close-Aida64 {
             $null = Resume-Process -process $thisStressTestProcess -ignoreError $true
         }
         else {
-            Write-Verbose('The Aida64 adstress test process id is set, but no stress test process was found!')
+            Write-VerboseText('The Aida64 adstress test process id is set, but no stress test process was found!')
         }
 
         # We can only send a keyboard command if the main window also still exists
         if ($thisStressTestProcess -and $windowProcessMainWindowHandle) {
-            Write-Verbose('The Aida64 stress test and the main window process exist')
+            Write-VerboseText('The Aida64 stress test and the main window process exist')
 
             # Repeat the whole process up to 3 times, i.e. 3x10x0,5 = 15 seconds total runtime before it errors out
             :LoopStopProcess for ($i = 1; $i -le 3; $i++) {
@@ -7073,10 +7249,10 @@ function Close-Aida64 {
                     $timestamp = Get-Date -Format HH:mm:ss
 
                     if ($thisStressTestProcess) {
-                        Write-Verbose($timestamp + ' - ... the Aida64 stress test process still exists')
+                        Write-VerboseText($timestamp + ' - ... the Aida64 stress test process still exists')
                     }
                     else {
-                        Write-Verbose($timestamp + ' - The Aida64 stress test process has successfully closed')
+                        Write-VerboseText($timestamp + ' - The Aida64 stress test process has successfully closed')
                         $success = $true
                         break LoopStopProcess
                     }
@@ -7090,13 +7266,13 @@ function Close-Aida64 {
 
     # No windowProcessMainWindowHandle was found
     if ($thisStressTestProcess -and !$windowProcessMainWindowHandle) {
-        Write-Verbose('Apparently there''s no Aida64 main window, but the stress test is still running!')
+        Write-VerboseText('Apparently there''s no Aida64 main window, but the stress test is still running!')
     }
 
     # If the stress test process couldn't be closed gracefully
     # We need to kill the whole program including the main window, or we may not be able to start the stress test again
     if ($closeOnlyStressTest -and $thisStressTestProcess) {
-        Write-Verbose('The Aida64 stress test process couldn''t be stopped, we need to kill both the stress test and the main window process')
+        Write-VerboseText('The Aida64 stress test process couldn''t be stopped, we need to kill both the stress test and the main window process')
 
         # Set the flag to also close the main window at this point
         $closeOnlyStressTest = $false
@@ -7105,7 +7281,7 @@ function Close-Aida64 {
 
     # Fallback to killing the process, with all its side effects
     if ($thisStressTestProcess -and !$success) {
-        Write-Verbose('Killing the Aida64 stress test program process')
+        Write-VerboseText('Killing the Aida64 stress test program process')
         Stop-Process $thisStressTestProcess.Id -Force -ErrorAction Ignore
     }
 
@@ -7114,70 +7290,70 @@ function Close-Aida64 {
     # But only if $closeOnlyStressTest is false
     if (!$closeOnlyStressTest) {
         if ($windowProcessMainWindowHandle) {
-            Write-Verbose('Trying to gracefully close Aida64')
-            Write-Verbose('windowProcessId: ' + $windowProcessId)
-            Write-Debug('The window process main window handle: ' + $windowProcessMainWindowHandle)
+            Write-VerboseText('Trying to gracefully close Aida64')
+            Write-VerboseText('windowProcessId: ' + $windowProcessId)
+            Write-DebugText('The window process main window handle: ' + $windowProcessMainWindowHandle)
 
             $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
             if (!$windowProcess) {
-                Write-Verbose('The window process wasn''t found, no need to close it')
+                Write-VerboseText('The window process wasn''t found, no need to close it')
             }
             else {
                 # The process may be suspended
-                Write-Verbose('The process may be suspended, resuming')
+                Write-VerboseText('The process may be suspended, resuming')
                 $null = Resume-Process -process $windowProcess -ignoreError $true
 
-                Write-Verbose('Sending the close message to the main window')
+                Write-VerboseText('Sending the close message to the main window')
 
                 # Send the message to close the main window
                 # The window may still be blocked from the stress test process being closed, so repeat if necessary
                 try {
                     for ($i = 1; $i -le 5; $i++) {
-                        Write-Debug('Try ' + $i)
+                        Write-DebugText('Try ' + $i)
                         [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
 
                         # We've send the close request, let's wait a second for it to actually exit
                         if ($windowProcess -and !$windowProcess.HasExited) {
                             $timestamp = Get-Date -Format HH:mm:ss
-                            Write-Verbose($timestamp + ' - Sent the close message, waiting for Aida64 to exit')
+                            Write-VerboseText($timestamp + ' - Sent the close message, waiting for Aida64 to exit')
                             $null = $windowProcess.WaitForExit(1000)
                         }
 
                         $hasExited = $windowProcess.HasExited
-                        Write-Verbose('         - ... has exited: ' + $hasExited)
+                        Write-VerboseText('         - ... has exited: ' + $hasExited)
 
                         if ($windowProcess.HasExited) {
-                            Write-Verbose('The main window has exited')
+                            Write-VerboseText('The main window has exited')
 
                             # But is the process still there?
                             $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
                             if (!$windowProcess) {
-                                Write-Verbose('The main window has truly exited')
+                                Write-VerboseText('The main window has truly exited')
                                 break
                             }
                             else {
-                                Write-Verbose('The main window is still there, trying again')
+                                Write-VerboseText('The main window is still there, trying again')
                             }
                         }
                     }
                 }
                 catch {
-                    Write-Verbose('Could not gracefully close Aida64, proceeding to kill the process')
-                    Write-Debug('Error: ' + $_)
+                    Write-VerboseText('Could not gracefully close Aida64, proceeding to kill the process')
+                    Write-DebugText('Error: ' + $_)
                 }
             }
         }
 
         $timestamp = Get-Date -Format HH:mm:ss
-        Write-Verbose($timestamp + ' - Checking if the main window process still exists:')
+        Write-VerboseText($timestamp + ' - Checking if the main window process still exists:')
 
         # If the window is still here at this point, just kill the process
         $windowProcess = Get-Process $stressTestPrograms['aida64']['processName'] -ErrorAction Ignore
 
         if ($windowProcess) {
-            Write-Verbose('Still there, could not gracefully close Aida64, forcefully killing the process')
+            Write-VerboseText('Still there, could not gracefully close Aida64, forcefully killing the process')
 
             # Unfortunately this will leave any tray icons behind
             Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
@@ -7188,18 +7364,18 @@ function Close-Aida64 {
         $checkStressTestProcess = Get-Process $stressTestPrograms['aida64']['processNameForLoad'] -ErrorAction Ignore
 
         if (!$checkWindowProcess -and !$checkStressTestProcess) {
-            Write-Verbose('Aida64 closed')
+            Write-VerboseText('Aida64 closed')
         }
         else {
             if ($checkWindowProcess) {
-                Write-Verbose('The main window process still exists')
+                Write-VerboseText('The main window process still exists')
             }
 
             if ($checkStressTestProcess) {
-                Write-Verbose('The stress test process still exists')
+                Write-VerboseText('The stress test process still exists')
             }
 
-            Write-Verbose('Could not close Aida64 successfully. Actually this is weird and should not happen.')
+            Write-VerboseText('Could not close Aida64 successfully. Actually this is weird and should not happen.')
         }
     }
 
@@ -7233,8 +7409,8 @@ function Initialize-yCruncher {
     $binaryWithPathToRun = $fullPathToExe + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']
 
     # Check if the selected binary exists
-    Write-Verbose('Checking if ' + $binaryToRun + ' exists at:')
-    Write-Verbose($binaryWithPathToRun)
+    Write-VerboseText('Checking if ' + $binaryToRun + ' exists at:')
+    Write-VerboseText($binaryWithPathToRun)
 
     if (!(Test-Path ($binaryWithPathToRun) -PathType Leaf)) {
         Write-ColorText('FATAL ERROR: Could not find y-cruncher!') Red
@@ -7353,7 +7529,7 @@ function Start-yCruncher {
         [Parameter(Mandatory=$false)] $overrideNumberOfThreads
     )
 
-    Write-Verbose('Starting y-cruncher')
+    Write-VerboseText('Starting y-cruncher')
 
     # Minimized to the tray
     #$processId = Start-Process -FilePath $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToExe'] -ArgumentList ('config "' + $stressTestConfigFilePath + '"') -PassThru -WindowStyle Hidden
@@ -7379,8 +7555,8 @@ function Start-yCruncher {
     $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
     $windowBehaviour = $(if ($stressTestProgramWindowToForeground) { 1 } else { $windowBehaviour })
 
-    Write-Debug('Trying to start the stress test with the command:')
-    Write-Debug($command)
+    Write-DebugText('Trying to start the stress test with the command:')
+    Write-DebugText($command)
 
     $processId = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
 
@@ -7408,14 +7584,14 @@ function Start-yCruncher {
 
             $Script:processCounterPathTime = $processCounterPathId -Replace $counterNames['SearchString'], $counterNames['ReplaceString']
 
-            Write-Verbose('The Performance Process Counter Path for the ID:')
-            Write-Verbose($processCounterPathId)
-            Write-Verbose('The Performance Process Counter Path for the Time:')
-            Write-Verbose($processCounterPathTime)
+            Write-VerboseText('The Performance Process Counter Path for the ID:')
+            Write-VerboseText($processCounterPathId)
+            Write-VerboseText('The Performance Process Counter Path for the Time:')
+            Write-VerboseText($processCounterPathTime)
         }
         catch {
-            Write-Debug('Could not query the process path')
-            Write-Debug('Error: ' + $_)
+            Write-DebugText('Could not query the process path')
+            Write-DebugText('Error: ' + $_)
         }
     }
 }
@@ -7431,7 +7607,7 @@ function Start-yCruncher {
     [Void]
 #>
 function Close-yCruncher {
-    Write-Verbose('Trying to close y-cruncher')
+    Write-VerboseText('Trying to close y-cruncher')
 
     $windowProcess = $null
     $stressTestProcess = $null
@@ -7440,7 +7616,7 @@ function Close-yCruncher {
     # If there is no windowProcessMainWindowHandle id
     # Try to get it
     if (!$windowProcessMainWindowHandle) {
-        Write-Debug('No main window process handle found, trying to get it')
+        Write-DebugText('No main window process handle found, trying to get it')
         Get-StressTestProcessInformation $false -1   # Don't exit the script when the process or threads are not found
     }
 
@@ -7456,11 +7632,11 @@ function Close-yCruncher {
 
 
         if ($isYCruncherWithLogging -and !$stressTestProcess) {
-            Write-Verbose('The stress test process wasn''t found, no need to close it')
+            Write-VerboseText('The stress test process wasn''t found, no need to close it')
         }
         elseif ($isYCruncherWithLogging -and $stressTestProcess) {
             # The process may be suspended, but we don't care, since we're just killing it
-            Write-Verbose('Killing y-cruncher''s stress test process')
+            Write-VerboseText('Killing y-cruncher''s stress test process')
             Stop-Process -InputObject $stressTestProcess -Force -ErrorAction Ignore
         }
 
@@ -7468,26 +7644,26 @@ function Close-yCruncher {
         # This is executed for both cases
         # If not run with the wrapper, this will be the regular y-cruncher process anyway
         if (!$windowProcess) {
-            Write-Verbose('The window process wasn''t found, no need to close it')
+            Write-VerboseText('The window process wasn''t found, no need to close it')
         }
         else {
             # The process may be suspended (only if the wrapper is NOT being used)
             if (!$isYCruncherWithLogging) {
                 $null = Resume-Process -process $windowProcess -ignoreError $true
 
-                Write-Verbose('Trying to gracefully close y-cruncher')
+                Write-VerboseText('Trying to gracefully close y-cruncher')
             }
             else {
-                Write-Verbose('Trying to gracefully close y-cruncher''s wrapper (the main window)')
+                Write-VerboseText('Trying to gracefully close y-cruncher''s wrapper (the main window)')
             }
 
-            Write-Debug('The window process main window handle: ' + $windowProcessMainWindowHandle)
+            Write-DebugText('The window process main window handle: ' + $windowProcessMainWindowHandle)
 
             # Send the message to close the main window
             # The window may still be blocked from the stress test process being closed, so repeat if necessary
             try {
                 for ($i = 1; $i -le 5; $i++) {
-                    Write-Debug('Try ' + $i)
+                    Write-DebugText('Try ' + $i)
                     [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
 
                     # This seems to make powershell / .Net crash
@@ -7497,32 +7673,32 @@ function Close-yCruncher {
                     # We've send the close request, let's wait a second for it to actually exit
                     if ($windowProcess -and !$windowProcess.HasExited) {
                         $timestamp = Get-Date -Format HH:mm:ss
-                        Write-Verbose($timestamp + ' - Sent the close message, waiting for Y-Cruncher to exit')
+                        Write-VerboseText($timestamp + ' - Sent the close message, waiting for Y-Cruncher to exit')
                         $null = $windowProcess.WaitForExit(1000)
                     }
 
                     $hasExited = $windowProcess.HasExited
-                    Write-Verbose('         - ... has exited: ' + $hasExited)
+                    Write-VerboseText('         - ... has exited: ' + $hasExited)
 
                     if ($windowProcess.HasExited) {
-                        Write-Verbose('The main window has exited')
+                        Write-VerboseText('The main window has exited')
 
                         # But is the process still there?
                         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
                         if (!$windowProcess) {
-                            Write-Verbose('The main window has truly exited')
+                            Write-VerboseText('The main window has truly exited')
                             break
                         }
                         else {
-                            Write-Verbose('The main window is still there, trying again')
+                            Write-VerboseText('The main window is still there, trying again')
                         }
                     }
                 }
             }
             catch {
-                Write-Verbose('Could not gracefully close y-cruncher, proceeding to kill the process')
-                Write-Debug('Error: ' + $_)
+                Write-VerboseText('Could not gracefully close y-cruncher, proceeding to kill the process')
+                Write-DebugText('Error: ' + $_)
             }
         }
     }
@@ -7532,14 +7708,14 @@ function Close-yCruncher {
     $windowProcess = Get-Process $processName -ErrorAction Ignore
 
     if ($windowProcess) {
-        Write-Verbose('Could not gracefully close y-cruncher, killing the process')
+        Write-VerboseText('Could not gracefully close y-cruncher, killing the process')
 
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
         Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
-        Write-Verbose('y-cruncher closed')
+        Write-VerboseText('y-cruncher closed')
     }
 }
 
@@ -7567,7 +7743,7 @@ function Initialize-Linpack {
     # OMP_PROC_BIND:      Was set to SPREAD. Maybe FALSE would also work. https://www.openmp.org/spec-html/5.0/openmpse52.html
     # MKL_DYNAMIC:        If TRUE, allows MKL to dynamically change the number of threads (i.e. it will set it to 12 threads if run on a 24 virtual core CPU, instead of all 24). Defaults to TRUE. Should be set to FALSE
 
-    Write-Debug('Initializing Linpack')
+    Write-DebugText('Initializing Linpack')
 
     $fullPathToExe = $stressTestPrograms[$settings.General.stressTestProgram]['fullPathToLoadExe']
     $binaryToRun = $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + '.' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameExt']
@@ -7575,8 +7751,8 @@ function Initialize-Linpack {
 
 
     # Check if the selected binary exists
-    Write-Verbose('Checking if ' + $binaryToRun + ' exists at:')
-    Write-Verbose($binaryWithPathToRun)
+    Write-VerboseText('Checking if ' + $binaryToRun + ' exists at:')
+    Write-VerboseText($binaryWithPathToRun)
 
     if (!(Test-Path ($binaryWithPathToRun) -PathType Leaf)) {
         Write-ColorText('FATAL ERROR: Could not find Linpack!') Red
@@ -7679,7 +7855,7 @@ function Initialize-Linpack {
     if ($hardCodedProblemSizes[$gbValue]) {
         $problemSize = $hardCodedProblemSizes[$gbValue]
         $leadingDim  = $problemSize
-        Write-Debug('Found a hardcoded problem size: "' + $memorySizeString + '" -> ' + $gbValue + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
+        Write-DebugText('Found a hardcoded problem size: "' + $memorySizeString + '" -> ' + $gbValue + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
     }
 
     # For any other memory value, calculate the problem size ourself
@@ -7687,7 +7863,7 @@ function Initialize-Linpack {
         $usesAvx     = ($settings.Linpack.mode -eq 'FAST' -or $settings.Linpack.mode -eq 'FASTEST')
         $problemSize = Get-LinpackProblemSize -memoryBytes $memory -usesAvx $usesAvx
         $leadingDim  = Get-LinpackLeadingDimensionValue -problemSize $problemSize -usesAvx $usesAvx
-        Write-Debug('Calculated the problem size: "' + $memorySizeString + '" -> ' + $memory + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
+        Write-DebugText('Calculated the problem size: "' + $memorySizeString + '" -> ' + $memory + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
     }
     #>
 
@@ -7704,11 +7880,11 @@ function Initialize-Linpack {
     $problemSize = Get-LinpackProblemSize -memoryBytes $memory -usesAvx $usesAvx
     $leadingDim  = Get-LinpackLeadingDimensionValue -problemSize $problemSize -usesAvx $usesAvx
 
-    Write-Debug('Calculated the problem size: "' + $memorySizeString + '" -> ' + $memory + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
-    Write-Debug('Selected Memory: ' + [Math]::Round($memory / 1GB, 1)     + ' GB (' + $memory     + ' bytes) ("memory = ' + $memorySizeString + '")')
-    Write-Debug('Free Memory:     ' + [Math]::Round($freeMemory / 1GB, 1) + ' GB (' + $freeMemory + ' bytes)')
-    Write-Debug('The final problem size: ' + $problemSize)
-    Write-Debug('The leading dimension:  ' + $leadingDim)
+    Write-DebugText('Calculated the problem size: "' + $memorySizeString + '" -> ' + $memory + ' -> ' + $problemSize + ' (LDA ' + $leadingDim + ')')
+    Write-DebugText('Selected Memory: ' + [Math]::Round($memory / 1GB, 1)     + ' GB (' + $memory     + ' bytes) ("memory = ' + $memorySizeString + '")')
+    Write-DebugText('Free Memory:     ' + [Math]::Round($freeMemory / 1GB, 1) + ' GB (' + $freeMemory + ' bytes)')
+    Write-DebugText('The final problem size: ' + $problemSize)
+    Write-DebugText('The leading dimension:  ' + $leadingDim)
 
     if ($problemSize -lt 1) {
         $errorText  = 'The Linpack memory size is too small or the problem size could not be calculated!'
@@ -7753,8 +7929,8 @@ function Initialize-Linpack {
         Exit-WithFatalError -text ('Could not create the config file at ' + $configFile + '!')
     }
 
-    Write-Debug('Also modifying the startup command, because Linpack requires an')
-    Write-Debug('environment variable for the number of threads')
+    Write-DebugText('Also modifying the startup command, because Linpack requires an')
+    Write-DebugText('environment variable for the number of threads')
 
     # Generate the command line
     # Linpack uses environment variables to set the number of threads
@@ -7793,15 +7969,15 @@ function Start-Linpack {
         [Parameter(Mandatory=$false)] $overrideNumberOfThreads
     )
 
-    Write-Verbose('Starting Linpack')
+    Write-VerboseText('Starting Linpack')
 
     $command         = $stressTestPrograms[$settings.General.stressTestProgram]['command']
     $command         = $(if ($stressTestProgramWindowToForeground) { $command.Replace('/MIN ', '') } else { $command })   # Remove the /MIN so that the window isn't placed in the background
     $windowBehaviour = $stressTestPrograms[$settings.General.stressTestProgram]['windowBehaviour']
     $windowBehaviour = $(if ($stressTestProgramWindowToForeground) { 1 } else { $windowBehaviour })
 
-    Write-Debug('Trying to start the stress test with the command:')
-    Write-Debug($command)
+    Write-DebugText('Trying to start the stress test with the command:')
+    Write-DebugText($command)
 
     # We're using Powershell to open the binary, since we can use the Tee-Object command to copy the output to a log file
     $processId = [Microsoft.VisualBasic.Interaction]::Shell($command, $windowBehaviour)
@@ -7830,14 +8006,14 @@ function Start-Linpack {
 
             $Script:processCounterPathTime = $processCounterPathId -Replace $counterNames['SearchString'], $counterNames['ReplaceString']
 
-            Write-Verbose('The Performance Process Counter Path for the ID:')
-            Write-Verbose($processCounterPathId)
-            Write-Verbose('The Performance Process Counter Path for the Time:')
-            Write-Verbose($processCounterPathTime)
+            Write-VerboseText('The Performance Process Counter Path for the ID:')
+            Write-VerboseText($processCounterPathId)
+            Write-VerboseText('The Performance Process Counter Path for the Time:')
+            Write-VerboseText($processCounterPathTime)
         }
         catch {
-            Write-Debug('Could not query the process path')
-            Write-Debug('Error: ' + $_)
+            Write-DebugText('Could not query the process path')
+            Write-DebugText('Error: ' + $_)
         }
     }
 }
@@ -7853,7 +8029,7 @@ function Start-Linpack {
     [Void]
 #>
 function Close-Linpack {
-    Write-Verbose('Trying to close Linpack')
+    Write-VerboseText('Trying to close Linpack')
 
 
     # If there is no windowProcessMainWindowHandle id
@@ -7862,12 +8038,13 @@ function Close-Linpack {
         Get-StressTestProcessInformation $false -1   # Don't exit the script when the process or threads are not found
     }
 
+
     # If we now have a windowProcessMainWindowHandle, try to close the window
     if ($windowProcessMainWindowHandle) {
         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
         if (!$windowProcess) {
-            Write-Verbose('The window process wasn''t found, no need to close it')
+            Write-VerboseText('The window process wasn''t found, no need to close it')
         }
         else {
             # Is the stress test process still running?
@@ -7879,62 +8056,80 @@ function Close-Linpack {
             }
 
 
-            Write-Verbose('Trying to gracefully close Linpack')
-            Write-Debug('The window process main window handle: ' + $windowProcessMainWindowHandle)
+            Write-VerboseText('Trying to gracefully close Linpack')
+            Write-DebugText('The window process main window handle: ' + $windowProcessMainWindowHandle)
 
             # Send the message to close the main window
             # The window may still be blocked from the stress test process being closed, so repeat if necessary
             try {
                 for ($i = 1; $i -le 5; $i++) {
-                    Write-Debug('Try ' + $i)
+                    Write-DebugText('Try ' + $i)
                     [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
 
                     # We've send the close request, let's wait a second for it to actually exit
                     if ($windowProcess -and !$windowProcess.HasExited) {
                         $timestamp = Get-Date -Format HH:mm:ss
-                        Write-Verbose($timestamp + ' - Sent the close message, waiting for Linpack to exit')
+                        Write-VerboseText($timestamp + ' - Sent the close message, waiting for Linpack to exit')
                         $null = $windowProcess.WaitForExit(1000)
                     }
 
                     $hasExited = $windowProcess.HasExited
-                    Write-Verbose('         - ... has exited: ' + $hasExited)
+                    Write-VerboseText('         - ... has exited: ' + $hasExited)
 
                     if ($windowProcess.HasExited) {
-                        Write-Verbose('The main window has exited')
+                        Write-VerboseText('The main window has exited')
 
                         # But is the process still there?
                         $windowProcess = Get-Process -Id $windowProcessId -ErrorAction Ignore
 
                         if (!$windowProcess) {
-                            Write-Verbose('The main window has truly exited')
+                            Write-VerboseText('The main window has truly exited')
                             break
                         }
                         else {
-                            Write-Verbose('The main window is still there, trying again')
+                            Write-VerboseText('The main window is still there, trying again')
                         }
                     }
                 }
             }
             catch {
-                Write-Verbose('Could not gracefully close Linpack, proceeding to kill the process')
-                Write-Debug('Error: ' + $_)
+                Write-VerboseText('Could not gracefully close Linpack, proceeding to kill the process')
+                Write-DebugText('Error: ' + $_)
             }
         }
     }
+
+
+    # If we didn't find a windowProcessMainWindowHandle, try to check if the binary is open, and kill that instead
+    elseif (!$windowProcessMainWindowHandle) {
+        $binaryProcess = Get-Process $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] -ErrorAction Ignore
+
+        if ($binaryProcess) {
+            Write-VerboseText('Found at least one process for ' + $stressTestPrograms[$settings.General.stressTestProgram]['processNameForLoad'] + ', killing all of them')
+
+            $binaryProcess | ForEach-Object {
+                Write-VerboseText('Killing Process ' + $_.Id)
+                Write-VerboseText('Path:  ' + $_.Path)
+                Write-VerboseText('Title: ' + $_.MainWindowTitle)
+                Stop-Process $_.Id -Force -ErrorAction Continue
+            }
+        }
+    }
+
 
 
     # If the window is still here at this point, just kill the process
     $windowProcess = Get-Process $processName -ErrorAction Ignore
 
     if ($windowProcess) {
-        Write-Verbose('Could not gracefully close Linpack, killing the process')
+        Write-VerboseText('Could not gracefully close Linpack, killing the process')
 
         #'The process is still there, killing it'
         # Unfortunately this will leave any tray icons behind
         Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
     }
     else {
-        Write-Verbose('Linpack closed')
+        Write-VerboseText('Linpack closed')
     }
 }
 
@@ -7953,10 +8148,10 @@ function Initialize-StressTestProgram {
         [Parameter(Mandatory=$false)] $overrideNumberOfThreads
     )
 
-    Write-Verbose('Initializing the stress test program')
+    Write-VerboseText('Initializing the stress test program')
 
     if ($overrideNumberOfThreads) {
-        Write-Debug('Override the number of threads: ' + $overrideNumberOfThreads)
+        Write-DebugText('Override the number of threads: ' + $overrideNumberOfThreads)
     }
 
     if ($isPrime95) {
@@ -7996,7 +8191,7 @@ function Start-StressTestProgram {
         [Parameter(Mandatory=$false)] $overrideNumberOfThreads
     )
 
-    Write-Verbose('Starting the stress test program')
+    Write-VerboseText('Starting the stress test program')
 
     if ($isPrime95) {
         Start-Prime95 $overrideNumberOfThreads
@@ -8030,7 +8225,7 @@ function Close-StressTestProgram {
         [Parameter(Mandatory=$false)] [Bool] $closeOnlyStressTest = $false
     )
 
-    Write-Verbose('Trying to close the stress test program')
+    Write-VerboseText('Trying to close the stress test program')
 
     if ($isPrime95) {
         Close-Prime95
@@ -8084,7 +8279,7 @@ function Test-StressTestProgrammIsRunning {
     # Does the stress test process still exist?
     $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
-    Write-Debug($timestamp + ' - Checking for stress test errors')
+    Write-DebugText($timestamp + ' - Checking for stress test errors')
 
 
     # 1. The process doesn't exist anymore, immediate error
@@ -8098,7 +8293,7 @@ function Test-StressTestProgrammIsRunning {
     if (!$stressTestError) {
         # If using Prime95, parse the results.txt file and look for an error message
         if ($isPrime95) {
-            Write-Debug('           Checking the new Prime95 log entries...')
+            Write-DebugText('           Checking the new Prime95 log entries...')
 
             # Look for a line with an "error" string in the new log entries
             $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' } | Select-Object -Last 1
@@ -8109,15 +8304,15 @@ function Test-StressTestProgrammIsRunning {
                 $stressTestError = $errorResults.Line
                 $errorType = 'CALCULATIONERROR'
 
-                Write-Verbose($timestamp)
-                Write-Verbose('Found an error in the new entries of the results.txt!')
+                Write-VerboseText($timestamp)
+                Write-VerboseText('Found an error in the new entries of the results.txt!')
             }
         }
 
 
         # We can use a wrapper to capture the output for yCruncher
         elseif ($isYCruncherWithLogging) {
-            Write-Debug('           Checking the new y-cruncher log entries...')
+            Write-DebugText('           Checking the new y-cruncher log entries...')
 
             # The messages y-cruncher displays:
             # Exception Encountered: XYZ
@@ -8140,8 +8335,8 @@ function Test-StressTestProgrammIsRunning {
                 $stressTestError = $errorResults.Line
                 $errorType = 'CALCULATIONERROR'
 
-                Write-Verbose($timestamp)
-                Write-Verbose('Found an error in the new entries of the y-cruncher output!')
+                Write-VerboseText($timestamp)
+                Write-VerboseText('Found an error in the new entries of the y-cruncher output!')
 
                 # For y-cruncher, remove the core number, since it doesn't represent the actual core being tested
                 $stressTestError = $stressTestError -Replace '\s*\d+\.', ''
@@ -8151,18 +8346,18 @@ function Test-StressTestProgrammIsRunning {
 
         # Linpack also has a log file, created by Powershell's Tee-Object
         elseif ($isLinpack) {
-            Write-Debug('           Checking the new Linpack log entries...')
+            Write-DebugText('           Checking the new Linpack log entries...')
 
-            Write-Debug('           The new log file entries to check:')
+            Write-DebugText('           The new log file entries to check:')
             $newLogEntries | ForEach-Object {
-                Write-Debug('           [Line ' + $_.LineNumber + '] ' + $_.Line)
+                Write-DebugText('           [Line ' + $_.LineNumber + '] ' + $_.Line)
             }
 
             # Look for a line with a "fail" string in the new log entries
             $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
 
-            Write-Debug('           errorResults:')
-            Write-Debug('           ' + $(if ($errorResults) { $errorResults } else { 'null' }))
+            Write-DebugText('           errorResults:')
+            Write-DebugText('           ' + $(if ($errorResults) { $errorResults } else { 'null' }))
 
             # Found the "fail" string
             if ($errorResults) {
@@ -8170,8 +8365,8 @@ function Test-StressTestProgrammIsRunning {
                 $stressTestError = $errorResults.Line
                 $errorType = 'CALCULATIONERROR'
 
-                Write-Verbose($timestamp)
-                Write-Verbose('Found an error in the new entries of the Linpack output!')
+                Write-VerboseText($timestamp)
+                Write-VerboseText('Found an error in the new entries of the Linpack output!')
             }
         }
     }
@@ -8196,15 +8391,15 @@ function Test-StressTestProgrammIsRunning {
                 $apicIdFromWheaMessage = Convert-WheaMessageToApicId $lastWheaError
                 $coreFromWheaMessage   = Convert-WheaMessageToCoreId $lastWheaError
 
-                Write-Debug('The core extracted APIC ID from the WHEA message: ' + $apicIdFromWheaMessage)
-                Write-Debug('The core extracted from the WHEA message:         ' + $coreFromWheaMessage)
+                Write-DebugText('The core extracted APIC ID from the WHEA message: ' + $apicIdFromWheaMessage)
+                Write-DebugText('The core extracted from the WHEA message:         ' + $coreFromWheaMessage)
 
 
                 # Depending on the settings, this is either a warning or an error
                 # However it is only an error if the core matches the APIC ID
                 if ($settings.General.treatWheaWarningAsError -gt 0) {
                     if ($actualCoreNumber -eq $coreFromWheaMessage) {
-                        Write-Debug('The core from the WHEA message matches the tested core (' + $coreNumber + ' = ' + $coreFromWheaMessage + ')')
+                        Write-DebugText('The core from the WHEA message matches the tested core (' + $coreNumber + ' = ' + $coreFromWheaMessage + ')')
 
                         $stressTestError = 'There has been a WHEA error while running this test and the setting to treat this as an error has been set!'
                         $errorType = 'WHEAERROR'
@@ -8212,7 +8407,7 @@ function Test-StressTestProgrammIsRunning {
 
                     # Wrong core, just display a warning
                     else {
-                        Write-Debug('The core from the WHEA message does not match the tested core (' + $coreNumber + ' = ' + $coreFromWheaMessage + ')')
+                        Write-DebugText('The core from the WHEA message does not match the tested core (' + $coreNumber + ' = ' + $coreFromWheaMessage + ')')
 
                         Write-ColorText('WARNING: ' + $timestamp) Magenta
                         Write-ColorText('WARNING: There seems to have been a WHEA error while running this test!') Magenta
@@ -8275,7 +8470,7 @@ function Test-StressTestProgrammIsRunning {
     if (!$stressTestError) {
         # If the CPU utilization check is disabled in the settings
         if ($disableCpuUtilizationCheck -gt 0) {
-            #Write-Debug('Checking CPU usage is disabled, skipping the check')
+            #Write-DebugText('Checking CPU usage is disabled, skipping the check')
         }
 
         # If the CPU utilization check is enabled in the settings, but not using the Windows Performance Counters
@@ -8315,7 +8510,7 @@ function Test-StressTestProgrammIsRunning {
                     # Does the stress test process still exist?
                     $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
-                    Write-Debug($timestamp + ' - Checking for stress test errors')
+                    Write-DebugText($timestamp + ' - Checking for stress test errors')
 
                     if (!$checkProcess) {
                         $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t exist anymore.'
@@ -8330,7 +8525,7 @@ function Test-StressTestProgrammIsRunning {
                 $measuredTime = [Math]::Round(($cpuTime2 - $cpuTime1) * 1000, 0)
 
                 # For 100% core usage, this should be 0.1 seconds time increase during 100 milliseconds
-                Write-Verbose($timestamp + ' - Checking CPU usage: ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
+                Write-VerboseText($timestamp + ' - Checking CPU usage: ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
 
                 if ($measuredTime -le $minTime) {
                     # For Prime95
@@ -8381,7 +8576,7 @@ function Test-StressTestProgrammIsRunning {
                         # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
                         for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
                             $timestamp = Get-Date -Format HH:mm:ss
-                            Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
+                            Write-VerboseText($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
 
                             # Let's use the wait time as the measure time!
                             try {
@@ -8402,7 +8597,7 @@ function Test-StressTestProgrammIsRunning {
                                 # Does the stress test process still exist?
                                 $checkProcess = Get-Process -Id $stressTestProcessId -ErrorAction Ignore
 
-                                Write-Debug($timestamp + ' - Checking for stress test errors')
+                                Write-DebugText($timestamp + ' - Checking for stress test errors')
 
                                 if (!$checkProcess) {
                                     $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t exist anymore.'
@@ -8416,22 +8611,22 @@ function Test-StressTestProgrammIsRunning {
                             }
 
                             $timestamp = Get-Date -Format HH:mm:ss
-                            Write-Verbose($timestamp + ' - Checking CPU usage again (#' + $curCheck + '): ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
+                            Write-VerboseText($timestamp + ' - Checking CPU usage again (#' + $curCheck + '): ' + $measuredTime + 'ms (expected: ' + $expectedTime + 'ms, lower limit: ' + $minTime + 'ms)')
 
                             # If we have recovered, break and continue with stresss testing
                             if ($measuredTime -ge $minTime) {
-                                Write-Verbose('           The process seems to have recovered, continuing with stress testing')
+                                Write-VerboseText('           The process seems to have recovered, continuing with stress testing')
                                 break
                             }
 
                             else {
                                 if ($curCheck -lt $maxChecks) {
-                                    Write-Verbose('           Still not enough usage (#' + $curCheck + ')')
+                                    Write-VerboseText('           Still not enough usage (#' + $curCheck + ')')
                                 }
 
                                 # Reached the maximum amount of checks for the CPU usage
                                 else {
-                                    Write-Verbose('           Still not enough usage, throw an error')
+                                    Write-VerboseText('           Still not enough usage, throw an error')
 
                                     # We don't care about an error string here anymore
                                     $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $measuredTime + 'ms instead of the expected ' + $expectedTime + 'ms)'
@@ -8450,7 +8645,7 @@ function Test-StressTestProgrammIsRunning {
             # Get the CPU percentage
             $processCPUPercentage = [Math]::Round(((Get-Counter $processCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
 
-            Write-Verbose($timestamp + ' - Checking CPU usage: ' + $processCPUPercentage + '% (expected: ' + $expectedUsageTotal + '%, lower limit: ' + $minProcessUsage + '%)')
+            Write-VerboseText($timestamp + ' - Checking CPU usage: ' + $processCPUPercentage + '% (expected: ' + $expectedUsageTotal + '%, lower limit: ' + $minProcessUsage + '%)')
 
             # It doesn't use enough CPU power
             if ($processCPUPercentage -le $minProcessUsage) {
@@ -8506,7 +8701,7 @@ function Test-StressTestProgrammIsRunning {
                     # Repeat the CPU usage check $maxChecks times and only throw an error if the process hasn't recovered by then
                     for ($curCheck = 1; $curCheck -le $maxChecks; $curCheck++) {
                         $timestamp = Get-Date -Format HH:mm:ss
-                        Write-Verbose($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
+                        Write-VerboseText($timestamp + ' - ...the CPU usage was too low, waiting ' + $waitTime + 'ms for another check...')
 
                         Start-Sleep -Milliseconds $waitTime
 
@@ -8514,7 +8709,7 @@ function Test-StressTestProgrammIsRunning {
                         # Do the whole process path procedure again
                         $thisProcessId = $checkProcess.Id[0]
 
-                        Write-Verbose('Process Id: ' + $thisProcessId)
+                        Write-VerboseText('Process Id: ' + $thisProcessId)
 
                         # Start a background job to get around the cached Get-Counter value
                         $thisProcessCounterPathId = Start-Job -ScriptBlock {
@@ -8527,22 +8722,22 @@ function Test-StressTestProgrammIsRunning {
                         $thisProcessCPUPercentage   = [Math]::Round(((Get-Counter $thisProcessCounterPathTime -ErrorAction Ignore).CounterSamples.CookedValue) / $numLogicalCores, 2)
 
                         $timestamp = Get-Date -Format HH:mm:ss
-                        Write-Verbose($timestamp + ' - Checking CPU usage again (#' + $curCheck + '): ' + $thisProcessCPUPercentage + '% (expected: ' + $expectedUsageTotal + '%, lower limit: ' + $minProcessUsage + '%)')
+                        Write-VerboseText($timestamp + ' - Checking CPU usage again (#' + $curCheck + '): ' + $thisProcessCPUPercentage + '% (expected: ' + $expectedUsageTotal + '%, lower limit: ' + $minProcessUsage + '%)')
 
                         # If we have recovered, break and continue with stresss testing
                         if ($thisProcessCPUPercentage -ge $minProcessUsage) {
-                            Write-Verbose('           The process seems to have recovered, continuing with stress testing')
+                            Write-VerboseText('           The process seems to have recovered, continuing with stress testing')
                             break
                         }
 
                         else {
                             if ($curCheck -lt $maxChecks) {
-                                Write-Verbose('           Still not enough usage (#' + $curCheck + ')')
+                                Write-VerboseText('           Still not enough usage (#' + $curCheck + ')')
                             }
 
                             # Reached the maximum amount of checks for the CPU usage
                             else {
-                                Write-Verbose('           Still not enough usage, throw an error')
+                                Write-VerboseText('           Still not enough usage, throw an error')
 
                                 # We don't care about an error string here anymore
                                 $stressTestError = 'The ' + $selectedStressTestProgram + ' process doesn''t use enough CPU power anymore (only ' + $thisProcessCPUPercentage + '% instead of the expected ' + $expectedUsageTotal + '%)'
@@ -8562,8 +8757,8 @@ function Test-StressTestProgrammIsRunning {
     }
 
 
-    Write-Verbose('There has been an error while running the stress test program!')
-    Write-Verbose('Error type: ' + $errorType)
+    Write-VerboseText('There has been an error while running the stress test program!')
+    Write-VerboseText('Error type: ' + $errorType)
 
     # Store the core number in the array
     $Script:coresWithError += $coreNumber
@@ -8632,7 +8827,7 @@ function Test-StressTestProgrammIsRunning {
     if (($isPrime95 -or $isYCruncherWithLogging -or $isLinpack) -and $errorType -ne 'CALCULATIONERROR' -and $errorType -ne 'WHEAERROR') {
         $timestamp = Get-Date -Format HH:mm:ss
 
-        Write-Verbose($timestamp + ' - The stress test program has a log file, trying to look for an error message in the log')
+        Write-VerboseText($timestamp + ' - The stress test program has a log file, trying to look for an error message in the log')
 
         Get-NewLogfileEntries
 
@@ -8662,8 +8857,8 @@ function Test-StressTestProgrammIsRunning {
                 $stressTestError = $stressTestError -Replace '\s*\d+\.', ''
             }
 
-            Write-Verbose($timestamp)
-            Write-Verbose('           Now found an error in the new entries of the log file!')
+            Write-VerboseText($timestamp)
+            Write-VerboseText('           Now found an error in the new entries of the log file!')
         }
     }
 
@@ -8719,7 +8914,7 @@ function Test-StressTestProgrammIsRunning {
         $lastFFTErrorEntry = $newLogEntries | Where-Object { $_.Line -Match 'Hardware failure detected running \d+K FFT size*' } | Select-Object -Last 1
 
         if ($lastFFTErrorEntry) {
-            Write-Verbose('There was an FFT size provided in the error message, use it.')
+            Write-VerboseText('There was an FFT size provided in the error message, use it.')
 
             $hasMatched = $lastFFTErrorEntry -Match 'Hardware failure detected running (\d+)K FFT size'
             $lastRunFFT = if ($hasMatched) { [Int] $Matches[1] }   # $Matches is a fixed(?) variable name for -Match
@@ -8741,21 +8936,21 @@ function Test-StressTestProgrammIsRunning {
             # The max smallest FFT size is 240, so starting with 480 the order should get randomized
             # Large FFTs are not randomized, Huge FFTs and All FFTs are
 
-            Write-Verbose('No FFT size provided in the error message, make an educated guess.')
+            Write-VerboseText('No FFT size provided in the error message, make an educated guess.')
 
             # Temporary(?) solution
             if ($maxFFTSize -le $FFTMinMaxValues['SSE']['LARGE']['Max']) {
-                Write-Verbose('The maximum FFT size is within the range where we can still make an educated guess about the failed FFT size')
+                Write-VerboseText('The maximum FFT size is within the range where we can still make an educated guess about the failed FFT size')
 
                 # There were no log entries yet
                 if (!$allLogEntries -or $allLogEntries.Count -eq 0) {
-                    Write-Verbose('No results.txt exists yet, assuming the error happened on the first FFT size')
+                    Write-VerboseText('No results.txt exists yet, assuming the error happened on the first FFT size')
                     $lastRunFFT = $minFFTSize
                 }
 
                 # Get the last couple of rows and find the last passed FFT size
                 else {
-                    Write-Verbose('Trying to find the last passed FFT sizes')
+                    Write-VerboseText('Trying to find the last passed FFT sizes')
 
                     $lastFiveRows     = $allLogEntries | Select-Object -Last 5
                     $lastPassedFFTArr = @($lastFiveRows | Where-Object { $_ -like '*passed*' })  # This needs to be an array
@@ -8773,14 +8968,14 @@ function Test-StressTestProgrammIsRunning {
                     # No passed FFT was found, assume it's the first FFT size
                     if (!$lastPassedFFT) {
                         $lastRunFFT = $minFFTSize
-                        Write-Verbose('No passed FFT was found, assume it was the first FFT size: ' + ($lastRunFFT/1024))
+                        Write-VerboseText('No passed FFT was found, assume it was the first FFT size: ' + ($lastRunFFT/1024))
                     }
 
                     # If the last passed FFT size is the max selected FFT size, start at the beginning
                     elseif ($lastPassedFFT -eq $maxFFTSize) {
                         $lastRunFFT = $minFFTSize
-                        Write-Verbose('Last passed FFT size found: ' + ($lastPassedFFT/1024))
-                        Write-Verbose('The last passed FFT size is the max selected FFT size, use the min FFT size: ' + ($lastRunFFT/1024))
+                        Write-VerboseText('Last passed FFT size found: ' + ($lastPassedFFT/1024))
+                        Write-VerboseText('The last passed FFT size is the max selected FFT size, use the min FFT size: ' + ($lastRunFFT/1024))
                     }
 
                     # If the last passed FFT size is not the max size, check if the value doesn't show up at all in the FFT array
@@ -8788,15 +8983,15 @@ function Test-StressTestProgrammIsRunning {
                     # Example: Smallest FFT max = 21, but the actual last size tested is 20K
                     elseif (!$FFTSizes[$cpuTestMode].Contains($lastPassedFFT)) {
                         $lastRunFFT = $minFFTSize
-                        Write-Verbose('Last passed FFT size found: ' + ($lastPassedFFT/1024))
-                        Write-Verbose('The last passed FFT size does not show up in the FFTSizes array, assume it''s the first FFT size: ' + ($lastRunFFT/1024))
+                        Write-VerboseText('Last passed FFT size found: ' + ($lastPassedFFT/1024))
+                        Write-VerboseText('The last passed FFT size does not show up in the FFTSizes array, assume it''s the first FFT size: ' + ($lastRunFFT/1024))
                     }
 
                     # If it's not the max value and it does show up in the FFT array, select the next value
                     else {
                         $lastRunFFT = $FFTSizes[$cpuTestMode][$FFTSizes[$cpuTestMode].indexOf($lastPassedFFT)+1]
-                        Write-Verbose('Last passed FFT size found: ' + ($lastPassedFFT/1024))
-                        Write-Verbose('Last run FFT size assumed:  ' + ($lastRunFFT/1024))
+                        Write-VerboseText('Last passed FFT size found: ' + ($lastPassedFFT/1024))
+                        Write-VerboseText('Last run FFT size assumed:  ' + ($lastRunFFT/1024))
                     }
                 }
 
@@ -8809,12 +9004,12 @@ function Test-StressTestProgrammIsRunning {
                     Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
                 }
 
-                Write-Verbose('The last 5 entries in the results.txt:')
+                Write-VerboseText('The last 5 entries in the results.txt:')
 
                 $lastFiveRows | ForEach-Object -Begin {
                     $index = $allLogEntries.Count - 5
                 } -Process {
-                    Write-Verbose('- [Line ' + $index + '] ' + $_)
+                    Write-VerboseText('- [Line ' + $index + '] ' + $_)
                     $index++
                 }
 
@@ -8844,16 +9039,16 @@ function Test-StressTestProgrammIsRunning {
                     Write-ColorText('ERROR: No additional FFT size information found in the results.txt') Magenta
                 }
 
-                Write-Verbose('The max FFT size was outside of the range where it still follows a numerical order')
-                Write-Verbose('The selected max FFT size:         ' + ($maxFFTSize/1024))
-                Write-Verbose('The limit for the numerical order: ' + ($FFTMinMaxValues['SSE']['LARGE']['Max']/1024))
+                Write-VerboseText('The max FFT size was outside of the range where it still follows a numerical order')
+                Write-VerboseText('The selected max FFT size:         ' + ($maxFFTSize/1024))
+                Write-VerboseText('The limit for the numerical order: ' + ($FFTMinMaxValues['SSE']['LARGE']['Max']/1024))
 
 
-                Write-Verbose('The last 5 entries in the results.txt:')
+                Write-VerboseText('The last 5 entries in the results.txt:')
                 $lastFiveRows | ForEach-Object -Begin {
                     $index = $allLogEntries.Count - 5
                 } -Process {
-                    Write-Verbose('- [Line ' + $index + '] ' + $_)
+                    Write-VerboseText('- [Line ' + $index + '] ' + $_)
                     $index++
                 }
 
@@ -8865,13 +9060,13 @@ function Test-StressTestProgrammIsRunning {
 
     # Aida64
     elseif ($isAida64) {
-        Write-Verbose('The stress test program is Aida64, no detailed error detection available')
+        Write-VerboseText('The stress test program is Aida64, no detailed error detection available')
     }
 
 
     # y-cruncher with logging wrapper
     elseif ($isYCruncherWithLogging) {
-        Write-Verbose('The stress test program is y-cruncher with logging wrapper enabled')
+        Write-VerboseText('The stress test program is y-cruncher with logging wrapper enabled')
         $lastRunTest = $null
         $lastErrorMessage = $null
 
@@ -8954,11 +9149,11 @@ function Test-StressTestProgrammIsRunning {
         }
 
 
-        Write-Verbose('The last 20 entries of the output:')
+        Write-VerboseText('The last 20 entries of the output:')
         $lastTwentyRows | ForEach-Object -Begin {
             $index = $allLogEntries.Count - 20
         } -Process {
-            Write-Verbose('- [Line ' + $index + '] ' + $_)
+            Write-VerboseText('- [Line ' + $index + '] ' + $_)
             $index++
         }
 
@@ -8968,31 +9163,31 @@ function Test-StressTestProgrammIsRunning {
 
     # y-cruncher without the wrapper
     elseif ($isYCruncher -or $isYCruncherOld) {
-        Write-Verbose('The stress test program is y-cruncher, no detailed error detection available')
+        Write-VerboseText('The stress test program is y-cruncher, no detailed error detection available')
     }
 
 
     # Linpack
     elseif ($isLinpack) {
-        Write-Verbose('The stress test program is Linpack, no additional error details available')
+        Write-VerboseText('The stress test program is Linpack, no additional error details available')
 
         # Look for the line the error message appears in
         $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*fail.*' } | Select-Object -Last 1
 
         # This is the same message as already displayed, so don't show it by default
         if ($errorResults) {
-            Write-Verbose('ERROR: The line with the error:')
-            Write-Verbose($errorResults.Line)
+            Write-VerboseText('ERROR: The line with the error:')
+            Write-VerboseText($errorResults.Line)
         }
 
         # Get the last 10 rows
         $lastTenRows = $allLogEntries | Select-Object -Last 10
 
-        Write-Verbose('The last 10 entries of the output:')
+        Write-VerboseText('The last 10 entries of the output:')
         $lastTenRows | ForEach-Object -Begin {
             $index = $allLogEntries.Count - 10
         } -Process {
-            Write-Verbose('- [Line ' + $index + '] ' + $_)
+            Write-VerboseText('- [Line ' + $index + '] ' + $_)
             $index++
         }
     }
@@ -9052,7 +9247,7 @@ function Resolve-StressTestProgrammIsRunningError {
         [Parameter(Mandatory=$true)] $ErrorObj
     )
 
-    Write-Verbose('There has been some error in Test-StressTestProgrammIsRunning, checking (' + $checkType + ')')
+    Write-VerboseText('There has been some error in Test-StressTestProgrammIsRunning, checking (' + $checkType + ')')
 
 
     # Check if we're in Automatic Test Mode and need to increase the Curve Optimizer / voltage offset value
@@ -9070,7 +9265,7 @@ function Resolve-StressTestProgrammIsRunningError {
     if ($ExceptionObj.Exception -and $ExceptionObj.Exception.Message -eq 'StressTestError') {
         if ($checkType -eq 'LAST_ERROR_CHECK') {
             # Try to close the stress test program process if it is still running
-            Write-Verbose('Trying to close the stress test program to re-start it')
+            Write-VerboseText('Trying to close the stress test program to re-start it')
 
             # Set the flag to only stop the stress test program if possible
             Close-StressTestProgram $true
@@ -9116,14 +9311,14 @@ function Resolve-StressTestProgrammIsRunningError {
         # And the process is still running of course
         # And it is still using enough CPU power
         elseif ($isYCruncherWithLogging -and !$settings.General.restartTestProgramForEachCore -and $ExceptionObj.Exception.InnerException.Message -notmatch 'PROCESSMISSING|CPULOAD') {
-            Write-Verbose('Running y-cruncher with the log wrapper and restartTestProgramForEachCore disabled')
-            Write-Verbose('And the process is still there resp. the process is still using enough CPU power')
-            Write-Verbose('Continue to the next core')
+            Write-VerboseText('Running y-cruncher with the log wrapper and restartTestProgramForEachCore disabled')
+            Write-VerboseText('And the process is still there resp. the process is still using enough CPU power')
+            Write-VerboseText('Continue to the next core')
         }
 
         # If it's not y-cruncher with logging, or the flag to restart is set, try to close and restart the stress test program process if it is still running
         else {
-            Write-Verbose('Trying to close the stress test program to re-start it')
+            Write-VerboseText('Trying to close the stress test program to re-start it')
 
             # Set the flag to only stop the stress test program if possible
             Close-StressTestProgram $true
@@ -9133,7 +9328,7 @@ function Resolve-StressTestProgrammIsRunningError {
             # Don't try to restart at this point if $settings.General.restartTestProgramForEachCore is set to 1
             # This will be taken care of in another routine
             if (!$settings.General.restartTestProgramForEachCore) {
-                Write-Verbose('restartTestProgramForEachCore is not set, restarting the test program right away')
+                Write-VerboseText('restartTestProgramForEachCore is not set, restarting the test program right away')
 
                 $timestamp = Get-Date -Format HH:mm:ss
                 Write-Text($timestamp + ' - Trying to restart ' + $selectedStressTestProgram)
@@ -9208,8 +9403,8 @@ function Test-AutomaticTestModeIncrease {
             Write-ColorText('Automatic Test Mode is enabled') Yellow
         }
 
-        Write-Debug('Trying to increase the ' + $autoModeDescription + ' value' + $forCore)
-        Write-Debug('The new ' + $autoModeDescription + ' value: ' + $newValueStr + ' (old: ' + $oldValueStr + ')')
+        Write-DebugText('Trying to increase the ' + $autoModeDescription + ' value' + $forCore)
+        Write-DebugText('The new ' + $autoModeDescription + ' value: ' + $newValueStr + ' (old: ' + $oldValueStr + ')')
 
 
         # Temporary increasement, will be overwritten on each start of an iteration
@@ -9259,12 +9454,12 @@ function Test-AutomaticTestModeIncrease {
             }
             else {
                 Write-ColorText('The flag to repeat the core is set, so repeating the test') Yellow
-                Write-Debug('Core test order array before: ' + $coreTestOrderArray)
+                Write-DebugText('Core test order array before: ' + $coreTestOrderArray)
 
                 # Re-insert the core to the order array
                 [Void] $coreTestOrderArray.Insert(0, $actualCoreNumber)
 
-                Write-Debug('Core test order array after:  ' + $coreTestOrderArray)
+                Write-DebugText('Core test order array after:  ' + $coreTestOrderArray)
 
                 # This sets the index to the one before this core, so it should fall on the same core again when we continue the loop
                 # This variable was passed as a reference, so we need to access the .Value property
@@ -9295,7 +9490,7 @@ function Test-AutomaticTestModeIncrease {
 #>
 function Get-NewLogfileEntries {
     $timestamp = Get-Date -Format HH:mm:ss
-    Write-Debug($timestamp + ' - Getting new log file entries')
+    Write-DebugText($timestamp + ' - Getting new log file entries')
 
     # Reset the newLogEntries array
     $Script:newLogEntries = [System.Collections.ArrayList]::new()
@@ -9305,7 +9500,7 @@ function Get-NewLogfileEntries {
 
     # No file, no check
     if (!$resultFileHandle) {
-        Write-Debug('           The stress test log file doesn''t exist yet')
+        Write-DebugText('           The stress test log file doesn''t exist yet')
         return
     }
 
@@ -9313,14 +9508,14 @@ function Get-NewLogfileEntries {
     # The size has increased, so something must have changed
     # It's either a new passed FFT entry, a [Timestamp], or an error
     if ($resultFileHandle.Length -le $previousFileSize) {
-        Write-Debug('           No file size change for the log file')
+        Write-DebugText('           No file size change for the log file')
         return
     }
 
     # Store the file size of the log file
     $Script:previousFileSize = $resultFileHandle.Length
 
-    Write-Debug('           Getting new log entries starting at position ' + $lastFilePosition + ' / Line ' + $lineCounter)
+    Write-DebugText('           Getting new log entries starting at position ' + $lastFilePosition + ' / Line ' + $lineCounter)
 
     # Initialize the file stream
     # Note: This throws both PSUseConsistentIndentation: "Indentation not consistent" and
@@ -9366,12 +9561,12 @@ function Get-NewLogfileEntries {
     # Close the file
     $streamReader.Close()
 
-    Write-Debug('           The new log file entries:')
+    Write-DebugText('           The new log file entries:')
     $newLogEntries | ForEach-Object {
-        Write-Debug('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
+        Write-DebugText('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
     }
 
-    Write-Debug('           New file position: ' + $lastFilePosition + ' / Line ' + $lineCounter)
+    Write-DebugText('           New file position: ' + $lastFilePosition + ' / Line ' + $lineCounter)
 }
 
 
@@ -9394,8 +9589,8 @@ function Set-StressTestProgramAffinities {
         [Parameter(Mandatory=$true)] [Int[]] $CpuArray
     )
 
-    Write-Debug('The number of Processor Groups:       ' + $numProcessorGroups)
-    Write-Debug('The number of CPUs in the last group: ' + $numCpusInLastProcessorGroup)
+    Write-DebugText('The number of Processor Groups:       ' + $numProcessorGroups)
+    Write-DebugText('The number of CPUs in the last group: ' + $numCpusInLastProcessorGroup)
 
 
     # Get the Processor Group for the CPU(s) to test
@@ -9403,7 +9598,7 @@ function Set-StressTestProgramAffinities {
     # that the first entry of the CPU array is sufficient to test
     $groupId = [Math]::floor((($cpuArray[0]) / 64))
 
-    Write-Debug('The group ID of the CPU to set to: ' + $groupId)
+    Write-DebugText('The group ID of the CPU to set to: ' + $groupId)
 
     if ($groupId -gt $numProcessorGroups) {
         throw('Invalid groupId. Group ' + $groupId + ' is out of range. Maximum groupId is ' + $numProcessorGroups)
@@ -9426,7 +9621,7 @@ function Set-StressTestProgramAffinities {
         }
     }
 
-    Write-Debug('The number of processors in this group: ' + $processorsInGroup)
+    Write-DebugText('The number of processors in this group: ' + $processorsInGroup)
 
 
     # Modulo 64 the $cpuArray so the mask is correct for the given group
@@ -9439,7 +9634,7 @@ function Set-StressTestProgramAffinities {
     }
 
 
-    Write-Debug('The IDs of the CPUs in its own group: ' + $cpuPerGroupArray)
+    Write-DebugText('The IDs of the CPUs in its own group: ' + $cpuPerGroupArray)
 
 
     # Calculate the new affinities
@@ -9457,7 +9652,7 @@ function Set-StressTestProgramAffinities {
             $affinity += [UInt64] [Math]::Pow(2, $cpuNumber)    # CPU 63 would overflow signed [Int64]
         }
 
-        Write-Debug('Calculated the group specific affinity as ' + $affinity + ' [CPUs ' + ($cpuNumbersArray -Join ' and ') + ', Group ' + $groupId + ']')
+        Write-DebugText('Calculated the group specific affinity as ' + $affinity + ' [CPUs ' + ($cpuNumbersArray -Join ' and ') + ', Group ' + $groupId + ']')
 
         $affinities += $affinity
     }
@@ -9470,12 +9665,12 @@ function Set-StressTestProgramAffinities {
             $affinity  = [UInt64] [Math]::Pow(2, $cpuNumber)    # CPU 63 would overflow signed [Int64]
             $affinities += $affinity
 
-            Write-Debug('Calculated the group specific affinity as ' + $affinity + ' [CPU ' + $cpuNumber + ', Group ' + $groupId + ']')
+            Write-DebugText('Calculated the group specific affinity as ' + $affinity + ' [CPU ' + $cpuNumber + ', Group ' + $groupId + ']')
         }
     }
 
 
-    Write-Debug('All calculated group specific affinities: ' + ($affinities -Join ' & '))
+    Write-DebugText('All calculated group specific affinities: ' + ($affinities -Join ' & '))
 
 
     # Go through the stress test threads that we identified earlier, and evenly distribute the CPU affinities across the threads
@@ -9484,8 +9679,8 @@ function Set-StressTestProgramAffinities {
     # And let's hope that these threads never change while the test is running!
     $numberOfStressTestThreads = $stressTestThreads.Count
 
-    Write-Debug('Found number of stress test threads: ' + $numberOfStressTestThreads)
-    Write-Debug('The original affinities array: ' + ($affinities -Join ', '))
+    Write-DebugText('Found number of stress test threads: ' + $numberOfStressTestThreads)
+    Write-DebugText('The original affinities array: ' + ($affinities -Join ', '))
 
     # Expand the affinities array to the number of threads
     if ($numberOfStressTestThreads -gt 2 -and $affinities.Count -gt 1) {
@@ -9498,27 +9693,27 @@ function Set-StressTestProgramAffinities {
         }
     }
 
-    Write-Debug('The final affinities array:    ' + ($affinities -Join ', '))
+    Write-DebugText('The final affinities array:    ' + ($affinities -Join ', '))
 
     # Now set the affinities
     for ($i = 0; $i -lt $numberOfStressTestThreads; $i++) {
-        Write-Debug('Processing stress test thread number ' + $i)
+        Write-DebugText('Processing stress test thread number ' + $i)
 
         $stressTestThread = $stressTestThreads[$i]
 
-        Write-Verbose('Trying to set the affinity for thread ID: ' + $stressTestThread.Id)
+        Write-VerboseText('Trying to set the affinity for thread ID: ' + $stressTestThread.Id)
 
 
         # If there's more than one affinity, use the one that matches the thread number
         # Otherwise use the same one
         $affinity = $(if ($affinities.Count -ge ($i+1) -and $affinities[$i]) { $affinities[$i] } else { $affinities[0] })
 
-        Write-Verbose('- Processor Group: ' + $groupId + ' | Affinity: ' + $affinity)
+        Write-VerboseText('- Processor Group: ' + $groupId + ' | Affinity: ' + $affinity)
 
 
         try {
             Set-ThreadGroupAffinity -ThreadId $stressTestThread.Id -Affinity $affinity -Group $groupId
-            Write-Debug('Successfully set the group affinity for thread ID ' + $stressTestThread.Id + ' to ' + $affinity + ' within group ' + $groupId)
+            Write-DebugText('Successfully set the group affinity for thread ID ' + $stressTestThread.Id + ' to ' + $affinity + ' within group ' + $groupId)
         }
         catch {
             $errorMessage  = 'Failed to set the group affinity for thread ID ' + $stressTestThread.Id + '.'
@@ -9599,16 +9794,16 @@ function Get-AffinityValue {
         }
     }
 
-    Write-Debug('Get-AffinityValue for CPUs ' + (($cpuNumbersArray | Sort-Object) -Join ' and '))
-    Write-Debug('Number of processors in the group of the CPUs: ' + $processorsInGroup)
+    Write-DebugText('Get-AffinityValue for CPUs ' + (($cpuNumbersArray | Sort-Object) -Join ' and '))
+    Write-DebugText('Number of processors in the group of the CPUs: ' + $processorsInGroup)
 
     $affinityBitMaskString = Convert-CpuArrayToAffinityMaskString -CpuArray $CpuArray -ProcessorCount $processorsInGroup
 
-    Write-Debug('The affinity mask string: ' + $affinityBitMaskString)
+    Write-DebugText('The affinity mask string: ' + $affinityBitMaskString)
 
     $affinityValue = [System.Convert]::ToInt64($affinityBitMaskString, 2)
 
-    Write-Debug('The affinity value:       ' + $affinityValue)
+    Write-DebugText('The affinity value:       ' + $affinityValue)
 
     return $affinityValue
 }
@@ -9646,7 +9841,7 @@ function Get-ThreadGroupAffinity {
 
         if (!$result) {
             if ($errorCode -gt 0) {
-                Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
                 $errorResult = Get-DotNetErrorMessage $errorCode
 
                 throw('Failed to get thread group affinity.' + [Environment]::NewLine + 'Error code: ' + $errorResult.errorCode + '. Error message: ' + $errorResult.errorMessage)
@@ -9686,21 +9881,21 @@ function Set-ThreadGroupAffinity {
         [Parameter(Mandatory=$true)] [Int] $Group
     )
 
-    Write-Debug('Getting the thread handle for thread ID: ' + $ThreadId)
+    Write-DebugText('Getting the thread handle for thread ID: ' + $ThreadId)
 
     # Open the thread with the necessary access rights
     $threadHandle = [ThreadHandler]::OpenThread([ThreadHandler]::THREAD_SET_INFORMATION -bor [ThreadHandler]::THREAD_QUERY_INFORMATION, $false, $ThreadId)
 
-    Write-Debug('The returned thread handle: ' + $threadHandle)
+    Write-DebugText('The returned thread handle: ' + $threadHandle)
 
     # The thread doesn't seem to exist anymore
     if ($threadHandle -eq [IntPtr]::Zero) {
-        Write-Verbose('We didn''t receive a thread handle for the thread ID ' + $ThreadId + '!')
-        Write-Debug('A list of all the threads of the stress test process:')
+        Write-VerboseText('We didn''t receive a thread handle for the thread ID ' + $ThreadId + '!')
+        Write-DebugText('A list of all the threads of the stress test process:')
 
         $threadFound = $false
         $stressTestProcess.Threads | ForEach-Object {
-            Write-Debug($_ | Format-List | Out-String)
+            Write-DebugText($_ | Format-List | Out-String)
 
             if ($_.Id -eq $ThreadId) {
                 $threadFound = $true
@@ -9733,7 +9928,7 @@ function Set-ThreadGroupAffinity {
 
         if (!$result) {
             if ($errorCode -gt 0) {
-                Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
                 $errorResult = Get-DotNetErrorMessage $errorCode
 
                 throw('Failed to set thread group affinity.' + [Environment]::NewLine + 'Error code: ' + $errorResult.errorCode + '. Error message: ' + $errorResult.errorMessage)
@@ -9778,10 +9973,40 @@ function Get-StressTestProgramAffinities {
     [Void]
 #>
 function Save-LogFileDataToDisk {
-    Write-Debug('           Trying to flush the write cache to disk for drive: ' + $scriptDriveLetter)
+    Write-DebugText('           Trying to flush the write cache to disk for drive: ' + $scriptDriveLetter)
 
     # Start it as a job to not block the script execution
     Write-VolumeCache -AsJob -DriveLetter $scriptDriveLetter -ErrorAction Ignore | Out-Null
+}
+
+
+
+<#
+.DESCRIPTION
+    Check if we the Windows Event Log service is available
+.OUTPUTS
+    [Bool] $true if it is running
+#>
+function Test-EventLogService {
+    # The service itself may not be available
+    try {
+        $eventLogService = Get-Service 'EventLog'
+        
+        if (!($eventLogService | Get-Member Status) -or $eventLogService.Status -ne 'Running' ) {
+            Write-VerboseText('The Event Log service is not available')
+            $Script:eventLogAvailable = $false
+            $Script:canUseWindowsEventLog = $false
+            return $false
+        }
+    }
+    catch {
+        Write-VerboseText('Error while checking for the Event Log service, it is not available')
+        $Script:eventLogAvailable = $false
+        $Script:canUseWindowsEventLog = $false
+        return $false
+    }
+
+    return $true
 }
 
 
@@ -9796,20 +10021,21 @@ function Save-LogFileDataToDisk {
     [Void]
 #>
 function Add-AppEventLogSource {
-    Write-Verbose('Checking if we need to add the Event Log Source for CoreCycler')
+    Write-VerboseText('Checking if we can and need to add the Event Log Source for CoreCycler')
 
     $askToAddEventLog = $false
     $startedNewAdminProcess = $null
 
+
     try {
         if ([System.Diagnostics.EventLog]::SourceExists('CoreCycler') -eq $false) {
-            Write-Debug('The Event Log Source "CoreCycler" does not exist yet (#1)')
+            Write-DebugText('The Event Log Source "CoreCycler" does not exist yet (#1)')
             $askToAddEventLog = $true
         }
 
         # All good, continue
         else {
-            Write-Debug('The Event Log Source "CoreCycler" already exist, nothing to do')
+            Write-DebugText('The Event Log Source "CoreCycler" already exist, nothing to do')
             $Script:canUseWindowsEventLog = $true
             return
         }
@@ -9821,13 +10047,13 @@ function Add-AppEventLogSource {
     # It will not throw an exeption if the source was found in "Application"
     catch [System.Security.SecurityException] {
         # We assume that every SecurityException is due to not being able to search the "Security" part of the Event Log
-        Write-Debug('Expected exception found, the Event Log Source "CoreCycler" does not exist yet (#2)')
+        Write-DebugText('Expected exception found, the Event Log Source "CoreCycler" does not exist yet (#2)')
         $askToAddEventLog = $true
     }
 
     # Any other exception should be something else, so throw it
     catch {
-        Write-Debug('There was an unexpected exception when trying to get the Event Log Source!')
+        Write-DebugText('There was an unexpected exception when trying to get the Event Log Source!')
         throw $_
     }
 
@@ -9928,7 +10154,7 @@ function Write-AppEventLog {
         [Parameter(Mandatory=$false)] [String] $infoString3
     )
 
-    Write-Debug('Adding Event Log entry: ' + $type)
+    Write-DebugText('Adding Event Log entry: ' + $type)
 
     $wheaTypes = @{
         'script_started'    = @{
@@ -9984,7 +10210,7 @@ function Write-AppEventLog {
     }
 
     if (!$wheaTypes[$type]) {
-        Write-Debug('The provided type "' + $type + '" doesn''t exist for the Event Log Writer')
+        Write-DebugText('The provided type "' + $type + '" doesn''t exist for the Event Log Writer')
         return
     }
 
@@ -9995,21 +10221,21 @@ function Write-AppEventLog {
     $message     = $wheaTypes[$type]['message']
 
     try {
-        Write-Debug('Adding the Windows Event Log entry:')
+        Write-DebugText('Adding the Windows Event Log entry:')
 
         if ($message) {
             $messageArray = @($message -Split '\r?\n')
 
             foreach ($line in $messageArray) {
-                Write-Debug('[EVENTLOG] ' + $line)
+                Write-DebugText('[EVENTLOG] ' + $line)
             }
         }
 
         [System.Diagnostics.EventLog]::WriteEntry($eventSource, $message, $entryType, $eventId, 0)
     }
     catch {
-        Write-Debug('Couldn''t add the Event Log entry!')
-        Write-Debug($_)
+        Write-DebugText('Couldn''t add the Event Log entry!')
+        Write-DebugText($_)
     }
 }
 
@@ -10059,20 +10285,20 @@ function Compare-WheaErrorEntries {
     )
 
     $timestamp = Get-Date -Format HH:mm:ss
-    Write-Debug($timestamp + ' - Looking for new WHEA errors')
+    Write-DebugText($timestamp + ' - Looking for new WHEA errors')
 
     $lastWheaError = Get-LastWheaError
 
-    Write-Debug('           Core Start Date:        ' + $coreStartDate.ToString())
-    Write-Debug('           Stored WHEA Error Date: ' + $storedWheaError.TimeCreated.ToString())
-    Write-Debug('           Last WHEA Error Date:   ' + $lastWheaError.TimeCreated.ToString())
+    Write-DebugText('           Core Start Date:        ' + $coreStartDate.ToString())
+    Write-DebugText('           Stored WHEA Error Date: ' + $storedWheaError.TimeCreated.ToString())
+    Write-DebugText('           Last WHEA Error Date:   ' + $lastWheaError.TimeCreated.ToString())
 
     if ($lastWheaError.RecordId -eq $storedWheaError.RecordId) {
-        Write-Verbose('           No new WHEA error')
+        Write-VerboseText('           No new WHEA error')
         return
     }
 
-    Write-Verbose('           New WHEA error found!')
+    Write-VerboseText('           New WHEA error found!')
 
     # Store this new error
     if ($lastWheaError.RecordId -ne $storedWheaError.RecordId) {
@@ -10139,8 +10365,8 @@ function Convert-WheaMessageToApicId {
     Has basically no details, just the Length and RawData
     #>
 
-    Write-Debug('Parsing the WHEA entry')
-    Write-Debug('Id: ' + $wheaErrorEntry.Id)
+    Write-DebugText('Parsing the WHEA entry')
+    Write-DebugText('Id: ' + $wheaErrorEntry.Id)
 
     # 18 = Fatal Hardware Error
     # 19 = Correctable Hardware Error
@@ -10336,8 +10562,8 @@ function Get-DotNetErrorMessage {
     $errorMessage = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($errorMessagePtr)
     #>
 
-    Write-Debug('Error Code:    ' + $errorCode)
-    Write-Debug('Error Message: ' + $errorMessage)
+    Write-DebugText('Error Code:    ' + $errorCode)
+    Write-DebugText('Error Message: ' + $errorMessage)
 
     return @{
         'errorMessage' = $errorMessage
@@ -10402,13 +10628,15 @@ function Add-ToErrorCollection {
     The main functionality
 #>
 
+
+# Error Checks
+
+# We need the logs and the configs directory to exist
 try {
-    # We need the logs directory to exist
     if (!(Test-Path -Path $logFilePathAbsolute)) {
         $null = New-Item $logFilePathAbsolute -ItemType Directory
     }
 
-    # We need the configs directory to exist
     if (!(Test-Path -Path $configsPathAbsolute)) {
         $null = New-Item $configsPathAbsolute -ItemType Directory
     }
@@ -10417,8 +10645,6 @@ catch {
     Exit-WithFatalError -text $_
 }
 
-
-# Error Checks
 
 # PowerShell version too low
 # This is a neat flag
@@ -10437,20 +10663,19 @@ if ($PSVersionTable.PSVersion.Major -gt 5) {
     Exit-WithFatalError
 }
 
-
-Write-Verbose('Started the script at ' + $scriptStartDate.ToString('yyyy-MM-dd HH:mm:ss'))
+Write-VerboseText('Started the script at ' + $scriptStartDate.ToString('yyyy-MM-dd HH:mm:ss'))
 
 
 # Check the directory we're running from
-Write-Debug('PSScriptRoot: ' + $PSScriptRoot)
+Write-DebugText('PSScriptRoot: ' + $PSScriptRoot)
 
 
 # Please don't use OneDrive or Dropbox
 if ($PSScriptRoot -Match '\\(OneDrive)\\' -or $PSScriptRoot -Match '\\(Dropbox)\\'  -or $PSScriptRoot -Match '\\(_tests)\\') {
     $syncFolder = $Matches[1]
 
-    Write-Verbose('Synchronized directory detected: ' + $syncFolder)
-    Write-Debug('Checking if the corresponding binary is still running')
+    Write-VerboseText('Synchronized directory detected: ' + $syncFolder)
+    Write-DebugText('Checking if the corresponding binary is still running')
 
     # We assume that the directory name equals the program name (e.g. OneDrive -> OneDrive.exe)
     $syncPrograms = @{
@@ -10473,13 +10698,13 @@ if ($PSScriptRoot -Match '\\(OneDrive)\\' -or $PSScriptRoot -Match '\\(Dropbox)\
     $syncProgramName     = $syncPrograms[$syncFolder.ToLowerInvariant()]['name']
     $checkForSyncProcess = Get-Process $syncProgramProcess -ErrorAction Ignore
 
-    Write-Debug('The synchronization process to check for: ' + $syncProgramProcess)
+    Write-DebugText('The synchronization process to check for: ' + $syncProgramProcess)
 
     if ($checkForSyncProcess) {
-        Write-Verbose('The synchronization binary is running!')
-        Write-Debug('Sync Program Name: ' + $syncProgramName)
-        Write-Debug('Sync Program Path: ' + $checkForSyncProcess.Path)
-        Write-Debug('Throwing error and exiting')
+        Write-VerboseText('The synchronization binary is running!')
+        Write-DebugText('Sync Program Name: ' + $syncProgramName)
+        Write-DebugText('Sync Program Path: ' + $checkForSyncProcess.Path)
+        Write-DebugText('Throwing error and exiting')
 
         Write-Host('')
         Write-Host('FATAL ERROR: The directory seems to indicate that you''re trying') -ForegroundColor Red
@@ -10507,7 +10732,7 @@ if ($PSScriptRoot -Match '\\(OneDrive)\\' -or $PSScriptRoot -Match '\\(Dropbox)\
     }
 
     else {
-        Write-Verbose('The synchronization binary is not running, assume we''re ok')
+        Write-VerboseText('The synchronization binary is not running, assume we''re ok')
     }
 }
 
@@ -10551,11 +10776,36 @@ $Error.clear()
 
 # Wrap the main functionality in a try {} block, so that the finally {} block is executed even if CTRL+C is pressed
 try {
-    # Gets the log level, so that Write-Debug and Write-Verbose work correctly
+    # Gets the log level, so that Write-DebugText and Write-VerboseText work correctly
     $Script:logLevel = Get-InitialLogLevel
 
-    Write-Debug('The initial log level: ' + $Script:logLevel)
-    Write-Debug('Starting the main functionality block')
+    Write-DebugText('The initial log level: ' + $Script:logLevel)
+    Write-DebugText('Starting the main functionality block')
+
+
+
+    # Disable the QuickEdit Mode feature of the terminal window
+    # The QuickEdit Mode can freeze the console output and the script execution, and we don't want this
+    $consoleMode = [ChangeConsoleMode]::GetMode()
+
+    Write-DebugText('The original console mode: ' + $consoleMode)
+
+    $disableQuickEditModeResult = [ChangeConsoleMode]::DisableQuickEdit()
+    $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+    if ($disableQuickEditModeResult) {
+        Write-DebugText('Disabled the QuickEdit Mode feature')
+    }
+    else {
+        Write-DebugText('Failed to disabled the QuickEdit Mode feature. (Result ' + $disableQuickEditModeResult + ')')
+
+        if ($errorCode -gt 0) {
+            Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+            $errorResult = Get-DotNetErrorMessage $errorCode
+            Write-DebugText($errorResult.errorMessage)
+        }
+    }
+
 
 
     # Remove the close button from our console window (or at least try to, it won't work for e.g. Windows Terminal)
@@ -10564,28 +10814,29 @@ try {
     # And the Automatic Test Mode requires administrator privileges, so the process *should* be started in its own window
     # It's not guaranteed though
     $parentMainWindowMenuHandle = [ConsoleWindowMenu]::GetSystemMenu($parentMainWindowHandle, $false)
-    $disableResult = [ConsoleWindowMenu]::DeleteMenu($parentMainWindowMenuHandle, [ConsoleWindowMenu]::SC_CLOSE, [ConsoleWindowMenu]::MF_BYCOMMAND)
+    $disableCloseButtonResult = [ConsoleWindowMenu]::DeleteMenu($parentMainWindowMenuHandle, [ConsoleWindowMenu]::SC_CLOSE, [ConsoleWindowMenu]::MF_BYCOMMAND)
     $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 
-    if ($disableResult) {
-        Write-Debug('Disabled the close button')
+    if ($disableCloseButtonResult) {
+        Write-DebugText('Disabled the close button')
     }
     else {
-        Write-Debug('Failed to disabled the close button. (Result ' + $disableResult + ')')
+        Write-DebugText('Failed to disabled the close button. (Result ' + $disableCloseButtonResult + ')')
 
         if ($errorCode -gt 0) {
-            Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+            Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
             $errorResult = Get-DotNetErrorMessage $errorCode
-            Write-Debug($errorResult.errorMessage)
+            Write-DebugText($errorResult.errorMessage)
         }
     }
+
 
 
     # Check if we can start the update check background job early, before truely parsing the settings
     $checkForEarlyUpdateCheck = Get-InitialUpdateCheckSetting
 
     if ($checkForEarlyUpdateCheck -and $checkForEarlyUpdateCheck['enabled'] -eq $true) {
-        Write-Debug('Update check is enabled, initializing the background job (early start)')
+        Write-DebugText('Update check is enabled, initializing the background job (early start)')
 
         # Store this in our global variable, which will be overwritten later when the settings are fully parsed
         $enableUpdateCheck = $checkForEarlyUpdateCheck['enabled']
@@ -10628,22 +10879,6 @@ try {
 
 
     # Get the cores with 2 threads and those with only 1
-    <#
-    $coresWithTwoThreads = @(0..($numPhysCores-1))
-    $coresWithOneThread  = @()
-
-    if ($hasAsymmetricCoreThreads) {
-        $numTheoreticalLogicalCores    = $numPhysCores * 2
-        $numCoresWithoutHyperthreading = $numTheoreticalLogicalCores - $numLogicalCores
-        $numCoresWithHyperthreading    = $numPhysCores - $numCoresWithoutHyperthreading
-
-        if ($numCoresWithoutHyperthreading -gt 0) {
-            $coresWithTwoThreads = @(0..($numCoresWithHyperthreading-1))
-            $coresWithOneThread  = @($numCoresWithHyperthreading..($numCoresWithoutHyperthreading+$numCoresWithHyperthreading-1))
-        }
-    }
-    #>
-
     $coresInfo['coreSmtStatus'].Keys | Sort-Object | ForEach-Object {
         $coreId = $_
         $smtStatus = $coresInfo['coreSmtStatus'][$coreId]
@@ -10685,11 +10920,11 @@ try {
 
 
     # Dump the settings to the log file
-    Write-Debug('')
-    Write-Debug('-------------------------------- The config file -------------------------------')
-    Write-Debug($configUserPath)
-    Write-Debug('--------------------------------------------------------------------------------')
-    Write-Debug('')
+    Write-DebugText('')
+    Write-DebugText('-------------------------------- The config file -------------------------------')
+    Write-DebugText($configUserPath)
+    Write-DebugText('--------------------------------------------------------------------------------')
+    Write-DebugText('')
 
     $configFile = Get-ChildItem -Path $configUserPath
     $reader = [System.IO.File]::OpenText($configFile)
@@ -10698,18 +10933,18 @@ try {
     $reader.Close()
 
     foreach ($line in $settingsArray) {
-        Write-Debug($line)
+        Write-DebugText($line)
     }
 
-    Write-Debug('')
-    Write-Debug('')
+    Write-DebugText('')
+    Write-DebugText('')
 
 
     if ($customConfigPath) {
-        Write-Debug('---------------------------- The custom config file ----------------------------')
-        Write-Debug($customConfigPath)
-        Write-Debug('--------------------------------------------------------------------------------')
-        Write-Debug('')
+        Write-DebugText('---------------------------- The custom config file ----------------------------')
+        Write-DebugText($customConfigPath)
+        Write-DebugText('--------------------------------------------------------------------------------')
+        Write-DebugText('')
 
         $configFile = Get-ChildItem -Path $customConfigPath
         $reader = [System.IO.File]::OpenText($configFile)
@@ -10718,31 +10953,33 @@ try {
         $reader.Close()
 
         foreach ($line in $settingsArray) {
-            Write-Debug($line)
+            Write-DebugText($line)
         }
 
-        Write-Debug('')
-        Write-Debug('')
+        Write-DebugText('')
+        Write-DebugText('')
     }
 
 
-    Write-Debug('------------------------------ The parsed settings -----------------------------')
+    Write-DebugText('------------------------------ The parsed settings -----------------------------')
 
     foreach ($section in $settings.GetEnumerator()) {
         if (($null -ne $section.Value -and ![String]::IsNullOrWhiteSpace($section.Value)) -and $section.Value -is [Hashtable]) {
             foreach ($setting in $section.Value.GetEnumerator()) {
-                Write-Debug('[' + $section.Name +'] ' + $setting.Name + ' = ' + $setting.Value)
+                Write-DebugText('[' + $section.Name +'] ' + $setting.Name + ' = ' + $setting.Value)
             }
         }
         else {
-            Write-Debug('[No Section] ' + $section.Name + ' = ' + $section.Value)
+            Write-DebugText('[No Section] ' + $section.Name + ' = ' + $section.Value)
         }
 
-        Write-Debug('')
+        Write-DebugText('')
     }
 
-    Write-Debug('--------------------------------------------------------------------------------')
-    Write-Debug('')
+    Write-DebugText('--------------------------------------------------------------------------------')
+    Write-DebugText('--------------------------------------------------------------------------------')
+    Write-DebugText('--------------------------------------------------------------------------------')
+    Write-DebugText('')
 
 
     # Start a request to check for an update
@@ -10750,7 +10987,7 @@ try {
     # The result of this job will be received later
     # We may have started this job already earlier, so check if it's already set
     if ($enableUpdateCheck -and !$updateCheckJob) {
-        Write-Debug('Update check is enabled, initializing the background job')
+        Write-DebugText('Update check is enabled, initializing the background job')
 
         $updateCheckJob = Start-UpdateCheckBackgroundJob
     }
@@ -10768,22 +11005,22 @@ try {
     $freeMemory  = $winOperatingSystem.FreePhysicalMemory * 1KB                     # This is returned in KB, so we multiply it
 
 
-    Write-Verbose('')
-    Write-Verbose('Operating System:')
-    Write-Verbose('OS:          ' + $winOperatingSystem.Caption)
-    Write-Verbose('Version:     ' + $winOperatingSystem.Version)
-    Write-Verbose('BuildNumber: ' + $winOperatingSystem.BuildNumber)
-    Write-Verbose('CSDVersion:  ' + $winOperatingSystem.CSDVersion)
-    Write-Verbose('CodeSet:     ' + $winOperatingSystem.CodeSet)
-    Write-Verbose('CountryCode: ' + $winOperatingSystem.CountryCode)
-    Write-Verbose('OSLanguage:  ' + $winOperatingSystem.OSLanguage)
-    Write-Verbose('Locale:      ' + $winOperatingSystem.Locale + ' (hex -> int -> ' + [System.Convert]::ToInt32($winOperatingSystem.Locale, 16) + ')')
-    Write-Verbose('Locale Name: ' + $currentLocale.DisplayName + ' (' + $currentLocale.Name + ')')
-    Write-Verbose('Free Memory: ' + [Math]::Round($freeMemory / 1MB) + ' MB')
-    Write-Verbose('Script Root: ' + $PSScriptRoot)
+    Write-VerboseText('')
+    Write-VerboseText('Operating System:')
+    Write-VerboseText('OS:          ' + $winOperatingSystem.Caption)
+    Write-VerboseText('Version:     ' + $winOperatingSystem.Version)
+    Write-VerboseText('BuildNumber: ' + $winOperatingSystem.BuildNumber)
+    Write-VerboseText('CSDVersion:  ' + $winOperatingSystem.CSDVersion)
+    Write-VerboseText('CodeSet:     ' + $winOperatingSystem.CodeSet)
+    Write-VerboseText('CountryCode: ' + $winOperatingSystem.CountryCode)
+    Write-VerboseText('OSLanguage:  ' + $winOperatingSystem.OSLanguage)
+    Write-VerboseText('Locale:      ' + $winOperatingSystem.Locale + ' (hex -> int -> ' + [System.Convert]::ToInt32($winOperatingSystem.Locale, 16) + ')')
+    Write-VerboseText('Locale Name: ' + $currentLocale.DisplayName + ' (' + $currentLocale.Name + ')')
+    Write-VerboseText('Free Memory: ' + [Math]::Round($freeMemory / 1MB) + ' MB')
+    Write-VerboseText('Script Root: ' + $PSScriptRoot)
 
-    Write-Verbose('')
-    Write-Verbose('APIC IDs:')
+    Write-VerboseText('')
+    Write-VerboseText('APIC IDs:')
 
     $maxLengthCpu    = ($coresInfo['cpuToApicId'].Keys | Measure-Object -Maximum).Maximum.ToString().Length
     $maxLengthAcpiId = ($coresInfo['apicIdToCpu'].Keys | Measure-Object -Maximum).Maximum.ToString().Length
@@ -10800,7 +11037,7 @@ try {
         $str += '  -> Core ' + ($coreId.ToString().PadLeft($maxLengthCore, ' '))
         $str += ' (SMT ' + $(if ($smtStatus) { 'On' } else { 'Off' }) + ')'
 
-        Write-Verbose($str)
+        Write-VerboseText($str)
     }
 
 
@@ -10821,12 +11058,17 @@ try {
         # Also check if the drive "letter" is an actual drive, and not e.g. a network share
         $canUseFlushToDisk = ($canUseFlushToDisk = $scriptDriveLetter -and $scriptDriveLetter -match '[a-z]')
 
-        Write-Debug("Can we use the flush to disk functionality: " + $canUseFlushToDisk)
+        Write-DebugText("Can we use the flush to disk functionality: " + $canUseFlushToDisk)
     }
 
 
     # Get last WHEA error
     if ($settings.General.lookForWheaErrors -gt 0) {
+        if (!(Test-EventLogService)) {
+            Exit-WithFatalError -text ('"[General] lookForWheaErrors" was set to 1, but the Windows Event Log service is not running!')
+        }
+
+
         $storedWheaError = Get-LastWheaError
 
         # DEBUG
@@ -10852,9 +11094,9 @@ try {
 
 
     # The process id of this and the calling process
-    Write-Debug('The script process id (PID):   ' + $scriptProcessId)
-    Write-Debug('The parent process id:         ' + $parentProcessId)
-    Write-Debug('The parent main window handle: ' + $parentMainWindowHandle)
+    Write-DebugText('The script process id (PID):   ' + $scriptProcessId)
+    Write-DebugText('The parent process id:         ' + $parentProcessId)
+    Write-DebugText('The parent main window handle: ' + $parentMainWindowHandle)
 
 
     # Try to get the localized counter names
@@ -10862,12 +11104,12 @@ try {
     # The "enablePerformanceCounters" is the shortcut for this
     if ($enablePerformanceCounters) {
         try {
-            Write-Verbose('Trying to get the localized performance counter names')
+            Write-VerboseText('Trying to get the localized performance counter names')
 
             $counterNameIds = Get-PerformanceCounterIDs $englishCounterNames
 
             $englishCounterNames.GetEnumerator() | ForEach-Object {
-                Write-Verbose(('ID of "' + $_ + '": ').PadRight(43, ' ') + $(if ($counterNameIds[$_]) { $counterNameIds[$_] } else { 'NOT FOUND!' }))
+                Write-VerboseText(('ID of "' + $_ + '": ').PadRight(43, ' ') + $(if ($counterNameIds[$_]) { $counterNameIds[$_] } else { 'NOT FOUND!' }))
             }
 
             foreach ($performanceCounterName in $englishCounterNames) {
@@ -10875,9 +11117,9 @@ try {
                     Throw 'Could not get the ID for the Performance Counter Name "' + $performanceCounterName + '" from the registry!'
                 }
 
-                Write-Debug('Getting the localized name for "' + $performanceCounterName + '" with ID "' + $counterNameIds[$performanceCounterName] + '"')
+                Write-DebugText('Getting the localized name for "' + $performanceCounterName + '" with ID "' + $counterNameIds[$performanceCounterName] + '"')
                 $counterNames[$performanceCounterName] = Get-PerformanceCounterLocalName $counterNameIds[$performanceCounterName]
-                Write-Verbose(('The localized name for "' + $performanceCounterName + '": ').PadRight(43, ' ') + $counterNames[$performanceCounterName])
+                Write-VerboseText(('The localized name for "' + $performanceCounterName + '": ').PadRight(43, ' ') + $counterNames[$performanceCounterName])
             }
 
 
@@ -10885,9 +11127,9 @@ try {
             $counterNames['SearchString']  = '\\' + $counterNames['ID Process'] + '$'
             $counterNames['ReplaceString'] = '\'  + $counterNames['% Processor Time']
 
-            Write-Verbose(('FullName: ').PadRight(43, ' ')      + $counterNames['FullName'])
-            Write-Verbose(('SearchString: ').PadRight(43, ' ')  + $counterNames['SearchString'])
-            Write-Verbose(('ReplaceString: ').PadRight(43, ' ') + $counterNames['ReplaceString'])
+            Write-VerboseText(('FullName: ').PadRight(43, ' ')      + $counterNames['FullName'])
+            Write-VerboseText(('SearchString: ').PadRight(43, ' ')  + $counterNames['SearchString'])
+            Write-VerboseText(('ReplaceString: ').PadRight(43, ' ') + $counterNames['ReplaceString'])
 
             # Examples
             # English             German               Spanish                      French
@@ -10923,18 +11165,18 @@ try {
             $allCountersCurrent = (Get-ItemProperty -Path $keyCurrent -Name Counter).Counter
             $numCountersCurrent = $allCountersCurrent.Count
 
-            Write-Debug('The number of counters for English:         ' + $numCountersEnglish)
-            Write-Debug('The number of counters for CurrentLanguage: ' + $numCountersCurrent)
+            Write-DebugText('The number of counters for English:         ' + $numCountersEnglish)
+            Write-DebugText('The number of counters for CurrentLanguage: ' + $numCountersCurrent)
 
-            Write-Debug('')
-            Write-Debug('English Counters:')
-            Write-Debug('-------------------------------------------------------------------------')
-            Write-Debug($allCountersEnglish)
+            Write-DebugText('')
+            Write-DebugText('English Counters:')
+            Write-DebugText('-------------------------------------------------------------------------')
+            Write-DebugText($allCountersEnglish)
 
-            Write-Debug('')
-            Write-Debug('CurrentLanguage Counters:')
-            Write-Debug('-------------------------------------------------------------------------')
-            Write-Debug($allCountersCurrent)
+            Write-DebugText('')
+            Write-DebugText('CurrentLanguage Counters:')
+            Write-DebugText('-------------------------------------------------------------------------')
+            Write-DebugText($allCountersCurrent)
 
             Exit-WithFatalError
         }
@@ -11271,15 +11513,15 @@ try {
         $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 
         if ($shutdownBlockReasonCreateRetVal) {
-            Write-Verbose('Successfully created the shutdown block reason: (' + $shutdownBlockReasonCreateRetVal + ')')
+            Write-VerboseText('Successfully created the shutdown block reason: (' + $shutdownBlockReasonCreateRetVal + ')')
         }
         else {
-            Write-Verbose('Could not create the shutdown block reason! (Return value: ' + $shutdownBlockReasonCreateRetVal + ')')
+            Write-VerboseText('Could not create the shutdown block reason! (Return value: ' + $shutdownBlockReasonCreateRetVal + ')')
 
             if ($errorCode -gt 0) {
-                Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
                 $errorResult = Get-DotNetErrorMessage $errorCode
-                Write-Verbose($errorResult.errorMessage)
+                Write-VerboseText($errorResult.errorMessage)
             }
         }
     }
@@ -11300,13 +11542,13 @@ try {
 
     # Close all existing instances of the stress test program and start a new one with our config
     if ($stressTestProcess -or $windowProcess) {
-        Write-Verbose('There already exists an instance of ' + $selectedStressTestProgram + ', trying to close it')
+        Write-VerboseText('There already exists an instance of ' + $selectedStressTestProgram + ', trying to close it')
 
         if ($windowProcess) {
-            Write-Verbose('Window Process ID: ' + $windowProcess.Id + ' - ProcessName: ' + $windowProcess.ProcessName)
+            Write-VerboseText('Window Process ID: ' + $windowProcess.Id + ' - ProcessName: ' + $windowProcess.ProcessName)
         }
         if ($stressTestProcess) {
-            Write-Verbose('Stress Test ID: ' + $stressTestProcess.Id + ' - ProcessName: ' + $stressTestProcess.ProcessName)
+            Write-VerboseText('Stress Test ID: ' + $stressTestProcess.Id + ' - ProcessName: ' + $stressTestProcess.ProcessName)
         }
 
         Close-StressTestProgram
@@ -11330,43 +11572,43 @@ try {
 
     # Get the update check job at this point
     if ($enableUpdateCheck) {
-        Write-Debug('Getting the result of the update check background job')
+        Write-DebugText('Getting the result of the update check background job')
 
         $updateStartTime = Get-Date
         $updateCheckResult = $updateCheckJob | Wait-Job -Timeout 4 | Receive-Job
 
-        # Write-Debug('The returned result:')
+        # Write-DebugText('The returned result:')
 
         # if ($updateCheckResult) {
         #     foreach ($entry in $updateCheckResult.GetEnumerator()) {
         #         if ($entry.Name -ne 'messages') {
-        #             #Write-Debug($entry | Format-List | Out-String)
-        #             Write-Debug('{ ' + $entry.Name + ' = ' + $entry.Value + ' }')
+        #             #Write-DebugText($entry | Format-List | Out-String)
+        #             Write-DebugText('{ ' + $entry.Name + ' = ' + $entry.Value + ' }')
         #         }
         #     }
         # }
 
-        Write-Debug('Messages from the update background job:')
+        Write-DebugText('Messages from the update background job:')
 
         if (!$updateCheckResult -or !($updateCheckResult['messages'])) {
-            Write-Debug('No messages returned')
+            Write-DebugText('No messages returned')
         }
         else {
             foreach ($message in $updateCheckResult['messages']) {
-                Write-Debug($message)
+                Write-DebugText($message)
             }
 
             $showUpdateAvailableMessage = $updateCheckResult['isNew']
-            Write-Debug('Is there an update available:       ' + $updateCheckResult['isNew'])
+            Write-DebugText('Is there an update available:       ' + $updateCheckResult['isNew'])
         }
 
 
         $updateEndTime = Get-Date
         $updateRunTime = $updateEndTime - $updateStartTime
 
-        Write-Debug('Update Check Started (User Time):   ' + $updateStartTime.ToString('HH:mm:ss'))
-        Write-Debug('Update Check Ended (User Time):     ' + $updateEndTime.ToString('HH:mm:ss'))
-        Write-Debug('Update Check Runtime (User Time):   ' + $updateRunTime.TotalSeconds)
+        Write-DebugText('Update Check Started (User Time):   ' + $updateStartTime.ToString('HH:mm:ss'))
+        Write-DebugText('Update Check Ended (User Time):     ' + $updateEndTime.ToString('HH:mm:ss'))
+        Write-DebugText('Update Check Runtime (User Time):   ' + $updateRunTime.TotalSeconds)
     }
 
 
@@ -11659,6 +11901,10 @@ try {
 
     # Add the Windows Event Log Source if we want to use the Event Log
     if ($settings.Logging.useWindowsEventLog) {
+        if (!(Test-EventLogService)) {
+            Exit-WithFatalError -text ('"[Logging] useWindowsEventLog" was set to 1, but the Windows Event Log service is not running!')
+        }
+
         Add-AppEventLogSource
     }
 
@@ -11711,18 +11957,18 @@ try {
 
     # If Aida64 was started, try to clear any error messages from previous runs
     if ($isAida64) {
-        Write-Verbose('Trying to clear Aida64 error messages from previous runs')
+        Write-VerboseText('Trying to clear Aida64 error messages from previous runs')
 
         $initFunctions = [scriptblock]::Create(@"
             function Send-CommandToAida64 { ${function:Send-CommandToAida64} }
-            function Write-Verbose { ${function:Write-Verbose} }
+            function Write-VerboseText { ${function:Write-VerboseText} }
 "@)
 
         $null = Start-Job -ScriptBlock {
             Start-Sleep -Seconds 3
 
             # Send the command a couple of times
-            # Unfortunately we cannot get any Write-Verbose without adding a Wait-Job
+            # Unfortunately we cannot get any Write-VerboseText without adding a Wait-Job
             for ($i = 0; $i -lt 3; $i++) {
                 Send-CommandToAida64 'dismiss'
                 Start-Sleep -Milliseconds 500
@@ -11752,11 +11998,11 @@ try {
         Write-ColorText('Apparently the computer crashed in the last run while testing core ' + $CoreFromAutoMode) Red
         Write-ColorText('Trying to resume the test process') Red
 
-        Write-Verbose('Adding core ' + $CoreFromAutoMode + ' to the front of the test array')
+        Write-VerboseText('Adding core ' + $CoreFromAutoMode + ' to the front of the test array')
         $coresToTest.Insert(0, $CoreFromAutoMode)
 
         $modeDescription = $(if ($useCurveOptimizer) { 'Curve Optimizer' } else { 'voltage offset' })
-        Write-Verbose('Adjusting the ' + $modeDescription + ' voltage value')
+        Write-VerboseText('Adjusting the ' + $modeDescription + ' voltage value')
 
         # We need to pass empty values at this point, as we're only adjusting the starting values
         $params = @{
@@ -11767,10 +12013,10 @@ try {
         Test-AutomaticTestModeIncrease @params
     }
 
-    Write-Verbose('All cores that could be tested:')
-    Write-Verbose($allCores -Join ', ')
-    Write-Verbose('The preliminary test order:')
-    Write-Verbose($coresToTest -Join ', ')
+    Write-VerboseText('All cores that could be tested:')
+    Write-VerboseText($allCores -Join ', ')
+    Write-VerboseText('The preliminary test order:')
+    Write-VerboseText($coresToTest -Join ', ')
 
 
     # Start with the CPU test
@@ -11822,11 +12068,11 @@ try {
 
 
 
-        Write-Debug('The initial test order:')
-        Write-Debug($coreTestOrderArray -Join ', ')
+        Write-DebugText('The initial test order:')
+        Write-DebugText($coreTestOrderArray -Join ', ')
 
-        Write-Debug('The initial number of available cores:        ' + $numAvailableCores)
-        Write-Debug('The initial number of unique available cores: ' + $numUniqueAvailableCores)
+        Write-DebugText('The initial number of available cores:        ' + $numAvailableCores)
+        Write-DebugText('The initial number of unique available cores: ' + $numUniqueAvailableCores)
 
 
 
@@ -11836,7 +12082,7 @@ try {
         # None of these actually change the number and unique number of cores, at best only re-arranges them
         # Important for the $numAvailableCores and $numUniqueAvailableCores variable
         if ($coreTestOrderMode -eq 'alternate') {
-            Write-Verbose('Alternating test order selected, building the test order array...')
+            Write-VerboseText('Alternating test order selected, building the test order array...')
 
             # Start fresh
             $coreTestOrderArray = [System.Collections.ArrayList]::new()
@@ -11871,7 +12117,7 @@ try {
 
         # Randomized
         elseif ($coreTestOrderMode -eq 'random') {
-            Write-Verbose('Random test order selected, building the test order array...')
+            Write-VerboseText('Random test order selected, building the test order array...')
             [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object { Get-Random })
 
             # If we had added a core from CoreFromAutoMode, we will need to push it to the front here again
@@ -11882,25 +12128,25 @@ try {
 
         # Custom
         elseif ($coreTestOrderMode -eq 'custom') {
-            Write-Verbose('Custom test order selected, keeping the test order array...')
+            Write-VerboseText('Custom test order selected, keeping the test order array...')
             # This was set above already, no need to change it
             # It also already doesn't include the ignored cores
         }
 
         # Sequential, do nothing
         else {
-            Write-Verbose('Sequential test order selected, keeping the test order array...')
+            Write-VerboseText('Sequential test order selected, keeping the test order array...')
             # This was set above already, no need to change it
             # It also already doesn't include the ignored cores
         }
 
-        Write-Verbose('The final test order:')
-        Write-Verbose($coreTestOrderArray -Join ', ')
+        Write-VerboseText('The final test order:')
+        Write-VerboseText($coreTestOrderArray -Join ', ')
 
-        Write-Debug('The number of available cores:         ' + $numAvailableCores)
-        Write-Debug('The number of unique available cores:  ' + $numUniqueAvailableCores)
-        Write-Debug('The number of cores with an error:     ' + $numCoresWithError)
-        Write-Debug('The number of cores with a WHEA error: ' + $numCoresWithWheaError)
+        Write-DebugText('The number of available cores:         ' + $numAvailableCores)
+        Write-DebugText('The number of unique available cores:  ' + $numUniqueAvailableCores)
+        Write-DebugText('The number of cores with an error:     ' + $numCoresWithError)
+        Write-DebugText('The number of cores with a WHEA error: ' + $numCoresWithWheaError)
 
 
         if (@($coreTestOrderArray).Count -lt 1) {
@@ -11911,7 +12157,7 @@ try {
         # Iterate over each core
         # Named for loop
         :LoopCoreRunner for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++) {
-            Write-Debug('Trying to switch to a new core (' + ($coreIndex+1) + ' of ' + $numAvailableCores + ') [index ' + $coreIndex + ' of ' + ($numAvailableCores-1) + ']')
+            Write-DebugText('Trying to switch to a new core (' + ($coreIndex+1) + ' of ' + $numAvailableCores + ') [index ' + $coreIndex + ' of ' + ($numAvailableCores-1) + ']')
 
             $startDateThisCore                   = Get-Date
             $estimatedEndDateCore                = $startDateThisCore + (New-TimeSpan -Seconds $runtimePerCore)
@@ -11933,9 +12179,9 @@ try {
             $numCoresWithErrorAndMaxVoltageValue = $coresWithErrorAndMaxVoltageValue.Count
 
 
-            Write-Verbose('Still available cores:')
-            Write-Verbose($coreTestOrderArray -Join ', ')
-            Write-Verbose('The selected core to test: ' + $actualCoreNumber)
+            Write-VerboseText('Still available cores:')
+            Write-VerboseText($coreTestOrderArray -Join ', ')
+            Write-VerboseText('The selected core to test: ' + $actualCoreNumber)
 
 
             # If the processor has a different architecture between the cores
@@ -11986,7 +12232,7 @@ try {
                     # The load should bounce back and forth between the two cores this way
                     # Hyperthreading needs to be enabled for this
                     if ($settings.General.assignBothVirtualCoresForSingleThread -and $isHyperthreadingEnabled) {
-                        Write-Verbose('assignBothVirtualCoresForSingleThread is enabled, choosing both virtual cores for the affinity')
+                        Write-VerboseText('assignBothVirtualCoresForSingleThread is enabled, choosing both virtual cores for the affinity')
 
                         for ($currentThread = 0; $currentThread -lt 2; $currentThread++) {
                             $cpuNumber        = ($actualCoreNumber * 2) + $currentThread
@@ -12009,8 +12255,8 @@ try {
 
             # Always try to avoid CPU 0 for single threads if Hyperthreading is enabled, switch to CPU 1 instead
             if ($cpuNumbersArray[0] -eq 0 -and $cpuNumbersArray.Count -eq 1 -and $isHyperthreadingEnabled) {
-                Write-Verbose('Trying to avoid Core 0 / CPU 0, as this is mainly used by the OS')
-                Write-Verbose('Setting to CPU 1 instead, which is the second virtual CPU of Core 0')
+                Write-VerboseText('Trying to avoid Core 0 / CPU 0, as this is mainly used by the OS')
+                Write-VerboseText('Setting to CPU 1 instead, which is the second virtual CPU of Core 0')
                 $cpuNumbersArray[0] = 1
             }
 
@@ -12022,7 +12268,7 @@ try {
             # Note: This shouldn't happen anymore, as we have removed the cores from the availableCores array
             if ($settings.General.coresToIgnore -contains $actualCoreNumber) {
                 # Ignore it silently
-                Write-Verbose('Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping')
+                Write-VerboseText('Core ' + $actualCoreNumber + ' (CPU ' + $cpuNumberString + ') is being ignored, skipping')
 
                 # Remove this core from the array of still available cores
                 [Void] $coreTestOrderArray.RemoveAt(0)
@@ -12073,7 +12319,7 @@ try {
                     Write-ColorText('           Normally we''d fall back to thread 2 on Core 0, but since Hyperthreading / SMT is disabled, we cannot do this.') Black Yellow
                     Write-ColorText('           Therefore we''re skipping this core.') Black Yellow
 
-                    Write-Verbose('Skipping this core due to Aida64 not running correctly on Core 0 / CPU 0 and Hyperthreading / SMT is disabled')
+                    Write-VerboseText('Skipping this core due to Aida64 not running correctly on Core 0 / CPU 0 and Hyperthreading / SMT is disabled')
 
                     # Remove this core from the array of still available cores
                     [Void] $coreTestOrderArray.RemoveAt(0)
@@ -12096,7 +12342,7 @@ try {
             # If $settings.General.restartTestProgramForEachCore is set, restart the stress test program for each core
             # Do not restart before the first core on the first iteration has been tested though
             if ($settings.General.restartTestProgramForEachCore -and $numberOfStartedTests -gt 1) {
-                Write-Verbose('restartTestProgramForEachCore is set, restarting the stress test program...')
+                Write-VerboseText('restartTestProgramForEachCore is set, restarting the stress test program...')
 
                 # Set the flag to only stop the stress test program if possible
                 Close-StressTestProgram $true
@@ -12114,8 +12360,8 @@ try {
 
                 # If we've set to use two threads and the processor has cores that don't support two threads, set the config file accordingly before starting the stress test process
                 if ($settings.General.numberOfThreads -gt 1 -and $hasAsymmetricCoreThreads) {
-                    Write-Debug('The processor has cores that don''t support two threads')
-                    Write-Debug('Modifying the stress test config file accordingly before restarting')
+                    Write-DebugText('The processor has cores that don''t support two threads')
+                    Write-DebugText('Modifying the stress test config file accordingly before restarting')
 
                     $overrideNumberOfThreads = $(if ($coreSupportsOnly1T) { 1 } else { 2 })
 
@@ -12171,7 +12417,7 @@ try {
 
 
             if ($coreSupportsOnly1T) {
-                Write-Verbose('!!! This core supports only one thread')
+                Write-VerboseText('!!! This core supports only one thread')
 
                 # Prime95 doesn't play too well with 2 threads selected but only 1 available (e.g. Intel's E-Core)
                 if ($settings.General.numberOfThreads -gt 1 -and $isPrime95 -and !$settings.General.restartTestProgramForEachCore -and $useAutomaticRuntimePerCore) {
@@ -12191,8 +12437,8 @@ try {
             }
             catch {
                 # Apparently setting the affinity can fail on the first try, so make another attempt
-                Write-Verbose('Setting the affinity has failed, trying again...')
-                Write-Verbose('Error: ' + $_)
+                Write-VerboseText('Setting the affinity has failed, trying again...')
+                Write-VerboseText('Error: ' + $_)
 
                 Start-Sleep -Milliseconds 300
 
@@ -12215,9 +12461,9 @@ try {
             $affinitiesMatch = [bool]($null -eq (Compare-Object -ReferenceObject @($expectedAffinities | Sort-Object | Get-Unique) -DifferenceObject @($checkingAffinities | Sort-Object | Get-Unique)))
 
             if (!$affinitiesMatch) {
-                Write-Verbose('The affinity could NOT be set correctly!')
-                Write-Verbose(' - affinities trying to set: ' + $expectedAffinities)
-                Write-Verbose(' - actual affinities:        ' + $checkingAffinities)
+                Write-VerboseText('The affinity could NOT be set correctly!')
+                Write-VerboseText(' - affinities trying to set: ' + $expectedAffinities)
+                Write-VerboseText(' - actual affinities:        ' + $checkingAffinities)
 
                 Exit-WithFatalError -text 'The affinities could not be set correctly!'
             }
@@ -12304,10 +12550,10 @@ try {
             $totalRunTimeString = $totalRuntimeArray -Join ' '
 
             Write-ColorText('           Progress ' + ($coreIndex+1) + '/' + $numAvailableCores + ' | Iteration ' + $iteration + '/' + $settings.General.maxIterations + ' | Runtime ' + $totalRunTimeString) DarkGray
-            Write-Debug('The number of cores with an error so far: ' + $numCoresWithError)
+            Write-DebugText('The number of cores with an error so far: ' + $numCoresWithError)
 
             if ($settings.General.lookForWheaErrors) {
-                Write-Debug('The number of cores with a WHEA error so far: ' + $numCoresWithWheaError)
+                Write-DebugText('The number of cores with a WHEA error so far: ' + $numCoresWithWheaError)
             }
 
             # Make a check each x seconds
@@ -12317,22 +12563,22 @@ try {
             for ($checkNumber = 1; $checkNumber -le $cpuCheckIterations; $checkNumber++) {
                 $waitTime  = 0
                 $timestamp = Get-Date -Format HH:mm:ss
-                Write-Debug('')
-                Write-Debug($timestamp + ' - Tick ' + $checkNumber + ' of max ' + $cpuCheckIterations)
+                Write-DebugText('')
+                Write-DebugText($timestamp + ' - Tick ' + $checkNumber + ' of max ' + $cpuCheckIterations)
 
                 $nowDateTime         = Get-Date
                 $differenceMax       = New-TimeSpan -Start $nowDateTime -End $estimatedEndDateCore
                 $runtimeRemainingMax = [Math]::Round($differenceMax.TotalSeconds)
 
-                Write-Debug('           Remaining max runtime: ' + $runtimeRemainingMax + 's')
+                Write-DebugText('           Remaining max runtime: ' + $runtimeRemainingMax + 's')
 
                 # Make this the last iteration if the remaining time is close enough
                 # Also reduce the sleep time here by 1 second, we add this back after suspending the stress test program
                 if ($runtimeRemainingMax -le $tickInterval) {
                     $checkNumber = $cpuCheckIterations
                     $waitTime    = [Math]::Max(0, $runtimeRemainingMax - 2) # -2 instead of -1 due to the additional wait time after the suspension
-                    Write-Debug('           The remaining run time (' + $waitTime + ') is less than the tick interval (' + $tickInterval + ')')
-                    Write-Debug('           This will be the last interval')
+                    Write-DebugText('           The remaining run time (' + $waitTime + ') is less than the tick interval (' + $tickInterval + ')')
+                    Write-DebugText('           This will be the last interval')
                 }
                 else {
                     $waitTime = $tickInterval - 1
@@ -12355,25 +12601,25 @@ try {
                 # According to some reports, this may interfere with Test-StressTestProgrammIsRunning, so it's disabled by default now
                 if ($enableCpuFrequencyCheck) {
                     $currentCpuInfo = Get-CpuFrequency $cpuNumber
-                    Write-Verbose('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
+                    Write-VerboseText('           ...current CPU frequency: ~' + $currentCpuInfo.CurrentFrequency + ' MHz (' + $currentCpuInfo.Percent + '%)')
                 }
 
 
                 # Suspend and resume the stress test
                 if ($settings.General.suspendPeriodically) {
                     $timestamp = Get-Date -Format HH:mm:ss
-                    Write-Debug($timestamp + ' - Suspending the stress test process for ' + $suspensionTime + ' milliseconds')
+                    Write-DebugText($timestamp + ' - Suspending the stress test process for ' + $suspensionTime + ' milliseconds')
 
                     $suspended = Suspend-Process $stressTestProcess
-                    Write-Debug('           Suspended: ' + $suspended)
+                    Write-DebugText('           Suspended: ' + $suspended)
 
                     Start-Sleep -Milliseconds $suspensionTime
 
                     $timestamp = Get-Date -Format HH:mm:ss
-                    Write-Debug($timestamp + ' - Resuming the stress test process')
+                    Write-DebugText($timestamp + ' - Resuming the stress test process')
 
                     $resumed = Resume-Process -process $stressTestProcess
-                    Write-Debug('           Resumed: ' + $resumed)
+                    Write-DebugText('           Resumed: ' + $resumed)
                 }
 
 
@@ -12391,15 +12637,15 @@ try {
 
 
                     $timestamp = Get-Date -Format HH:mm:ss
-                    Write-Debug('')
+                    Write-DebugText('')
 
                     if ($delayFirstErrorCheck -lt $runtimeRemainingMax) {
-                        Write-Debug($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + 's, delaying...')
+                        Write-DebugText($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + 's, delaying...')
                         Start-Sleep -Seconds $delayFirstErrorCheck
                     }
                     else {
-                        Write-Debug($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + 's,')
-                        Write-Debug('           but the remaining runtime for this core is less (' + $runtimeRemainingMax + 's), so ignoring')
+                        Write-DebugText($timestamp + ' - delayFirstErrorCheck has been set to ' + $delayFirstErrorCheck + 's,')
+                        Write-DebugText('           but the remaining runtime for this core is less (' + $runtimeRemainingMax + 's), so ignoring')
                     }
                 }
 
@@ -12430,13 +12676,13 @@ try {
                         $timestamp = Get-Date -Format HH:mm:ss
                         $foundFFTSizeLines = @()
 
-                        Write-Debug($timestamp + ' - Automatic runtime per core selected')
+                        Write-DebugText($timestamp + ' - Automatic runtime per core selected')
 
                         # Only perform the check if the file size has increased
                         # The size has increased, so something must have changed
                         # It's either a new passed FFT entry, a [Timestamp], or an error
                         if ($newLogEntries.Count -le 0) {
-                            Write-Debug('           No new log file entries found')
+                            Write-DebugText('           No new log file entries found')
                             break LoopCheckForAutomaticRuntime
                         }
 
@@ -12446,7 +12692,7 @@ try {
                         $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error.*' }
 
                         if ($errorResults) {
-                            Write-Debug('           Found an error entry in the new log entries, proceed to the error check')
+                            Write-DebugText('           Found an error entry in the new log entries, proceed to the error check')
                             break LoopCheckForAutomaticRuntime
                         }
 
@@ -12457,14 +12703,14 @@ try {
 
                         # No passed FFT sizes found
                         if (!$lastPassedFFTSizeResults) {
-                            Write-Debug('           No passed FFT sizes found yet, assuming we''re at the very beginning of the test')
+                            Write-DebugText('           No passed FFT sizes found yet, assuming we''re at the very beginning of the test')
                             break LoopCheckForAutomaticRuntime
                         }
 
 
-                        Write-Debug('           The last passed FFT result lines:')
+                        Write-DebugText('           The last passed FFT result lines:')
                         $lastPassedFFTSizeResults | ForEach-Object {
-                            Write-Debug('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
+                            Write-DebugText('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
                         }
 
 
@@ -12480,7 +12726,7 @@ try {
 
                             # Not reached the line number of the last entry yet
                             elseif ($currentResultLineEntry.LineNumber -le $previousPassedFFTEntry.LineNumber) {
-                                Write-Debug('           Line number of previous entry not reached yet, skipping (Line ' + $currentResultLineEntry.LineNumber + ' <= ' + $previousPassedFFTEntry.LineNumber + ')')
+                                Write-DebugText('           Line number of previous entry not reached yet, skipping (Line ' + $currentResultLineEntry.LineNumber + ' <= ' + $previousPassedFFTEntry.LineNumber + ')')
                                 continue
                             }
 
@@ -12496,9 +12742,9 @@ try {
                         }
 
 
-                        Write-Debug('           All found FFT size lines ($foundFFTSizeLines):')
+                        Write-DebugText('           All found FFT size lines ($foundFFTSizeLines):')
                         $foundFFTSizeLines | ForEach-Object {
-                            Write-Debug('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
+                            Write-DebugText('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
                         }
 
 
@@ -12515,9 +12761,9 @@ try {
 
                             $insert = $false
 
-                            Write-Debug('')
-                            Write-Debug('Checking line ' + $currentResultLineEntry.LineNumber)
-                            Write-Debug(' -> ' + $currentResultLineEntry.Line)
+                            Write-DebugText('')
+                            Write-DebugText('Checking line ' + $currentResultLineEntry.LineNumber)
+                            Write-DebugText(' -> ' + $currentResultLineEntry.Line)
 
 
                             # Check the log, depending on the selected amount of threads to be tested
@@ -12540,8 +12786,8 @@ try {
                                 # Does this line also appear in the last line of the log?
                                 $curCheckIndex = $allFFTLogEntries.Count - 1
 
-                                Write-Debug(' -> $allFFTLogEntries.Count: ' + $allFFTLogEntries.Count)
-                                Write-Debug('           Looking for:  ' + $currentResultLineEntry.Line)
+                                Write-DebugText(' -> $allFFTLogEntries.Count: ' + $allFFTLogEntries.Count)
+                                Write-DebugText('           Looking for:  ' + $currentResultLineEntry.Line)
 
                                 # For newer Prime95 versions, the lines do not match anymore
                                 # Example:
@@ -12557,10 +12803,10 @@ try {
                                 while ($curCheckIndex -ge 0 -and $allFFTLogEntries[$curCheckIndex]) {
                                     $linesMatch = $currentResultLineEntry.Line -eq $allFFTLogEntries[$curCheckIndex].Line
 
-                                    Write-Debug('           Line ' + $curCheckIndex.ToString().PadLeft(6, ' ') + ':  ' + $allFFTLogEntries[$curCheckIndex].Line + '  -> Match: ' + $linesMatch)
+                                    Write-DebugText('           Line ' + $curCheckIndex.ToString().PadLeft(6, ' ') + ':  ' + $allFFTLogEntries[$curCheckIndex].Line + '  -> Match: ' + $linesMatch)
 
                                     if ($linesMatch) {
-                                        Write-Debug('           Both lines match, increasing the numLinesWithSameFFTSize counter')
+                                        Write-DebugText('           Both lines match, increasing the numLinesWithSameFFTSize counter')
                                         $numLinesWithSameFFTSize++
                                         break
                                     }
@@ -12568,7 +12814,7 @@ try {
 
                                     # Limit the search to x rows
                                     if ($i -eq $maxRowsToCheck) {
-                                        Write-Debug('           Matching line not found within ' + $maxRowsToCheck + ' rows, aborting')
+                                        Write-DebugText('           Matching line not found within ' + $maxRowsToCheck + ' rows, aborting')
                                         break
                                     }
 
@@ -12576,19 +12822,19 @@ try {
                                     $i++
                                 }
 
-                                Write-Debug('           The number of lines with the same FFT size: ' + $numLinesWithSameFFTSize)
+                                Write-DebugText('           The number of lines with the same FFT size: ' + $numLinesWithSameFFTSize)
 
                                 # If the number of same lines is uneven, we found the beginning of a pair
                                 if ($numLinesWithSameFFTSize % 2 -ne 0) {
                                     # We're ignoring this line
-                                    Write-Debug('           Found the beginning of a pair')
-                                    Write-Debug('           - Ignoring this line')
+                                    Write-DebugText('           Found the beginning of a pair')
+                                    Write-DebugText('           - Ignoring this line')
                                 }
 
                                 # We've found a pair, insert this FFT size
                                 else {
-                                    Write-Debug('           *** Found a pair ***')
-                                    Write-Debug('           - Inserting this FFT size')
+                                    Write-DebugText('           *** Found a pair ***')
+                                    Write-DebugText('           - Inserting this FFT size')
                                     $insert = $true
                                 }
                             }
@@ -12603,14 +12849,14 @@ try {
                             }
 
                             # Store the entry itself
-                            Write-Debug('           Line number of this entry:         ' + $currentResultLineEntry.LineNumber)
-                            Write-Debug('           Line number of the previous entry: ' + $previousFFTLogEntryLineNumber)
+                            Write-DebugText('           Line number of this entry:         ' + $currentResultLineEntry.LineNumber)
+                            Write-DebugText('           Line number of the previous entry: ' + $previousFFTLogEntryLineNumber)
 
                             if (
                                 $allFFTLogEntries.Count -eq 0 -or `
                                 ($allFFTLogEntries.Count -gt 0 -and $currentResultLineEntry.LineNumber -ne $previousFFTLogEntryLineNumber)`
                             ) {
-                                Write-Debug('           + Adding this line to the allFFTLogEntries array')
+                                Write-DebugText('           + Adding this line to the allFFTLogEntries array')
                                 [Void] $allFFTLogEntries.Add($currentResultLineEntry)
                             }
 
@@ -12631,10 +12877,10 @@ try {
                                     }
                                 }
 
-                                Write-Debug('')
-                                Write-Debug('           Checking Line ' + $currentResultLineEntry.LineNumber)
-                                Write-Debug('           - The previous passed FFT size - old: ' + ($previousPassedFFTSize/1024) + 'K')
-                                Write-Debug('           - The current passed FFT size  - new: ' + ($currentPassedFFTSize/1024) + 'K')
+                                Write-DebugText('')
+                                Write-DebugText('           Checking Line ' + $currentResultLineEntry.LineNumber)
+                                Write-DebugText('           - The previous passed FFT size - old: ' + ($previousPassedFFTSize/1024) + 'K')
+                                Write-DebugText('           - The current passed FFT size  - new: ' + ($currentPassedFFTSize/1024) + 'K')
 
                                 # Enter the last passed FFT sizes arrays, both all and unique
                                 [Void] $allPassedFFTs.Add($currentPassedFFTSize)
@@ -12644,14 +12890,14 @@ try {
                                 }
 
 
-                                Write-Debug('           - All passed FFTs:')
-                                Write-Debug('           - ' + ($allPassedFFTs -Join ', '))
-                                Write-Debug('           - All unique passed FFTs:')
-                                Write-Debug('           - ' + ($uniquePassedFFTs -Join ', '))
+                                Write-DebugText('           - All passed FFTs:')
+                                Write-DebugText('           - ' + ($allPassedFFTs -Join ', '))
+                                Write-DebugText('           - All unique passed FFTs:')
+                                Write-DebugText('           - ' + ($uniquePassedFFTs -Join ', '))
 
-                                Write-Verbose($timestamp + ' - The last passed FFT size: ' + ($currentPassedFFTSize/1024) + 'K')
-                                Write-Verbose('           The number of FFT sizes to test:        ' + $fftSubarray.Count)
-                                Write-Verbose('           The number of FFT sizes already tested: ' + $uniquePassedFFTs.Count)
+                                Write-VerboseText($timestamp + ' - The last passed FFT size: ' + ($currentPassedFFTSize/1024) + 'K')
+                                Write-VerboseText('           The number of FFT sizes to test:        ' + $fftSubarray.Count)
+                                Write-VerboseText('           The number of FFT sizes already tested: ' + $uniquePassedFFTs.Count)
 
                                 # Store the entries to be able to compare to the previous value
                                 $previousPassedFFTEntry = $currentResultLineEntry
@@ -12659,10 +12905,10 @@ try {
 
 
                                 if ($proceedToNextCore -and !$fftSizeOverflow) {
-                                    Write-Debug('')
-                                    Write-Debug('           We didn''t check the log file in time to switch to the next core before another FFT size was tested.')
-                                    Write-Debug('           That''s nothing to worry about, it''s just a bit unfortunate, because the order of FFT sizes for the')
-                                    Write-Debug('           next core is now slightly shifted.')
+                                    Write-DebugText('')
+                                    Write-DebugText('           We didn''t check the log file in time to switch to the next core before another FFT size was tested.')
+                                    Write-DebugText('           That''s nothing to worry about, it''s just a bit unfortunate, because the order of FFT sizes for the')
+                                    Write-DebugText('           next core is now slightly shifted.')
 
                                     $fftSizeOverflow = $true
                                 }
@@ -12678,7 +12924,7 @@ try {
 
                         # Continue to the next core if the flag was set
                         if ($proceedToNextCore) {
-                            Write-Debug('proceedToNextCore is set!')
+                            Write-DebugText('proceedToNextCore is set!')
 
                             # Get the runtime for this core test
                             $endDateThisCore  = Get-Date
@@ -12694,8 +12940,8 @@ try {
                             $runtimeArrayCore += ($differenceCore.Seconds.ToString().PadLeft(2, '0') + 's')
                             $runTimeStringCore = $runtimeArrayCore -Join ' '
 
-                            Write-Verbose('')
-                            Write-Verbose('           The number of unique FFT sizes matches the number of FFT sizes for the preset!')
+                            Write-VerboseText('')
+                            Write-VerboseText('           The number of unique FFT sizes matches the number of FFT sizes for the preset!')
                             Write-Text('           Test completed in ' + $runTimeStringCore)
                             Write-Text('           All FFT sizes have been tested for this core, proceeding to the next one')
 
@@ -12706,7 +12952,7 @@ try {
                             continue LoopCoreRunner
                         }
 
-                        Write-Debug('')
+                        Write-DebugText('')
 
 
                         # Break out of the while ($true) loop, we only want one iteration
@@ -12725,13 +12971,13 @@ try {
                         $timestamp = Get-Date -Format HH:mm:ss
                         $foundPassedTestLines = @()
 
-                        Write-Debug($timestamp + ' - Automatic runtime per core selected')
+                        Write-DebugText($timestamp + ' - Automatic runtime per core selected')
 
                         # Only perform the check if the file size has increased
                         # The size has increased, so something must have changed
                         # It's either a new passed test entry, a new iteration, an error, or a restarted program
                         if ($newLogEntries.Count -le 0) {
-                            Write-Debug('           No new log file entries found')
+                            Write-DebugText('           No new log file entries found')
                             break LoopCheckForAutomaticRuntime
                         }
 
@@ -12742,7 +12988,7 @@ try {
                         $errorResults = $newLogEntries | Where-Object { $_.Line -Match '.*error\(s\).*' } | Select-Object -Last 1
 
                         if ($errorResults) {
-                            Write-Debug('           Found an error entry in the new log entries, proceed to the error check')
+                            Write-DebugText('           Found an error entry in the new log entries, proceed to the error check')
                             break LoopCheckForAutomaticRuntime
                         }
 
@@ -12755,14 +13001,14 @@ try {
 
                         # No passed tests found
                         if (!$lastPassedTestResults) {
-                            Write-Debug('           No passed tests found yet, assuming we''re at the very beginning of the run')
+                            Write-DebugText('           No passed tests found yet, assuming we''re at the very beginning of the run')
                             break LoopCheckForAutomaticRuntime
                         }
 
 
-                        Write-Debug('           The last passed test lines:')
+                        Write-DebugText('           The last passed test lines:')
                         $lastPassedTestResults | ForEach-Object {
-                            Write-Debug('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
+                            Write-DebugText('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
                         }
 
 
@@ -12778,7 +13024,7 @@ try {
 
                             # Not reached the line number of the last entry yet
                             elseif ($currentResultLineEntry.LineNumber -le $previousPassedTestEntry.LineNumber) {
-                                Write-Debug('           Line number of previous entry not reached yet, skipping (Line ' + $currentResultLineEntry.LineNumber + ' <= ' + $previousPassedTestEntry.LineNumber + ')')
+                                Write-DebugText('           Line number of previous entry not reached yet, skipping (Line ' + $currentResultLineEntry.LineNumber + ' <= ' + $previousPassedTestEntry.LineNumber + ')')
                                 continue
                             }
 
@@ -12789,9 +13035,9 @@ try {
                         }
 
 
-                        Write-Debug('           All found passed test lines:')
+                        Write-DebugText('           All found passed test lines:')
                         $foundPassedTestLines | ForEach-Object {
-                            Write-Debug('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
+                            Write-DebugText('           - [Line ' + $_.LineNumber + '] ' + $_.Line)
                         }
 
 
@@ -12806,19 +13052,19 @@ try {
                                 $previousLogEntryLineNumber = $previousLogEntry.LineNumber
                             }
 
-                            Write-Debug('')
-                            Write-Debug('           Checking line ' + $currentResultLineEntry.LineNumber)
-                            Write-Debug('           ' + $currentResultLineEntry.Line)
+                            Write-DebugText('')
+                            Write-DebugText('           Checking line ' + $currentResultLineEntry.LineNumber)
+                            Write-DebugText('           ' + $currentResultLineEntry.Line)
 
                             # Store the entry itself
-                            Write-Debug('           Line number of this entry:         ' + $currentResultLineEntry.LineNumber)
-                            Write-Debug('           Line number of the previous entry: ' + $previousLogEntryLineNumber)
+                            Write-DebugText('           Line number of this entry:         ' + $currentResultLineEntry.LineNumber)
+                            Write-DebugText('           Line number of the previous entry: ' + $previousLogEntryLineNumber)
 
                             if (
                                 $allTestLogEntries.Count -eq 0 -or `
                                 ($allTestLogEntries.Count -gt 0 -and $currentResultLineEntry.LineNumber -ne $previousLogEntryLineNumber)`
                             ) {
-                                Write-Debug('           + Adding this line to the allTestLogEntries array')
+                                Write-DebugText('           + Adding this line to the allTestLogEntries array')
                                 [Void] $allTestLogEntries.Add($currentResultLineEntry)
                             }
 
@@ -12832,9 +13078,9 @@ try {
                             $currentPassedTest = $null
 
 
-                            Write-Debug('           Trying to get the passed test')
-                            Write-Debug('           Looking for ->')
-                            Write-Debug('           ' + $currentResultLineEntry.Line)
+                            Write-DebugText('           Trying to get the passed test')
+                            Write-DebugText('           Looking for ->')
+                            Write-DebugText('           ' + $currentResultLineEntry.Line)
 
                             $hasMatched = $currentResultLineEntry.Line -Match 'Running ([a-z0-9]+):.*'
 
@@ -12844,10 +13090,10 @@ try {
 
                             # If the line itself doesn't include the test name, we now try to get the passed test from the last entry up
                             else {
-                                Write-Debug('           Test not showing up in current line, searching the log entries for the passed test')
+                                Write-DebugText('           Test not showing up in current line, searching the log entries for the passed test')
 
                                 for ($x = $allLogEntries.Count-1; $x -ge 0; $x--) {
-                                    Write-Debug('           >>> [' + $x + '] ' + $allLogEntries[$x])
+                                    Write-DebugText('           >>> [' + $x + '] ' + $allLogEntries[$x])
 
                                     if ($allLogEntries[$x] -eq $currentResultLineEntry.Line) {
                                         if ($x -gt 0) {
@@ -12857,8 +13103,8 @@ try {
                                     }
                                 }
 
-                                Write-Debug('           Found line with test:')
-                                Write-Debug('           ' + $foundTestLine)
+                                Write-DebugText('           Found line with test:')
+                                Write-DebugText('           ' + $foundTestLine)
 
                                 $hasMatched = $foundTestLine -Match 'Running ([a-z0-9]+):.*'
 
@@ -12869,15 +13115,15 @@ try {
 
 
                             if (!$currentPassedTest) {
-                                Write-Debug('           Couldn''t find the currently passed test, possible detection error?')
+                                Write-DebugText('           Couldn''t find the currently passed test, possible detection error?')
                                 break LoopCheckForAutomaticRuntime
                             }
 
 
-                            Write-Debug('')
-                            Write-Debug('           Checked Line ' + $currentResultLineEntry.LineNumber)
-                            Write-Debug('           - The previous passed test - old: ' + $previousPassedTest)
-                            Write-Debug('           - The current passed test  - new: ' + $currentPassedTest)
+                            Write-DebugText('')
+                            Write-DebugText('           Checked Line ' + $currentResultLineEntry.LineNumber)
+                            Write-DebugText('           - The previous passed test - old: ' + $previousPassedTest)
+                            Write-DebugText('           - The current passed test  - new: ' + $currentPassedTest)
 
 
                             # Enter the last passed test arrays, both all and unique
@@ -12888,14 +13134,14 @@ try {
                             }
 
 
-                            Write-Debug('           - All passed tests:')
-                            Write-Debug('           - ' + ($allPassedTests -Join ', '))
-                            Write-Debug('           - All unique passed tests:')
-                            Write-Debug('           - ' + ($uniquePassedTests -Join ', '))
+                            Write-DebugText('           - All passed tests:')
+                            Write-DebugText('           - ' + ($allPassedTests -Join ', '))
+                            Write-DebugText('           - All unique passed tests:')
+                            Write-DebugText('           - ' + ($uniquePassedTests -Join ', '))
 
-                            Write-Verbose($timestamp + ' - The last passed test: ' + $currentPassedTest)
-                            Write-Verbose('           The number of tests to run:      ' + $settings.yCruncher.tests.Count)
-                            Write-Verbose('           The number of tests already run: ' + $uniquePassedTests.Count)
+                            Write-VerboseText($timestamp + ' - The last passed test: ' + $currentPassedTest)
+                            Write-VerboseText('           The number of tests to run:      ' + $settings.yCruncher.tests.Count)
+                            Write-VerboseText('           The number of tests already run: ' + $uniquePassedTests.Count)
 
                             # Store the entries to be able to compare to the previous value
                             $previousPassedTestEntry = $currentResultLineEntry
@@ -12927,8 +13173,8 @@ try {
                             $runTimeStringCore = $runtimeArrayCore -Join ' '
 
 
-                            Write-Verbose('')
-                            Write-Verbose('           The number of unique test names matches the number of the selected test names!')
+                            Write-VerboseText('')
+                            Write-VerboseText('           The number of unique test names matches the number of the selected test names!')
                             Write-Text('           Test completed in ' + $runTimeStringCore)
                             Write-Text('           All tests have been run for this core, proceeding to the next one')
 
@@ -12939,7 +13185,7 @@ try {
                             continue LoopCoreRunner
                         }
 
-                        Write-Debug('')
+                        Write-DebugText('')
 
 
                         # Break out of the while ($true) loop, we only want one iteration
@@ -12981,7 +13227,7 @@ try {
 
             # One last check
             try {
-                Write-Verbose('One last error check before finishing this core')
+                Write-VerboseText('One last error check before finishing this core')
 
                 # Give it half a second
                 Start-Sleep -Milliseconds 500
@@ -13035,9 +13281,9 @@ try {
         }   # End: :LoopCoreRunner for ($coreIndex = 0; $coreIndex -lt $numAvailableCores; $coreIndex++)
 
 
-        Write-Verbose('──────────────────────────────────')
-        Write-Verbose('Iteration complete')
-        Write-Verbose('──────────────────────────────────')
+        Write-VerboseText('──────────────────────────────────')
+        Write-VerboseText('Iteration complete')
+        Write-VerboseText('──────────────────────────────────')
 
 
         # Global counter
@@ -13132,10 +13378,10 @@ catch {
         Write-Host($_.InvocationInfo | Format-List -Force | Out-String) -ErrorAction Ignore
     }
     else {
-        Write-Verbose('Error in the main functionality block!')
-        Write-Verbose($Error | Out-String) -ErrorAction Ignore
-        Write-Verbose($_.Exception | Format-List -Force | Out-String) -ErrorAction Ignore
-        Write-Verbose($_.InvocationInfo | Format-List -Force | Out-String) -ErrorAction Ignore
+        Write-VerboseText('Error in the main functionality block!')
+        Write-VerboseText($Error | Out-String) -ErrorAction Ignore
+        Write-VerboseText($_.Exception | Format-List -Force | Out-String) -ErrorAction Ignore
+        Write-VerboseText($_.InvocationInfo | Format-List -Force | Out-String) -ErrorAction Ignore
     }
 
     if ($canUseWindowsEventLog) {
@@ -13155,21 +13401,23 @@ catch {
 # Although probably no output is generated for it anymore
 # Maybe the user wants to check the stress test program output after terminating the script
 finally {
-    Write-Debug('')
-    Write-Debug('┌─────────────────────────┐')
-    Write-Debug('│    THE FINALLY BLOCK    │')
-    Write-Debug('└─────────────────────────┘')
-    Write-Debug('')
+    Write-DebugText('')
+    Write-DebugText('┌─────────────────────────┐')
+    Write-DebugText('│    THE FINALLY BLOCK    │')
+    Write-DebugText('└─────────────────────────┘')
+    Write-DebugText('')
 
     $processCPUPercentage = 0
 
     $timestamp = Get-Date -Format HH:mm:ss
-    Write-Verbose($timestamp + ' - Terminating the script...')
+    Write-VerboseText($timestamp + ' - Terminating the script...')
 
 
     # Try to re-enable the close button
     $null = [ConsoleWindowMenu]::AppendMenu($parentMainWindowMenuHandle, [ConsoleWindowMenu]::MF_STRING, [ConsoleWindowMenu]::SC_CLOSE, "Close")
 
+    # Try to restore our original console mode
+    $null = [ChangeConsoleMode]::SetMode($consoleMode)
 
     # Re-enable sleep
     [Windows.PowerUtil]::StayAwake($false)
@@ -13180,15 +13428,15 @@ finally {
         $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 
         if ($shutdownBlockReasonDestroyRetVal) {
-            Write-Verbose('Successfully destroyed the shutdown block reason: (' + $shutdownBlockReasonDestroyRetVal + ')')
+            Write-VerboseText('Successfully destroyed the shutdown block reason: (' + $shutdownBlockReasonDestroyRetVal + ')')
         }
         else {
-            Write-Verbose('Could not destroy the shutdown block reason! (Return value: ' + $shutdownBlockReasonDestroyRetVal + ')')
+            Write-VerboseText('Could not destroy the shutdown block reason! (Return value: ' + $shutdownBlockReasonDestroyRetVal + ')')
 
             if ($errorCode -gt 0) {
-                Write-Debug('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
                 $errorResult = Get-DotNetErrorMessage $errorCode
-                Write-Verbose($errorResult.errorMessage)
+                Write-VerboseText($errorResult.errorMessage)
             }
         }
     }
@@ -13215,7 +13463,7 @@ finally {
 
     # Don't do anything after a fatal error
     if ($fatalError) {
-        Write-Debug('Exit-WithFatalError was called, skipping the rest')
+        Write-DebugText('Exit-WithFatalError was called, skipping the rest')
         exit
     }
 
@@ -13244,11 +13492,11 @@ finally {
         }
 
 
-        Write-Verbose('Checking CPU usage: ' + $processCPUPercentage + '% (expected: ' + $expectedUsageTotal + '%, lower limit: ' + $minProcessUsage + '%)')
+        Write-VerboseText('Checking CPU usage: ' + $processCPUPercentage + '% (expected: ' + $expectedUsageTotal + '%, lower limit: ' + $minProcessUsage + '%)')
 
         # Close only if we're using still enough CPU power
         if ($processCPUPercentage -ge $minProcessUsage) {
-            Write-Verbose('The stress test program is still using enough CPU power, so we can try to close it')
+            Write-VerboseText('The stress test program is still using enough CPU power, so we can try to close it')
             Write-Text('           Trying to close the stress test program...')
             Close-StressTestProgram
 
@@ -13264,7 +13512,7 @@ finally {
 
 
     else {
-        Write-Verbose('Checking if the process is still active')
+        Write-VerboseText('Checking if the process is still active')
         $checkProcess = $null
 
         if ($stressTestProcessId) {
@@ -13272,8 +13520,8 @@ finally {
         }
 
         if ($checkProcess) {
-            Write-Verbose('The stress test process is still running')
-            Write-Verbose('Checking if the process is still using CPU power')
+            Write-VerboseText('The stress test process is still running')
+            Write-VerboseText('Checking if the process is still using CPU power')
 
             # CPU(s): The amount of processor time that the process has used on all processors, in seconds.
             $firstCpuValue = $checkProcess.UserProcessorTime.TotalSeconds
@@ -13282,12 +13530,12 @@ finally {
 
             $diffCpuValue = $secondCpuValue - $firstCpuValue
 
-            Write-Debug('First CPU Value:  ' + $firstCpuValue)
-            Write-Debug('Second CPU Value: ' + $secondCpuValue)
-            Write-Debug('Difference:       ' + $diffCpuValue)
+            Write-DebugText('First CPU Value:  ' + $firstCpuValue)
+            Write-DebugText('Second CPU Value: ' + $secondCpuValue)
+            Write-DebugText('Difference:       ' + $diffCpuValue)
 
             if ($diffCpuValue -gt 0.2) {
-                Write-Verbose('The stress test program is still using enough CPU power, so we can try to close it')
+                Write-VerboseText('The stress test program is still using enough CPU power, so we can try to close it')
                 Write-Text('           Trying to close the stress test program...')
                 Close-StressTestProgram
 
@@ -13295,18 +13543,18 @@ finally {
             }
             else {
                 # Maybe the process was suspended?
-                Write-Debug('The stress test program isn''t using enough CPU power, maybe it''s suspended')
+                Write-DebugText('The stress test program isn''t using enough CPU power, maybe it''s suspended')
 
                 $suspendedThreads = @($checkProcess.Threads | Select-Object -Property ThreadState, WaitReason | Where-Object -FilterScript { $_.ThreadState -eq 'Wait' -and $_.WaitReason -eq 'Suspended' })
 
-                Write-Debug('$checkProcess.Threads.Count: ' + $checkProcess.Threads.Count)
-                Write-Debug('$suspendedThreads.Count:     ' + $suspendedThreads.Count)
+                Write-DebugText('$checkProcess.Threads.Count: ' + $checkProcess.Threads.Count)
+                Write-DebugText('$suspendedThreads.Count:     ' + $suspendedThreads.Count)
 
                 # Do we need to have the counts to be equal at this point?
                 # I suppose not. Resume any thread that is suspended
                 #if ($checkProcess.Threads.Count -eq $suspendedThreads.Count) {
                 if ($suspendedThreads.Count -gt 0) {
-                    Write-Debug('There''s at least one suspended thread')
+                    Write-DebugText('There''s at least one suspended thread')
 
                     $null = Resume-Process -process $checkProcess -ignoreError $true
 
@@ -13316,25 +13564,25 @@ finally {
 
                     $diffCpuValue = $secondCpuValue - $firstCpuValue
 
-                    Write-Debug('First CPU Value:  ' + $firstCpuValue)
-                    Write-Debug('Second CPU Value: ' + $secondCpuValue)
-                    Write-Debug('Difference:       ' + $diffCpuValue)
+                    Write-DebugText('First CPU Value:  ' + $firstCpuValue)
+                    Write-DebugText('Second CPU Value: ' + $secondCpuValue)
+                    Write-DebugText('Difference:       ' + $diffCpuValue)
 
                     if ($diffCpuValue -gt 0.2) {
-                        Write-Verbose('The stress test program is still using enough CPU power, so we can try to close it')
+                        Write-VerboseText('The stress test program is still using enough CPU power, so we can try to close it')
                         Write-Text('           Trying to close the stress test program...')
                         Close-StressTestProgram
 
                         Write-ColorText('Please check if the selected stress test program "' + $selectedStressTestProgram + '" is still running!') Yellow
                     }
                     else {
-                        Write-Debug('We tried to resume, it didn''t change anything')
+                        Write-DebugText('We tried to resume, it didn''t change anything')
                     }
                 }
             }
         }
         else {
-            Write-Verbose('The stress test process is not running anymore')
+            Write-VerboseText('The stress test process is not running anymore')
             Write-ColorText('The stress test program seems to have stopped.') Yellow
             Write-ColorText('Not killing the process so you can check if there was some error.') Yellow
 
