@@ -9284,7 +9284,7 @@ function Resolve-StressTestProgrammIsRunningError {
             Write-VerboseText('"stopOnError" is set, but Automatic Test Mode is enabled as well. Ignoring stopOnError')
         }
 
-        elseif ($settings.General.stopOnError -and !$useAutomaticTestMode) {
+        if ($settings.General.stopOnError -and !$useAutomaticTestMode) {
             Write-Text('')
             Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
