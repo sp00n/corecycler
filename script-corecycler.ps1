@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.0
+    0.10.0.1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.0.0'
+$version = '0.10.0.1'
 
 
 # This defines the strict mode
@@ -3968,7 +3968,7 @@ function Add-AutoModeScheduledTask {
         # $PWord = Read-Host -Prompt 'Enter a Password' -AsSecureString
         # $Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $User, $PWord
 
-        $user      = $env:USERNAME
+        $user      = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
         $action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-ExecutionPolicy Bypass -File "' + $autoModeStartupScriptFile + '"')
         $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
         $principal = New-ScheduledTaskPrincipal -UserId $user -RunLevel Highest
@@ -9672,6 +9672,10 @@ function Set-StressTestProgramAffinities {
 
     Write-DebugText('All calculated group specific affinities: ' + ($affinities -Join ' & '))
 
+
+    # TODO
+    # Issue #101
+    # Maybe relying on $stressTestThreads set in Get-StressTestProcessInformation is not sufficient here?
 
     # Go through the stress test threads that we identified earlier, and evenly distribute the CPU affinities across the threads
     # (e.g. just 1, or 1 + 1, or 2 + 2)
