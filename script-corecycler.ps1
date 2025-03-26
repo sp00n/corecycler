@@ -7479,6 +7479,11 @@ function Initialize-yCruncher {
         $stopOnError = '        StopOnError : "false"'
     }
 
+    # No stopOnError if the automatic test mode is enabled
+    if ($settings.yCruncher.enableYCruncherLoggingWrapper -eq 1 -and $settings.General.stopOnError -gt 0 -and $useAutomaticTestMode) {
+        $stopOnError = '        StopOnError : "false"'
+    }
+
     # The tests to run
     $testsToRun = $selectedTests | ForEach-Object { -Join('            "', $_, '"') }
 
@@ -9274,37 +9279,39 @@ function Resolve-StressTestProgrammIsRunningError {
 
         # If the stopOnError flag is set, stop at this point
         # But leave the stress test program open if possible
-        if ($settings.General.stopOnError) {
-            # Only stop the testing process if we're not using Automatic Test Mode
-            if (!$useAutomaticTestMode) {
-                Write-Text('')
-                Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
+        # Only stop the testing process if we're not using Automatic Test Mode (fixes #110)
+        if ($settings.General.stopOnError -and $useAutomaticTestMode) {
+            Write-VerboseText('"stopOnError" is set, but Automatic Test Mode is enabled as well. Ignoring stopOnError')
+        }
 
-                # Display the path to the log file
-                if ($isPrime95) {
-                    Write-Text('')
-                    Write-ColorText('Prime95''s results log file can be found at:') Cyan
-                    Write-ColorText($stressTestLogFilePath) Cyan
-                }
-                elseif ($isYCruncherWithLogging) {
-                    Write-Text('')
-                    Write-ColorText('y-cruncher''s log file can be found at:') Cyan
-                    Write-ColorText($stressTestLogFilePath) Cyan
-                }
-                elseif ($isLinpack) {
-                    Write-Text('')
-                    Write-ColorText('Linpack''s log file can be found at:') Cyan
-                    Write-ColorText($stressTestLogFilePath) Cyan
-                }
+        elseif ($settings.General.stopOnError -and !$useAutomaticTestMode) {
+            Write-Text('')
+            Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
-                # And the path to the CoreCycler the log file for this run
+            # Display the path to the log file
+            if ($isPrime95) {
                 Write-Text('')
-                Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
-                Write-ColorText($logFileFullPath) Cyan
-                Write-Text('')
-
-                Exit-Script
+                Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                Write-ColorText($stressTestLogFilePath) Cyan
             }
+            elseif ($isYCruncherWithLogging) {
+                Write-Text('')
+                Write-ColorText('y-cruncher''s log file can be found at:') Cyan
+                Write-ColorText($stressTestLogFilePath) Cyan
+            }
+            elseif ($isLinpack) {
+                Write-Text('')
+                Write-ColorText('Linpack''s log file can be found at:') Cyan
+                Write-ColorText($stressTestLogFilePath) Cyan
+            }
+
+            # And the path to the CoreCycler the log file for this run
+            Write-Text('')
+            Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+            Write-ColorText($logFileFullPath) Cyan
+            Write-Text('')
+
+            Exit-Script
         }
 
         # y-cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
@@ -9672,10 +9679,6 @@ function Set-StressTestProgramAffinities {
 
     Write-DebugText('All calculated group specific affinities: ' + ($affinities -Join ' & '))
 
-
-    # TODO
-    # Issue #101
-    # Maybe relying on $stressTestThreads set in Get-StressTestProcessInformation is not sufficient here?
 
     # Go through the stress test threads that we identified earlier, and evenly distribute the CPU affinities across the threads
     # (e.g. just 1, or 1 + 1, or 2 + 2)
