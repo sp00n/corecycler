@@ -203,7 +203,7 @@ try {
     $autoModeFileContent = @($autoModeFileContentString -Split '\r?\n')
 
     if (!$autoModeFileContent -or $autoModeFileContent.Count -lt 5) {
-        throw [AutoModeResumeFailedException] 'The .automode file doesn''t have all required information!'
+        throw [AutoModeResumeFailedException] 'Possible corruption detected, the .automode file doesn''t contain all required information!'
     }
 
     $fileTimestamp     = [UInt64] $autoModeFileContent[0]
