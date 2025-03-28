@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.0.1'
+$version = '0.10.1.0'
 
 
 # This defines the strict mode
@@ -819,6 +819,15 @@ repeatCoreOnError = 1
 #
 # Default: 0
 enableResumeAfterUnexpectedExit = 0
+
+
+# Windows treats crashes or reboots that happen within 120 seconds of the boot as a "failed" boot
+# To prevent the Windows Recovery Screen from appearing after three of those "failed" boots, the script will wait for this
+# amount of time before resuming the testing process
+# Set this to 0 if you don't care about that and want to resume immediately
+#
+# Default: 120
+waitBeforeAutomaticResume = 120
 
 
 
@@ -3867,7 +3876,7 @@ function Get-AutoModeFileContent {
     $autoModeFileContent = @($autoModeFileContentString -Split '\r?\n')
 
     if (!$autoModeFileContent -or $autoModeFileContent.Count -lt 5) {
-        throw 'The .automode file doesn''t have all required information!'
+        throw 'Possible corruption detected, the .automode file doesn''t contain all required information!'
     }
 
     $autoModeInfo = @{
@@ -3876,6 +3885,7 @@ function Get-AutoModeFileContent {
         'logFileCoreCycler' = [String] $autoModeFileContent[2]
         'logFileStressTest' = [String] $autoModeFileContent[3]
         'voltageInfo'       = [String] $autoModeFileContent[4]
+        'waitBeforeResume'  = [Int] $autoModeFileContent[5]
     }
 
     if ($autoModeInfo.lastCoreTested -ne $CoreFromAutoMode) {
@@ -3910,6 +3920,7 @@ function Set-AutoModeFile {
         $logFileFullPath
         $stressTestLogFilePath
         ($voltageCurrentValues -Join ' ').Trim()
+        $settings['AutomaticTestMode']['waitBeforeAutomaticResume']
     )
 
     $null = New-Item $autoModeFile -ItemType File -Force
@@ -3919,6 +3930,12 @@ function Set-AutoModeFile {
     }
 
     [System.IO.File]::WriteAllLines($autoModeFile, $autoModeFileContent)
+
+
+    # Try to flush the cache to the disk, hopefully reducing the amount of corrupted files
+    if ($canUseFlushToDisk) {
+        Save-CachedDataToDisk
+    }
 }
 
 
@@ -3976,7 +3993,12 @@ function Add-AutoModeScheduledTask {
         $task      = New-ScheduledTask -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description $autoModeTaskDescription
 
         $null = Register-ScheduledTask -Force -TaskName $autoModeTaskName -TaskPath $autoModeTaskPath -InputObject $task
+        $foundTask = Get-ScheduledTask -TaskName $autoModeTaskName -TaskPath $autoModeTaskPath -ErrorAction SilentlyContinue
 
+        if (!$foundTask) {
+            throw 'Could not find the created task!'
+        }
+       
         Write-DebugText('Added the Automatic Test Mode startup task')
     }
     catch {
@@ -4871,10 +4893,6 @@ function Initialize-AutomaticTestMode {
     $Script:useAutomaticTestModeWithResume = ($settings.AutomaticTestMode.enableResumeAfterUnexpectedExit -gt 0)
 
 
-    # Apply the starting values
-    Set-NewVoltageValues
-
-
     if ($useAutomaticTestModeWithResume) {
         Write-VerboseText('Automatic Test Mode with resuming after unexpected exit enabled')
 
@@ -4888,6 +4906,12 @@ function Initialize-AutomaticTestMode {
         Remove-AutoModeScheduledTask
         Remove-AutoModeFile
     }
+
+
+    # Apply the starting values
+    # Do these after the startup task has been created
+    Set-NewVoltageValues
+
 
     Write-VerboseText('The starting value(s):')
     Write-VerboseText($voltageStartValuesArray)
@@ -5937,6 +5961,36 @@ function Get-StressTestProcessInformation {
 
 
         if ($thisStressTestThreads.Count -ne $expectedNumberOfThreads) {
+            # Issue #111
+            # This may happen when the stress test immediately throws an error after being started, but before the check for the threads happens
+            # So check for new log file entries
+            # It's hard to debug
+            <#
+            try {
+                # TODO: Somehow get the actual core number
+                Test-StressTestProgrammIsRunning -coreNumber $actualCoreNumber -coreStartDate $startDateThisCore
+            }
+
+            # Some error happened in or with the stress test program
+            catch {
+                $params = @{
+                    'checkType'          = 'TICK'
+                    'actualCoreNumber'   = $actualCoreNumber
+                    'coreTestOrderArray' = $coreTestOrderArray
+                    'coreIndex'          = [Ref] $coreIndex
+                    'ExceptionObj'       = $_
+                    'ErrorObj'           = $Error
+                }
+
+                Resolve-StressTestProgrammIsRunningError @params
+
+                # TODO: Somehow proceed to the next core
+            }
+            #>
+
+
+
+
             Write-ColorText('FATAL ERROR: Incorrect number of threads found that could be running the stress test!') Red
             Write-ColorText('             Found ' + $thisStressTestThreads.Count + ' threads, but expected ' + $expectedNumberOfThreads) Red
 
@@ -9973,13 +10027,13 @@ function Get-StressTestProgramAffinities {
 
 <#
 .DESCRIPTION
-    Try to save the log file data to the disk
+    Try to save any cached file data to the disk
     Uses Write-VolumeCache to flush the disk write cache
     It may not work for drive internal caches though
 .OUTPUTS
     [Void]
 #>
-function Save-LogFileDataToDisk {
+function Save-CachedDataToDisk {
     Write-DebugText('           Trying to flush the write cache to disk for drive: ' + $scriptDriveLetter)
 
     # Start it as a job to not block the script execution
@@ -10777,7 +10831,7 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
 
 
 # Clear the error variable, it may have been populated by the above calls
-$Error.clear()
+$Error.Clear()
 
 
 
@@ -11059,7 +11113,7 @@ try {
     # Check if we can use Write-VolumeCache to write the log file data to the disk
     # It will not work under certain circumstances, e.g. for VeraCrypt volumes
     # Get-Volume and Write-VolumeCache have the same requirements
-    if ($settings.Logging.flushDiskWriteCache -eq 1) {
+    if ($settings.Logging.flushDiskWriteCache -eq 1 -or $useAutomaticTestModeWithResume) {
         $canUseFlushToDisk = !!(Get-Volume $scriptDriveLetter -ErrorAction Ignore)
 
         # Also check if the drive "letter" is an actual drive, and not e.g. a network share
@@ -12594,7 +12648,7 @@ try {
 
                 # Try to flush the disk write cache so that the log file is available in case of a crash
                 if ($canUseFlushToDisk) {
-                    Save-LogFileDataToDisk
+                    Save-CachedDataToDisk
                 }
 
 

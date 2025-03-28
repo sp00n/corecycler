@@ -12,6 +12,7 @@
     and tries to resume the testing process
 #>
 Set-StrictMode -Version 3.0
+$Error.Clear()
 
 
 
@@ -211,12 +212,14 @@ try {
     $logFileCoreCycler = [String] $autoModeFileContent[2]
     $logFileStressTest = [String] $autoModeFileContent[3]
     $voltageInfo       = [String] $autoModeFileContent[4]
+    $waitBeforeResume  = $(if ($autoModeFileContent.Length -gt 5) { [Int] $autoModeFileContent[5] } else { 0 })     # Optional
 
     Write-Text('Timestamp:           ' + $fileTimestamp)
     Write-Text('Tested Core:         ' + $coreTested)
     Write-Text('Logfile CoreCycler:  ' + $logFileCoreCycler)
     Write-Text('Logfile Stress Test: ' + $logFileStressTest)
     Write-Text('Voltage Settings:    ' + $voltageInfo)
+    Write-Text('Wait before resume:  ' + $waitBeforeResume)
     Write-Text('')
 
 
@@ -245,6 +248,32 @@ try {
         throw [AutoModeResumeFailedException] ('The resume timestamp is too long ago (too much time has passed: ' + [Math]::Round($actualTimeDiff / 60 / 60, 1) + ' hours, max: ' + [Math]::Round($limitTime / 60 / 60, 1) + ' hours)')
     }
 
+
+    # Wait for some time to prevent triggering a "failed" boot
+    if (-not [String]::IsNullOrWhiteSpace($waitBeforeResume) -and [Int]$waitBeforeResume -gt 0) {
+        Write-Text('Waiting for ' + $waitBeforeResume + ' seconds before resuming the test, to avoid a "failed" boot...')
+
+        $remainingTime = $waitBeforeResume
+        $steps = [Math]::Ceiling($waitBeforeResume / 10)
+        $timePassed = 0
+
+        Write-Text('0... ') -NoNewLine
+
+        for ($step = 1; $step -le $steps; $step++) {
+            $remainingTime = $waitBeforeResume - $timePassed
+            $waitTime = [Math]::Min(10, $remainingTime)
+
+            Start-Sleep $waitTime
+            
+
+            $timePassed = $timePassed + $waitTime
+            Write-Text([String]$timePassed + '... ') -NoNewLine
+        }
+        
+        Write-Text('')
+        Write-Text('')
+    }
+
     Write-Text('Re-starting CoreCycler...')
     Write-Text('')
 
@@ -269,7 +298,8 @@ catch [AutoModeResumeFailedException] {
 catch {
     Write-Text('')
     Write-Text('ERROR:')
-    Write-Text($_)
+    Write-Text($_ | Format-List -Force | Out-String)
+    Write-Text($_.InvocationInfo | Format-List -Force | Out-String)
 }
 
 finally {
