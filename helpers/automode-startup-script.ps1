@@ -131,6 +131,36 @@ function Exit-Script {
 
 <#
 .DESCRIPTION
+    Wait for a specific time, or contiue with a key press
+.PARAMETER timeout
+    [Int] How long to wait
+.SOURCE
+    https://gist.github.com/asheroto/7be9d7c945a09d82bca86df75e9a9d7a
+#>
+function Wait-ForKeyOrTimeout {
+    param (
+        [Int] $timeout = 120
+    )
+
+    for ($i = $timeout; $i -ge 0; $i--) {
+        Write-Text("`r" + ($i.ToString() + ' seconds... (Press any key to immediately continue)').PadRight(54, ' ')) -NoNewline
+        
+        if ([System.Console]::KeyAvailable) {
+            [void][System.Console]::ReadKey($true)
+            Write-Text("`r" + ('Key pressed, continuing...')).PadRight(54, ' ')
+            return
+        }
+
+        Start-Sleep -Seconds 1
+    }
+    
+            Write-Text("`r" + ('0 seconds... (Press any key to immediately continue)').PadRight(54, ' ')) -NoNewline
+}
+
+
+
+<#
+.DESCRIPTION
     This is a custom exception, just to get out of the try {} block without throwing an actual error
 #>
 class EndTryBlockException: System.Exception {
@@ -251,24 +281,9 @@ try {
 
     # Wait for some time to prevent triggering a "failed" boot
     if (-not [String]::IsNullOrWhiteSpace($waitBeforeResume) -and [Int]$waitBeforeResume -gt 0) {
-        Write-Text('Waiting for ' + $waitBeforeResume + ' seconds before resuming the test, to avoid a "failed" boot...')
+        Write-Text('Waiting for ' + $waitBeforeResume + ' seconds before resuming the test, to avoid a "failed" boot')
 
-        $remainingTime = $waitBeforeResume
-        $steps = [Math]::Ceiling($waitBeforeResume / 10)
-        $timePassed = 0
-
-        Write-Text('0... ') -NoNewLine
-
-        for ($step = 1; $step -le $steps; $step++) {
-            $remainingTime = $waitBeforeResume - $timePassed
-            $waitTime = [Math]::Min(10, $remainingTime)
-
-            Start-Sleep $waitTime
-            
-
-            $timePassed = $timePassed + $waitTime
-            Write-Text([String]$timePassed + '... ') -NoNewLine
-        }
+        Wait-ForKeyOrTimeout $waitBeforeResume
         
         Write-Text('')
         Write-Text('')
