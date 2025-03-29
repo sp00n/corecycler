@@ -4922,12 +4922,19 @@ function Initialize-AutomaticTestMode {
 <#
 .DESCRIPTION
     Get the currently applied Curve Optimizer values
-.PARAMETER
-    [Void]
+.PARAMETER IgnoreCoreCount
+    [Switch] (optional) If set, will not check if the returned array matches the number of physical cores (i.e. when the second CCD is disabled)
+.PARAMETER IgnoreInvalidValues
+    [Switch] (optional) If set, will not check if the returned array contains reasonable values (i.e. when the second CCD is disabled)
 .OUTPUTS
     [Array] The Curve Optimizer values
 #>
 function Get-CurveOptimizerValues {
+    param(
+        [Parameter(Mandatory=$false)] [Switch] $IgnoreCoreCount,
+        [Parameter(Mandatory=$false)] [Switch] $IgnoreInvalidValues
+    )
+
     try {
         Write-DebugText('Trying to query for the Curve Optimizer values')
 
@@ -4980,13 +4987,17 @@ function Get-CurveOptimizerValues {
         Write-DebugText('The queried and parsed Curve Optimizer values:')
         Write-DebugText($coArray)
 
-        if ($coArray.Count -ne $numPhysCores) {
-            throw('Found ' + $coArray.Count + ' entries instead of the expected ' + $numPhysCores + ':' + [Environment]::NewLine + $coArray)
+        if (!$IgnoreCoreCount.IsPresent) {
+            if ($coArray.Count -ne $numPhysCores) {
+                throw('Found ' + $coArray.Count + ' entries instead of the expected ' + $numPhysCores + ':' + [Environment]::NewLine + $coArray)
+            }
         }
 
         # Only reasonable values
-        if (@($coArray | Where-Object { [Math]::Abs($_) -gt $limitForCoValues }).Count -gt 0) {
-            throw('Found invalid values (either higher or lower than +-' + $limitForCoValues + ')' + [Environment]::NewLine + $coArray)
+        if (!$IgnoreInvalidValues.IsPresent) {
+            if (@($coArray | Where-Object { [Math]::Abs($_) -gt $limitForCoValues }).Count -gt 0) {
+                throw('Found invalid values (either higher or lower than +-' + $limitForCoValues + ')' + [Environment]::NewLine + $coArray)
+            }
         }
 
         return $coArray
@@ -5001,19 +5012,33 @@ function Get-CurveOptimizerValues {
 <#
 .DESCRIPTION
     Set the new Curve Optimizer values
-.PARAMETER
-    [Void]
+.PARAMETER overrideCoValues
+    [Array] (optional) Use these CO values instead
 .OUTPUTS
     [Void]
 #>
 function Set-CurveOptimizerValues {
+    param(
+        [Parameter(Mandatory=$false)] $overrideCoValues
+    )
+
+    Write-VerboseText('Trying to set the Curve Optimizer values')
+
     try {
-        Write-DebugText('Trying to set the Curve Optimizer values:')
+        if ($overrideCoValues) {
+            Write-DebugText('Overriding the Curve Optimizer values with:')
+            Write-DebugText($overrideCoValues)
 
-        $coString = $voltageCurrentValues -Join ' '
-        $argumentString = 'set ' + $coString
+            $coString = $overrideCoValues -Join ' '
+        }
+        else {
+            $coString = $voltageCurrentValues -Join ' '
+        }
 
+        Write-VerboseText('The values to set:')
         Write-VerboseText($coString)
+
+        $argumentString = 'set ' + $coString
 
         $setCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $setCoValuesProcessInfo.FileName = $pboCliTool
@@ -5063,6 +5088,31 @@ function Set-CurveOptimizerValues {
 
         if ($stdOut -eq '') {
             throw('Returned value was empty')
+        }
+
+        # The returned string needs to match the input values, otherwise something has gone wrong
+        # This does not seem to throw $stdErr, so we need to check for it
+        if ($stdOut -ne $coString) {
+            # Special case: the second CCD was disabled, so we only detect the cores for a single CCD, but pbotest still requires the values for all the cores
+            $readVoltageValuesArray = Get-CurveOptimizerValues -IgnoreCoreCount -IgnoreInvalidValues
+
+            # If the returned number of CO values are twice the amount of what we try to set, we assume that the second CCD is disabled
+            if ($voltageCurrentValues.Length -eq $numPhysCores -and $readVoltageValuesArray.Length -eq $voltageCurrentValues.Length * 2) {
+                Write-DebugText('It seems the second CCD is disabled, filling the Curve Optimizer values with 0')
+
+                # Set the disabled core values to 0
+                $dummyCoValues = (@(0..($numPhysCores-1)) | ForEach-Object { 0 })
+                $specialCaseCoValues = $voltageCurrentValues + $dummyCoValues
+
+                Write-DebugText('New special case CO values:')
+                Write-DebugText($specialCaseCoValues)
+
+                Set-CurveOptimizerValues $specialCaseCoValues
+                return
+            }
+            else {
+                throw('Unexpected output message:' + [Environment]::NewLine + $stdOut)
+            }
         }
 
         Write-DebugText('Curve Optimizer values successfuly set to:')
@@ -12647,7 +12697,7 @@ try {
 
 
                 # Try to flush the disk write cache so that the log file is available in case of a crash
-                if ($canUseFlushToDisk) {
+                if ($settings.Logging.flushDiskWriteCache -eq 1 -and $canUseFlushToDisk) {
                     Save-CachedDataToDisk
                 }
 
