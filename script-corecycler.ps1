@@ -30,6 +30,10 @@ $version = '0.10.1.0'
 Set-StrictMode -Version 3.0
 
 
+# Mimic the Win32 ERROR_SUCCESS constant
+Set-Variable ERROR_SUCCESS -Option Constant -Value 0
+
+
 # We want to use UTF-8 if possible when generating files, not UTF-16
 $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 
@@ -1960,6 +1964,29 @@ $ChangeConsoleModeDefinition = @'
 
 
 
+# Definition to flush the registry to the disk
+# Used to make sure that the Automatic Test Mode scheduled task can be correctly executed on the next boot
+# Sources: https://gist.github.com/ryanries/4dd567d08e2eace9683ffef67e20028e
+#          https://blog.coursemonster.com/registry-monitor-for-powershell
+#          https://github.com/PowerShell/PowerShell/blob/master/src/System.Management.Automation/namespaces/TransactedRegistryKey.cs
+#          https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regflushkey
+$RegistryFlusherDefinition = @'
+    using System;
+    using System.Runtime.InteropServices;
+
+    public class RegistryFlusher {
+        [DllImport("Advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern int RegOpenKeyExW(int hKey, string lpSubKey, int ulOptions, uint samDesired, out IntPtr phkResult);
+
+        [DllImport("Advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern int RegCloseKey(IntPtr hKey);
+
+        [DllImport("Advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern int RegFlushKey(IntPtr hKey);
+    }
+'@
+
+
 # Make the external code definitions available to PowerShell
 Add-Type -ErrorAction Stop -Name PowerUtil -Namespace Windows -MemberDefinition $PowerUtilDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ShutdownBlockDefinition
@@ -1967,9 +1994,10 @@ Add-Type -ErrorAction Stop -TypeDefinition $GetWindowsDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $WindowFlashDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ConsoleWindowMenuDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ChangeConsoleModeDefinition
-$SendMessage = Add-Type -ErrorAction Stop -TypeDefinition $SendMessageDefinition -PassThru
 Add-Type -ErrorAction Stop -TypeDefinition $SetThreadHandlerDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $SetSuspendAndResumeWithDebugDefinition
+Add-Type -ErrorAction Stop -TypeDefinition $RegistryFlusherDefinition
+$SendMessage = Add-Type -ErrorAction Stop -TypeDefinition $SendMessageDefinition -PassThru
 
 
 # Also make VisualBasic available
@@ -2795,7 +2823,7 @@ function Get-PerformanceCounterLocalName {
     $queryResult = $type::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref] $BufferSize)
 
     # 0 = ERROR_SUCCESS
-    if ($queryResult -eq 0) {
+    if ($queryResult -eq $ERROR_SUCCESS) {
         $Buffer.ToString().Substring(0, $BufferSize-1)
     }
     else {
@@ -3998,7 +4026,64 @@ function Add-AutoModeScheduledTask {
         if (!$foundTask) {
             throw 'Could not find the created task!'
         }
-       
+
+
+        # Issue 118
+        # If the computer crashes right after creating the scheduled task, it will not be executed on the next boot
+        # The registry is not immediately written to disk, so the reg key may be lost during the crash
+        # See https://superuser.com/a/1331545/196649
+        # See https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regflushkey
+        # Computer\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache
+        $HKLM = 0x80000002     # HKEY_LOCAL_MACHINE
+        $accessRights = 0x0001 # KEY_QUERY_VALUE
+        $regSubPath = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache'
+        $regHandle = [IntPtr]::Zero
+
+        # Open
+        $openResult = [RegistryFlusher]::RegOpenKeyExW($HKLM, $regSubPath, 0, $accessRights, [Ref] $regHandle)
+        $errorCode  = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+        if ($openResult -ne $ERROR_SUCCESS) {
+            Write-DebugText('Failed to check the registry key for the scheduled task. (Result ' + $openResult + ')')
+
+            if ($errorCode -gt 0) {
+                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                $errorResult = Get-DotNetErrorMessage $errorCode
+                Write-DebugText($errorResult.errorMessage)
+                throw('Failed to check the registry key for the scheduled task!' + [Environment]::NewLine + $errorResult.errorMessage)
+            }
+        }
+
+        # Flush
+        $flushResult = [RegistryFlusher]::RegFlushKey($regHandle)
+        $errorCode   = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+        if ($flushResult -ne $ERROR_SUCCESS) {
+            Write-DebugText('Failed to flush the registry key for the scheduled task. (Result ' + $flushResult + ')')
+
+            if ($errorCode -gt 0) {
+                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                $errorResult = Get-DotNetErrorMessage $errorCode
+                Write-DebugText($errorResult.errorMessage)
+                throw('Failed to flush the registry key for the scheduled task!' + [Environment]::NewLine + $errorResult.errorMessage)
+            }
+        }
+
+        # Close
+        $closeResult = [RegistryFlusher]::RegCloseKey($regHandle)
+        $errorCode   = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+        if ($closeResult -ne $ERROR_SUCCESS) {
+            Write-DebugText('Failed to close the registry key for the scheduled task. (Result ' + $closeResult + ')')
+
+            if ($errorCode -gt 0) {
+                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
+                $errorResult = Get-DotNetErrorMessage $errorCode
+                Write-DebugText($errorResult.errorMessage)
+                throw('Failed to close the registry key for the scheduled task!' + [Environment]::NewLine + $errorResult.errorMessage)
+            }
+        }
+
         Write-DebugText('Added the Automatic Test Mode startup task')
     }
     catch {
@@ -12229,11 +12314,18 @@ try {
         # Randomized
         elseif ($coreTestOrderMode -eq 'random') {
             Write-VerboseText('Random test order selected, building the test order array...')
-            [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object { Get-Random })
 
-            # If we had added a core from CoreFromAutoMode, we will need to push it to the front here again
+            # Only unique cores for the random order
+            [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object -Unique | Sort-Object { Get-Random })
+
+            # If we had added a core from CoreFromAutoMode, push that core to the front
             if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt -1) {
+                Write-VerboseText('Pushing the passed core to the beginning of the test order')
                 [Void] $coreTestOrderArray.Insert(0, $CoreFromAutoMode)
+                [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object -Unique)    # This should keep the randomized order, but keep the added core in the front
+
+                $numAvailableCores       = $coreTestOrderArray.Count
+                $numUniqueAvailableCores = @($coreTestOrderArray | Sort-Object | Get-Unique).Count
             }
         }
 
