@@ -1,0 +1,459 @@
+              +   Started the script at 2025-03-31 22:31:00
+              +++ PSScriptRoot: F:\Github\CoreCycler-EXE
+              +++ The initial log level: 2
+              +++ Starting the main functionality block
+              +++ The original console mode: 503
+              +++ Disabled the QuickEdit Mode feature
+              +++ Disabled the close button
+              +++ Trying to get the initial update check settings
+              +++ Custom config file: F:\Github\CoreCycler-EXE\
+              +++ F:\Github\CoreCycler-EXE\ not found, using the values from the config.ini
+              +++ Initial Update Check Enabled:   True
+              +++ Initial Update Check Frequency: 24
+              +++ Update check is enabled, initializing the background job (early start)
+              +++ Starting the update check background job
+              +++ Getting the settings
+              +++ Settings parsed
+              +++ 
+              +++ -------------------------------- The config file -------------------------------
+              +++ F:\Github\CoreCycler-EXE\config.ini
+              +++ --------------------------------------------------------------------------------
+              +++ 
+              +++ [General]
+              +++ useconfigfile = 
+              +++ stresstestprogram = YCRUNCHER
+              +++ runtimepercore = 6m
+              +++ suspendperiodically = 1
+              +++ coretestorder = Default
+              +++ skipcoreonerror = 1
+              +++ stoponerror = 0
+              +++ numberofthreads = 1
+              +++ assignbothvirtualcoresforsinglethread = 0
+              +++ maxiterations = 10000
+              +++ corestoignore = 
+              +++ restarttestprogramforeachcore = 0
+              +++ delaybetweencores = 15
+              +++ beeponerror = 1
+              +++ flashonerror = 1
+              +++ lookforwheaerrors = 1
+              +++ treatwheawarningaserror = 1
+              +++ 
+              +++ [Prime95]
+              +++ mode = SSE
+              +++ fftsize = Huge
+              +++ 
+              +++ [yCruncher]
+              +++ mode = 04-P4P
+              +++ tests = BKT, BBP, SFT, SFTv4, SNT, SVT, FFT, FFTv4, N63, VT3
+              +++ testduration = 60
+              +++ memory = Default
+              +++ enableycruncherloggingwrapper = 1
+              +++ 
+              +++ [Aida64]
+              +++ mode = 
+              +++ useavx = 0
+              +++ maxmemory = 90
+              +++ 
+              +++ [Linpack]
+              +++ version = 2018
+              +++ mode = Slowest
+              +++ memory = 100MB
+              +++ 
+              +++ [AutomaticTestMode]
+              +++ enableautomaticadjustment = 0
+              +++ startvalues = Default
+              +++ maxvalue = 0
+              +++ incrementby = 1
+              +++ repeatcoreonerror = 1
+              +++ enableresumeafterunexpectedexit = 0
+              +++ 
+              +++ [Logging]
+              +++ name = CoreCycler
+              +++ loglevel = 2
+              +++ usewindowseventlog = 1
+              +++ flushdiskwritecache = 0
+              +++ 
+              +++ [Update]
+              +++ enableupdatecheck = 1
+              +++ updatecheckfrequency = 24
+              +++ 
+              +++ [Prime95Custom]
+              +++ cpusupportsavx = 0
+              +++ cpusupportsavx2 = 0
+              +++ cpusupportsfma3 = 0
+              +++ cpusupportsavx512 = 0
+              +++ mintorturefft = 4
+              +++ maxtorturefft = 8192
+              +++ torturemem = 0
+              +++ torturetime = 1
+              +++ 
+              +++ [Debug]
+              +++ disablecpuutilizationcheck = 0
+              +++ usewindowsperformancecountersforcpuutilization = 0
+              +++ enablecpufrequencycheck = 0
+              +++ tickinterval = 10
+              +++ delayfirsterrorcheck = 0
+              +++ stresstestprogrampriority = Normal
+              +++ stresstestprogramwindowtoforeground = 0
+              +++ suspensiontime = 1000
+              +++ modetouseforsuspension = Threads
+              +++ 
+              +++ 
+              +++ 
+              +++ 
+              +++ ------------------------------ The parsed settings -----------------------------
+              +++ [No Section] mode = 04-P4P
+              +++ 
+              +++ [Logging] useWindowsEventLog = 1
+              +++ [Logging] flushDiskWriteCache = 0
+              +++ [Logging] name = CoreCycler
+              +++ [Logging] logLevel = 2
+              +++ 
+              +++ [Aida64] useAVX = 0
+              +++ [Aida64] mode = CACHE
+              +++ [Aida64] maxMemory = 90
+              +++ 
+              +++ [Update] enableUpdateCheck = 1
+              +++ [Update] updateCheckFrequency = 24
+              +++ 
+              +++ [Debug] stressTestProgramWindowToForeground = 0
+              +++ [Debug] delayFirstErrorCheck = 0
+              +++ [Debug] disableCpuUtilizationCheck = 0
+              +++ [Debug] modeToUseForSuspension = threads
+              +++ [Debug] tickInterval = 10
+              +++ [Debug] useWindowsPerformanceCountersForCpuUtilization = 0
+              +++ [Debug] enableCpuFrequencyCheck = 0
+              +++ [Debug] stressTestProgramPriority = Normal
+              +++ [Debug] suspensionTime = 1000
+              +++ 
+              +++ [yCruncher] mode = 04-P4P
+              +++ [yCruncher] enableYCruncherLoggingWrapper = 1
+              +++ [yCruncher] testDuration = 60
+              +++ [yCruncher] memory = default
+              +++ [yCruncher] tests = BKT BBP SFT SFTv4 SNT SVT FFT FFTv4 N63 VT3
+              +++ 
+              +++ [Prime95Custom] MinTortureFFT = 4
+              +++ [Prime95Custom] TortureTime = 1
+              +++ [Prime95Custom] TortureMem = 0
+              +++ [Prime95Custom] CpuSupportsAVX = 0
+              +++ [Prime95Custom] CpuSupportsFMA3 = 0
+              +++ [Prime95Custom] MaxTortureFFT = 8192
+              +++ [Prime95Custom] CpuSupportsAVX512 = 0
+              +++ [Prime95Custom] CpuSupportsAVX2 = 0
+              +++ 
+              +++ [AutomaticTestMode] repeatCoreOnError = 1
+              +++ [AutomaticTestMode] enableAutomaticAdjustment = 0
+              +++ [AutomaticTestMode] maxValue = 0
+              +++ [AutomaticTestMode] enableResumeAfterUnexpectedExit = 0
+              +++ [AutomaticTestMode] incrementBy = 1
+              +++ [AutomaticTestMode] startValues = default
+              +++ 
+              +++ [Prime95] FFTSize = Huge
+              +++ [Prime95] mode = SSE
+              +++ 
+              +++ [Linpack] memory = 100mb
+              +++ [Linpack] version = 2018
+              +++ [Linpack] mode = Slowest
+              +++ 
+              +++ [General] runtimePerCore = 360
+              +++ [General] coresToIgnore = 
+              +++ [General] maxIterations = 10000
+              +++ [General] assignBothVirtualCoresForSingleThread = 0
+              +++ [General] useConfigFile = 
+              +++ [General] flashOnError = 1
+              +++ [General] skipCoreOnError = 1
+              +++ [General] restartTestProgramForEachCore = 0
+              +++ [General] treatWheaWarningAsError = 1
+              +++ [General] stopOnError = 0
+              +++ [General] numberOfThreads = 1
+              +++ [General] delayBetweenCores = 15
+              +++ [General] stressTestProgram = ycruncher
+              +++ [General] lookForWheaErrors = 1
+              +++ [General] suspendPeriodically = 1
+              +++ [General] coreTestOrder = default
+              +++ [General] beepOnError = 1
+              +++ 
+              +++ --------------------------------------------------------------------------------
+              +++ --------------------------------------------------------------------------------
+              +++ --------------------------------------------------------------------------------
+              +++ 
+              +   
+              +   Operating System:
+              +   OS:          Microsoft Windows 11 Pro
+              +   Version:     10.0.26100
+              +   BuildNumber: 26100
+              +   CSDVersion:  
+              +   CodeSet:     1252
+              +   CountryCode: 1
+              +   OSLanguage:  1033
+              +   Locale:      0409 (hex -> int -> 1033)
+              +   Locale Name: English (United States) (en-US)
+              +   Free Memory: 26721 MB
+              +   Script Root: F:\Github\CoreCycler-EXE
+              +   
+              +   APIC IDs:
+              +   CPU  0:  ACPI ID =  0  -> Core  0 (SMT On)
+              +   CPU  1:  ACPI ID =  1  -> Core  0 (SMT On)
+              +   CPU  2:  ACPI ID =  2  -> Core  1 (SMT On)
+              +   CPU  3:  ACPI ID =  3  -> Core  1 (SMT On)
+              +   CPU  4:  ACPI ID =  4  -> Core  2 (SMT On)
+              +   CPU  5:  ACPI ID =  5  -> Core  2 (SMT On)
+              +   CPU  6:  ACPI ID =  6  -> Core  3 (SMT On)
+              +   CPU  7:  ACPI ID =  7  -> Core  3 (SMT On)
+              +   CPU  8:  ACPI ID =  8  -> Core  4 (SMT On)
+              +   CPU  9:  ACPI ID =  9  -> Core  4 (SMT On)
+              +   CPU 10:  ACPI ID = 10  -> Core  5 (SMT On)
+              +   CPU 11:  ACPI ID = 11  -> Core  5 (SMT On)
+              +   CPU 12:  ACPI ID = 12  -> Core  6 (SMT On)
+              +   CPU 13:  ACPI ID = 13  -> Core  6 (SMT On)
+              +   CPU 14:  ACPI ID = 14  -> Core  7 (SMT On)
+              +   CPU 15:  ACPI ID = 15  -> Core  7 (SMT On)
+              +   CPU 16:  ACPI ID = 16  -> Core  8 (SMT On)
+              +   CPU 17:  ACPI ID = 17  -> Core  8 (SMT On)
+              +   CPU 18:  ACPI ID = 18  -> Core  9 (SMT On)
+              +   CPU 19:  ACPI ID = 19  -> Core  9 (SMT On)
+              +   CPU 20:  ACPI ID = 20  -> Core 10 (SMT On)
+              +   CPU 21:  ACPI ID = 21  -> Core 10 (SMT On)
+              +   CPU 22:  ACPI ID = 22  -> Core 11 (SMT On)
+              +   CPU 23:  ACPI ID = 23  -> Core 11 (SMT On)
+              +   CPU 24:  ACPI ID = 24  -> Core 12 (SMT On)
+              +   CPU 25:  ACPI ID = 25  -> Core 12 (SMT On)
+              +   CPU 26:  ACPI ID = 26  -> Core 13 (SMT On)
+              +   CPU 27:  ACPI ID = 27  -> Core 13 (SMT On)
+              +   CPU 28:  ACPI ID = 28  -> Core 14 (SMT On)
+              +   CPU 29:  ACPI ID = 29  -> Core 14 (SMT On)
+              +   CPU 30:  ACPI ID = 30  -> Core 15 (SMT On)
+              +   CPU 31:  ACPI ID = 31  -> Core 15 (SMT On)
+              +++ Removing the startup task "\CoreCycler\\CoreCycler AutoMode Startup Task"
+              +++ Removing the .automode file
+              +++ Removing the .automode file
+              +++ The script process id (PID):   17636
+              +++ The parent process id:         12604
+              +++ The parent main window handle: 6620368
+              +   Successfully created the shutdown block reason: (True)
+              +   Initializing the stress test program
+              +   Checking if 04-P4P.exe exists at:
+              +   F:\Github\CoreCycler-EXE\test_programs\y-cruncher\Binaries\04-P4P.exe
+              +++ Getting the result of the update check background job
+              +++ Messages from the update background job:
+              +++ Checking for updates...
+              +++ Started: 22:31:01
+              +++ The current version string:   0.10.0.0
+              +++ Int value of current version: 10000000000
+              +++ The .updatecheck file doesn't exist, initiate online check
+              +++ Web request status code: 200
+              +++ Found our first real release!
+              +++ Tag name of last release:  v0.10.0.0
+              +++ Int value of last release: 10000000000
+              +++ No new version found
+              +++ Writing the .updatecheck file
+              +++ Background Job Started:             22:31:01
+              +++ Background Job Ended:               22:31:01
+              +++ Background Job Runtime:             0.4611652
+              +++ Is there an update available:       False
+              +++ Update Check Started (User Time):   22:31:03
+              +++ Update Check Ended (User Time):     22:31:03
+              +++ Update Check Runtime (User Time):   0.0121659
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+╟────────────┤ CoreCycler v0.10.0.0 started at 2025-03-31 22:31:03 ├───────────╢
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Log Level set to: ..................... 2 [Writing debug messages to log file]
+Use the Windows Event Log: ............ ENABLED
+Check for WHEA errors: ................ ENABLED
+Stress test program: .................. Y-CRUNCHER
+Selected test mode: ................... 04-P4P
+Selected y-cruncher tests: ............ BKT, BBP, SFT, SFTv4, SNT, SVT, FFT, FFTv4, N63, VT3
+Duration per test: .................... 60
+Detected processor: ................... AMD Ryzen 9 5950X 16-Core Processor            
+Logical/Physical cores: ............... 32 logical / 16 physical cores
+Hyperthreading / SMT is: .............. ENABLED
+Selected number of threads: ........... 1
+Assign both cores to stress thread: ... DISABLED
+Runtime per core: ..................... 6 MINUTES
+Suspend periodically: ................. ENABLED
+Restart for each core: ................ DISABLED
+Test order of cores: .................. DEFAULT (ALTERNATE)
+Number of iterations: ................. 10000
+
+────────────────────────────────────────────────────────────────────────────────
+The log files for this run are stored in:
+F:\Github\CoreCycler-EXE\logs\
+ - CoreCycler: CoreCycler_2025-03-31_22-31-00_YCRUNCHER_04-P4P.log
+ - y-cruncher: yCruncher_2025-03-31_22-31-00_mode_04-P4P.log
+────────────────────────────────────────────────────────────────────────────────
+
+              +   Checking if we can and need to add the Event Log Source for CoreCycler
+              +++ The Event Log Source "CoreCycler" already exist, nothing to do
+              +++ Adding Event Log entry: script_started
+              +++ Adding the Windows Event Log entry:
+              +++ [EVENTLOG] CoreCycler has started
+              +++ [EVENTLOG] 
+              +++ [EVENTLOG] The log files for this run are stored in:
+              +++ [EVENTLOG] F:\Github\CoreCycler-EXE\logs\CoreCycler_2025-03-31_22-31-00_YCRUNCHER_04-P4P.log
+              +++ [EVENTLOG] F:\Github\CoreCycler-EXE\logs\yCruncher_2025-03-31_22-31-00_mode_04-P4P.log
+              +++ [EVENTLOG] 
+              +++ [EVENTLOG] Stress test program: Y-CRUNCHER
+              +++ [EVENTLOG] Selected test mode: 04-P4P
+              +++ [EVENTLOG] Selected number of threads: 1
+              +++ [EVENTLOG] Assign both cores to stress thread: DISABLED
+              +++ [EVENTLOG] Runtime per core: 6 MINUTES
+              +++ [EVENTLOG] Suspend periodically: ENABLED
+              +++ [EVENTLOG] Restart for each core: DISABLED
+              +++ [EVENTLOG] Test order of cores: DEFAULT (ALTERNATE)
+              +++ [EVENTLOG] Number of iterations: 10000
+              +++ [EVENTLOG] 
+              +   Starting the stress test program
+              +   Starting y-cruncher
+              +++ Trying to start the stress test with the command:
+              +++ cmd /C start /MIN /AFFINITY 0xC "y-cruncher - 04-P4P.exe" "F:\Github\CoreCycler-EXE\helpers\WriteConsoleToWriteFileWrapper.exe" "F:\Github\CoreCycler-EXE\test_programs\y-cruncher\Binaries\04-P4P.exe" priority:2 config "F:\Github\CoreCycler-EXE\test_programs\y-cruncher\Binaries\stressTest.cfg" /dlllog:"F:\Github\CoreCycler-EXE\logs\yCruncher_2025-03-31_22-31-00_mode_04-P4P.log"
+              +   Trying to get the stress test program main window handle
+              +   Looking for these window names:
+              +   ^.*WriteConsoleToWriteFileWrapper\.exe$, ^.*04-P4P\.exe$
+              +   22:31:04 - Window found
+              +   Found the following window(s) with these names:
+              +    - WinTitle:          y-cruncher - 04-P4P.exe
+              +      MainWindowHandle:  4785910
+              +      ProcessId:         6572
+              +      Process Path:      F:\Github\CoreCycler-EXE\helpers\WriteConsoleToWriteFileWrapper.exe
+              +      Process Path (PS): F:\Github\CoreCycler-EXE\helpers\WriteConsoleToWriteFileWrapper.exe
+              +   enableYCruncherLoggingWrapper has been set, special handling
+              +   Filtering the windows for "*"F:\Github\CoreCycler-EXE\test_programs\y-cruncher\Binaries\04-P4P.exe"*":
+              +    - ProcessId:         6572
+              +      searchForProcess:  *"F:\Github\CoreCycler-EXE\test_programs\y-cruncher\Binaries\04-P4P.exe"*
+              +      CommandLine:       "F:\Github\CoreCycler-EXE\helpers\WriteConsoleToWriteFileWrapper.exe"  "F:\Github\CoreCycler-EXE\test_programs\y-cruncher\Binaries\04-P4P.exe" priority:2 config "F:\Github\CoreCycler-EXE\test_programs\y-cruncher\Binaries\stressTest.cfg" /dlllog:"F:\Github\CoreCycler-EXE\logs\yCruncher_2025-03-31_22-31-00_mode_04-P4P.log"
+              +      hasMatch:          True
+              +++ Found the following windows:
+              +    - WinTitle:          y-cruncher - 04-P4P.exe
+              +      MainWindowHandle:  4785910
+              +      ProcessId:         6572
+              +      Process Path:      F:\Github\CoreCycler-EXE\helpers\WriteConsoleToWriteFileWrapper.exe
+              +      Process Path (PS): F:\Github\CoreCycler-EXE\helpers\WriteConsoleToWriteFileWrapper.exe
+              +   The process performing the stress test is NOT the same as the main window!
+              +   Searching for process "04-P4P"...
+              +   22:31:04 - Found with ID: 2752
+              +++ The stress test process id: 2752
+              +++ The expected number of threads to find: 1
+              +++ Trying to get the threads that are running the stress test
+              +++ Trying to get the threads (loop: 0 - iteration: 1)
+              +++ Found the expected number of threads (1 = 1)
+              +   Main window handle:       4785910
+              +   Main window process name: WriteConsoleToWriteFileWrapper
+              +   Main window process ID:   6572
+              +   Stress test process name: 04-P4P
+              +   Stress test process ID:   2752
+              +   Stress test thread IDs:   
+              +   All cores that could be tested:
+              +   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+              +   The preliminary test order:
+              +   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+
+22:31:04 - Iteration 1
+════════════════════════════════════════════════════════════════════════════════
+              +++ The initial test order:
+              +++ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+              +++ The initial number of available cores:        16
+              +++ The initial number of unique available cores: 16
+              +   Alternating test order selected, building the test order array...
+              +   The final test order:
+              +   0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15
+              +++ The number of available cores:         16
+              +++ The number of unique available cores:  16
+              +++ The number of cores with an error:     0
+              +++ The number of cores with a WHEA error: 0
+              +++ Trying to switch to a new core (1 of 16) [index 0 of 15]
+              +   Still available cores:
+              +   0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15
+              +   The selected core to test: 0
+              +   Trying to avoid Core 0 / CPU 0, as this is mainly used by the OS
+              +   Setting to CPU 1 instead, which is the second virtual CPU of Core 0
+22:31:05 - Set to Core 0 (CPU 1)
+              +++ Adding Event Log entry: core_started
+              +++ Adding the Windows Event Log entry:
+              +++ [EVENTLOG] Started testing Core 0 (CPU 1)
+              +++ The number of Processor Groups:       1
+              +++ The number of CPUs in the last group: 0
+              +++ The group ID of the CPU to set to: 0
+              +++ The number of processors in this group: 32
+              +++ The IDs of the CPUs in its own group: 1
+              +++ Calculated the group specific affinity as 2 [CPU 1, Group 0]
+              +++ All calculated group specific affinities: 2
+              +++ Found number of stress test threads: 1
+              +++ The original affinities array: 2
+              +++ The final affinities array:    2
+              +++ Processing stress test thread number 0
+              +   Trying to set the affinity for thread ID: 2836
+              +   - Processor Group: 0 | Affinity: 2
+              +++ Getting the thread handle for thread ID: 2836
+              +++ The returned thread handle: 3968
+              +++ Successfully set the group affinity for thread ID 2836 to 2 within group 0
+           Running for 6 minutes...
+           Progress 1/16 | Iteration 1/10000 | Runtime 00h 00m 04s
+              +++ The number of cores with an error so far: 0
+              +++ The number of cores with a WHEA error so far: 0
+              +++ 
+              +++ 22:31:05 - Tick 1 of max 36
+              +++            Remaining max runtime: 360s
+              +++ 
+              +++ ┌─────────────────────────┐
+              +++ │    THE FINALLY BLOCK    │
+              +++ └─────────────────────────┘
+              +++ 
+              +   22:31:10 - Terminating the script...
+              +   Successfully destroyed the shutdown block reason: (True)
+              +++ Adding Event Log entry: script_terminated
+              +++ Adding the Windows Event Log entry:
+              +++ [EVENTLOG] CoreCycler was terminated
+              +++ [EVENTLOG] 
+              +++ [EVENTLOG] The log files for this run are stored in:
+              +++ [EVENTLOG] F:\Github\CoreCycler-EXE\logs\CoreCycler_2025-03-31_22-31-00_YCRUNCHER_04-P4P.log
+              +++ [EVENTLOG] F:\Github\CoreCycler-EXE\logs\y-cruncher: yCruncher_2025-03-31_22-31-00_mode_04-P4P.log
+              +++ [EVENTLOG] 
+              +++ [EVENTLOG] 
+              +++ [EVENTLOG] Summary:
+              +++ [EVENTLOG] Run time: 10 seconds
+              +++ [EVENTLOG] Iterations: 1 started / 0 completed
+              +++ [EVENTLOG] Tested cores: 1 cores / 1 tests
+              +++ [EVENTLOG] Core 0 (1x)
+              +++ [EVENTLOG] No core has thrown an error
+              +++ [EVENTLOG] No WHEA errors were observed during the test
+              +++ [EVENTLOG] 
+              +++ Removing the startup task "\CoreCycler\\CoreCycler AutoMode Startup Task"
+              +++ Removing the .automode file
+22:31:10 - Terminating the script...
+              +   Checking if the process is still active
+              +   The stress test process is still running
+              +   Checking if the process is still using CPU power
+              +++ First CPU Value:  3.296875
+              +++ Second CPU Value: 3.484375
+              +++ Difference:       0.1875
+              +++ The stress test program isn't using enough CPU power, maybe it's suspended
+              +++ $checkProcess.Threads.Count: 4
+              +++ $suspendedThreads.Count:     0
+Check for these processes:
+ - WriteConsoleToWriteFileWrapper.exe
+ - 04-P4P.exe
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+╟──────────────────────────────────┤ Summary ├─────────────────────────────────╢
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Run time:     10 seconds
+Iterations:   1 started / 0 completed
+Tested cores: 1 cores / 1 tests
+              Core 0 (1x)
+
+────────────────────────────────────────────────────────────────────────────────
+
+No core has thrown an error
+
+No WHEA errors were observed during the test
+
+────────────────────────────────────────────────────────────────────────────────
+
+The log files for this run are stored in:
+F:\Github\CoreCycler-EXE\logs\
+ - CoreCycler: CoreCycler_2025-03-31_22-31-00_YCRUNCHER_04-P4P.log
+ - y-cruncher: yCruncher_2025-03-31_22-31-00_mode_04-P4P.log
+

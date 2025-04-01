@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.1
+    0.10.0.0
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,15 +23,11 @@ param(
 
 
 # Our current version
-$version = '0.10.1.0'
+$version = '0.10.0.0'
 
 
 # This defines the strict mode
 Set-StrictMode -Version 3.0
-
-
-# Mimic the Win32 ERROR_SUCCESS constant
-Set-Variable ERROR_SUCCESS -Option Constant -Value 0
 
 
 # We want to use UTF-8 if possible when generating files, not UTF-16
@@ -823,15 +819,6 @@ repeatCoreOnError = 1
 #
 # Default: 0
 enableResumeAfterUnexpectedExit = 0
-
-
-# Windows treats crashes or reboots that happen within 120 seconds of the boot as a "failed" boot
-# To prevent the Windows Recovery Screen from appearing after three of those "failed" boots, the script will wait for this
-# amount of time before resuming the testing process
-# Set this to 0 if you don't care about that and want to resume immediately
-#
-# Default: 120
-waitBeforeAutomaticResume = 120
 
 
 
@@ -1964,29 +1951,6 @@ $ChangeConsoleModeDefinition = @'
 
 
 
-# Definition to flush the registry to the disk
-# Used to make sure that the Automatic Test Mode scheduled task can be correctly executed on the next boot
-# Sources: https://gist.github.com/ryanries/4dd567d08e2eace9683ffef67e20028e
-#          https://blog.coursemonster.com/registry-monitor-for-powershell
-#          https://github.com/PowerShell/PowerShell/blob/master/src/System.Management.Automation/namespaces/TransactedRegistryKey.cs
-#          https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regflushkey
-$RegistryFlusherDefinition = @'
-    using System;
-    using System.Runtime.InteropServices;
-
-    public class RegistryFlusher {
-        [DllImport("Advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        public static extern int RegOpenKeyExW(int hKey, string lpSubKey, int ulOptions, uint samDesired, out IntPtr phkResult);
-
-        [DllImport("Advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        public static extern int RegCloseKey(IntPtr hKey);
-
-        [DllImport("Advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        public static extern int RegFlushKey(IntPtr hKey);
-    }
-'@
-
-
 # Make the external code definitions available to PowerShell
 Add-Type -ErrorAction Stop -Name PowerUtil -Namespace Windows -MemberDefinition $PowerUtilDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ShutdownBlockDefinition
@@ -1994,10 +1958,9 @@ Add-Type -ErrorAction Stop -TypeDefinition $GetWindowsDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $WindowFlashDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ConsoleWindowMenuDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ChangeConsoleModeDefinition
+$SendMessage = Add-Type -ErrorAction Stop -TypeDefinition $SendMessageDefinition -PassThru
 Add-Type -ErrorAction Stop -TypeDefinition $SetThreadHandlerDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $SetSuspendAndResumeWithDebugDefinition
-Add-Type -ErrorAction Stop -TypeDefinition $RegistryFlusherDefinition
-$SendMessage = Add-Type -ErrorAction Stop -TypeDefinition $SendMessageDefinition -PassThru
 
 
 # Also make VisualBasic available
@@ -2823,7 +2786,7 @@ function Get-PerformanceCounterLocalName {
     $queryResult = $type::PdhLookupPerfNameByIndex($ComputerName, $ID, $Buffer, [Ref] $BufferSize)
 
     # 0 = ERROR_SUCCESS
-    if ($queryResult -eq $ERROR_SUCCESS) {
+    if ($queryResult -eq 0) {
         $Buffer.ToString().Substring(0, $BufferSize-1)
     }
     else {
@@ -3904,7 +3867,7 @@ function Get-AutoModeFileContent {
     $autoModeFileContent = @($autoModeFileContentString -Split '\r?\n')
 
     if (!$autoModeFileContent -or $autoModeFileContent.Count -lt 5) {
-        throw 'Possible corruption detected, the .automode file doesn''t contain all required information!'
+        throw 'The .automode file doesn''t have all required information!'
     }
 
     $autoModeInfo = @{
@@ -3913,7 +3876,6 @@ function Get-AutoModeFileContent {
         'logFileCoreCycler' = [String] $autoModeFileContent[2]
         'logFileStressTest' = [String] $autoModeFileContent[3]
         'voltageInfo'       = [String] $autoModeFileContent[4]
-        'waitBeforeResume'  = [Int] $autoModeFileContent[5]
     }
 
     if ($autoModeInfo.lastCoreTested -ne $CoreFromAutoMode) {
@@ -3948,7 +3910,6 @@ function Set-AutoModeFile {
         $logFileFullPath
         $stressTestLogFilePath
         ($voltageCurrentValues -Join ' ').Trim()
-        $settings['AutomaticTestMode']['waitBeforeAutomaticResume']
     )
 
     $null = New-Item $autoModeFile -ItemType File -Force
@@ -3958,12 +3919,6 @@ function Set-AutoModeFile {
     }
 
     [System.IO.File]::WriteAllLines($autoModeFile, $autoModeFileContent)
-
-
-    # Try to flush the cache to the disk, hopefully reducing the amount of corrupted files
-    if ($canUseFlushToDisk) {
-        Save-CachedDataToDisk
-    }
 }
 
 
@@ -4013,7 +3968,7 @@ function Add-AutoModeScheduledTask {
         # $PWord = Read-Host -Prompt 'Enter a Password' -AsSecureString
         # $Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $User, $PWord
 
-        $user      = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $user      = $env:USERNAME
         $action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-ExecutionPolicy Bypass -File "' + $autoModeStartupScriptFile + '"')
         $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
         $principal = New-ScheduledTaskPrincipal -UserId $user -RunLevel Highest
@@ -4021,68 +3976,6 @@ function Add-AutoModeScheduledTask {
         $task      = New-ScheduledTask -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description $autoModeTaskDescription
 
         $null = Register-ScheduledTask -Force -TaskName $autoModeTaskName -TaskPath $autoModeTaskPath -InputObject $task
-        $foundTask = Get-ScheduledTask -TaskName $autoModeTaskName -TaskPath $autoModeTaskPath -ErrorAction SilentlyContinue
-
-        if (!$foundTask) {
-            throw 'Could not find the created task!'
-        }
-
-
-        # Issue 118
-        # If the computer crashes right after creating the scheduled task, it will not be executed on the next boot
-        # The registry is not immediately written to disk, so the reg key may be lost during the crash
-        # See https://superuser.com/a/1331545/196649
-        # See https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regflushkey
-        # Computer\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache
-        $HKLM = 0x80000002     # HKEY_LOCAL_MACHINE
-        $accessRights = 0x0001 # KEY_QUERY_VALUE
-        $regSubPath = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache'
-        $regHandle = [IntPtr]::Zero
-
-        # Open
-        $openResult = [RegistryFlusher]::RegOpenKeyExW($HKLM, $regSubPath, 0, $accessRights, [Ref] $regHandle)
-        $errorCode  = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-
-        if ($openResult -ne $ERROR_SUCCESS) {
-            Write-DebugText('Failed to check the registry key for the scheduled task. (Result ' + $openResult + ')')
-
-            if ($errorCode -gt 0) {
-                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
-                $errorResult = Get-DotNetErrorMessage $errorCode
-                Write-DebugText($errorResult.errorMessage)
-                throw('Failed to check the registry key for the scheduled task!' + [Environment]::NewLine + $errorResult.errorMessage)
-            }
-        }
-
-        # Flush
-        $flushResult = [RegistryFlusher]::RegFlushKey($regHandle)
-        $errorCode   = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-
-        if ($flushResult -ne $ERROR_SUCCESS) {
-            Write-DebugText('Failed to flush the registry key for the scheduled task. (Result ' + $flushResult + ')')
-
-            if ($errorCode -gt 0) {
-                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
-                $errorResult = Get-DotNetErrorMessage $errorCode
-                Write-DebugText($errorResult.errorMessage)
-                throw('Failed to flush the registry key for the scheduled task!' + [Environment]::NewLine + $errorResult.errorMessage)
-            }
-        }
-
-        # Close
-        $closeResult = [RegistryFlusher]::RegCloseKey($regHandle)
-        $errorCode   = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-
-        if ($closeResult -ne $ERROR_SUCCESS) {
-            Write-DebugText('Failed to close the registry key for the scheduled task. (Result ' + $closeResult + ')')
-
-            if ($errorCode -gt 0) {
-                Write-DebugText('Error Code: ' + $errorCode + ' - Line: ' + (Get-ScriptLineNumber))
-                $errorResult = Get-DotNetErrorMessage $errorCode
-                Write-DebugText($errorResult.errorMessage)
-                throw('Failed to close the registry key for the scheduled task!' + [Environment]::NewLine + $errorResult.errorMessage)
-            }
-        }
 
         Write-DebugText('Added the Automatic Test Mode startup task')
     }
@@ -4978,6 +4871,10 @@ function Initialize-AutomaticTestMode {
     $Script:useAutomaticTestModeWithResume = ($settings.AutomaticTestMode.enableResumeAfterUnexpectedExit -gt 0)
 
 
+    # Apply the starting values
+    Set-NewVoltageValues
+
+
     if ($useAutomaticTestModeWithResume) {
         Write-VerboseText('Automatic Test Mode with resuming after unexpected exit enabled')
 
@@ -4992,12 +4889,6 @@ function Initialize-AutomaticTestMode {
         Remove-AutoModeFile
     }
 
-
-    # Apply the starting values
-    # Do these after the startup task has been created
-    Set-NewVoltageValues
-
-
     Write-VerboseText('The starting value(s):')
     Write-VerboseText($voltageStartValuesArray)
 }
@@ -5007,19 +4898,12 @@ function Initialize-AutomaticTestMode {
 <#
 .DESCRIPTION
     Get the currently applied Curve Optimizer values
-.PARAMETER IgnoreCoreCount
-    [Switch] (optional) If set, will not check if the returned array matches the number of physical cores (i.e. when the second CCD is disabled)
-.PARAMETER IgnoreInvalidValues
-    [Switch] (optional) If set, will not check if the returned array contains reasonable values (i.e. when the second CCD is disabled)
+.PARAMETER
+    [Void]
 .OUTPUTS
     [Array] The Curve Optimizer values
 #>
 function Get-CurveOptimizerValues {
-    param(
-        [Parameter(Mandatory=$false)] [Switch] $IgnoreCoreCount,
-        [Parameter(Mandatory=$false)] [Switch] $IgnoreInvalidValues
-    )
-
     try {
         Write-DebugText('Trying to query for the Curve Optimizer values')
 
@@ -5072,17 +4956,13 @@ function Get-CurveOptimizerValues {
         Write-DebugText('The queried and parsed Curve Optimizer values:')
         Write-DebugText($coArray)
 
-        if (!$IgnoreCoreCount.IsPresent) {
-            if ($coArray.Count -ne $numPhysCores) {
-                throw('Found ' + $coArray.Count + ' entries instead of the expected ' + $numPhysCores + ':' + [Environment]::NewLine + $coArray)
-            }
+        if ($coArray.Count -ne $numPhysCores) {
+            throw('Found ' + $coArray.Count + ' entries instead of the expected ' + $numPhysCores + ':' + [Environment]::NewLine + $coArray)
         }
 
         # Only reasonable values
-        if (!$IgnoreInvalidValues.IsPresent) {
-            if (@($coArray | Where-Object { [Math]::Abs($_) -gt $limitForCoValues }).Count -gt 0) {
-                throw('Found invalid values (either higher or lower than +-' + $limitForCoValues + ')' + [Environment]::NewLine + $coArray)
-            }
+        if (@($coArray | Where-Object { [Math]::Abs($_) -gt $limitForCoValues }).Count -gt 0) {
+            throw('Found invalid values (either higher or lower than +-' + $limitForCoValues + ')' + [Environment]::NewLine + $coArray)
         }
 
         return $coArray
@@ -5097,33 +4977,19 @@ function Get-CurveOptimizerValues {
 <#
 .DESCRIPTION
     Set the new Curve Optimizer values
-.PARAMETER overrideCoValues
-    [Array] (optional) Use these CO values instead
+.PARAMETER
+    [Void]
 .OUTPUTS
     [Void]
 #>
 function Set-CurveOptimizerValues {
-    param(
-        [Parameter(Mandatory=$false)] $overrideCoValues
-    )
-
-    Write-VerboseText('Trying to set the Curve Optimizer values')
-
     try {
-        if ($overrideCoValues) {
-            Write-DebugText('Overriding the Curve Optimizer values with:')
-            Write-DebugText($overrideCoValues)
+        Write-DebugText('Trying to set the Curve Optimizer values:')
 
-            $coString = $overrideCoValues -Join ' '
-        }
-        else {
-            $coString = $voltageCurrentValues -Join ' '
-        }
-
-        Write-VerboseText('The values to set:')
-        Write-VerboseText($coString)
-
+        $coString = $voltageCurrentValues -Join ' '
         $argumentString = 'set ' + $coString
+
+        Write-VerboseText($coString)
 
         $setCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $setCoValuesProcessInfo.FileName = $pboCliTool
@@ -5173,31 +5039,6 @@ function Set-CurveOptimizerValues {
 
         if ($stdOut -eq '') {
             throw('Returned value was empty')
-        }
-
-        # The returned string needs to match the input values, otherwise something has gone wrong
-        # This does not seem to throw $stdErr, so we need to check for it
-        if ($stdOut -ne $coString) {
-            # Special case: the second CCD was disabled, so we only detect the cores for a single CCD, but pbotest still requires the values for all the cores
-            $readVoltageValuesArray = Get-CurveOptimizerValues -IgnoreCoreCount -IgnoreInvalidValues
-
-            # If the returned number of CO values are twice the amount of what we try to set, we assume that the second CCD is disabled
-            if ($voltageCurrentValues.Length -eq $numPhysCores -and $readVoltageValuesArray.Length -eq $voltageCurrentValues.Length * 2) {
-                Write-DebugText('It seems the second CCD is disabled, filling the Curve Optimizer values with 0')
-
-                # Set the disabled core values to 0
-                $dummyCoValues = (@(0..($numPhysCores-1)) | ForEach-Object { 0 })
-                $specialCaseCoValues = $voltageCurrentValues + $dummyCoValues
-
-                Write-DebugText('New special case CO values:')
-                Write-DebugText($specialCaseCoValues)
-
-                Set-CurveOptimizerValues $specialCaseCoValues
-                return
-            }
-            else {
-                throw('Unexpected output message:' + [Environment]::NewLine + $stdOut)
-            }
         }
 
         Write-DebugText('Curve Optimizer values successfuly set to:')
@@ -6096,36 +5937,6 @@ function Get-StressTestProcessInformation {
 
 
         if ($thisStressTestThreads.Count -ne $expectedNumberOfThreads) {
-            # Issue #111
-            # This may happen when the stress test immediately throws an error after being started, but before the check for the threads happens
-            # So check for new log file entries
-            # It's hard to debug
-            <#
-            try {
-                # TODO: Somehow get the actual core number
-                Test-StressTestProgrammIsRunning -coreNumber $actualCoreNumber -coreStartDate $startDateThisCore
-            }
-
-            # Some error happened in or with the stress test program
-            catch {
-                $params = @{
-                    'checkType'          = 'TICK'
-                    'actualCoreNumber'   = $actualCoreNumber
-                    'coreTestOrderArray' = $coreTestOrderArray
-                    'coreIndex'          = [Ref] $coreIndex
-                    'ExceptionObj'       = $_
-                    'ErrorObj'           = $Error
-                }
-
-                Resolve-StressTestProgrammIsRunningError @params
-
-                # TODO: Somehow proceed to the next core
-            }
-            #>
-
-
-
-
             Write-ColorText('FATAL ERROR: Incorrect number of threads found that could be running the stress test!') Red
             Write-ColorText('             Found ' + $thisStressTestThreads.Count + ' threads, but expected ' + $expectedNumberOfThreads) Red
 
@@ -7665,11 +7476,6 @@ function Initialize-yCruncher {
 
     # Stop on error or not
     if ($settings.yCruncher.enableYCruncherLoggingWrapper -eq 1 -and $settings.General.stopOnError -eq 0) {
-        $stopOnError = '        StopOnError : "false"'
-    }
-
-    # No stopOnError if the automatic test mode is enabled
-    if ($settings.yCruncher.enableYCruncherLoggingWrapper -eq 1 -and $settings.General.stopOnError -gt 0 -and $useAutomaticTestMode) {
         $stopOnError = '        StopOnError : "false"'
     }
 
@@ -9468,39 +9274,37 @@ function Resolve-StressTestProgrammIsRunningError {
 
         # If the stopOnError flag is set, stop at this point
         # But leave the stress test program open if possible
-        # Only stop the testing process if we're not using Automatic Test Mode (fixes #110)
-        if ($settings.General.stopOnError -and $useAutomaticTestMode) {
-            Write-VerboseText('"stopOnError" is set, but Automatic Test Mode is enabled as well. Ignoring stopOnError')
-        }
-
-        if ($settings.General.stopOnError -and !$useAutomaticTestMode) {
-            Write-Text('')
-            Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
-
-            # Display the path to the log file
-            if ($isPrime95) {
+        if ($settings.General.stopOnError) {
+            # Only stop the testing process if we're not using Automatic Test Mode
+            if (!$useAutomaticTestMode) {
                 Write-Text('')
-                Write-ColorText('Prime95''s results log file can be found at:') Cyan
-                Write-ColorText($stressTestLogFilePath) Cyan
-            }
-            elseif ($isYCruncherWithLogging) {
-                Write-Text('')
-                Write-ColorText('y-cruncher''s log file can be found at:') Cyan
-                Write-ColorText($stressTestLogFilePath) Cyan
-            }
-            elseif ($isLinpack) {
-                Write-Text('')
-                Write-ColorText('Linpack''s log file can be found at:') Cyan
-                Write-ColorText($stressTestLogFilePath) Cyan
-            }
+                Write-ColorText('Stopping the testing process because the "stopOnError" flag was set.') Yellow
 
-            # And the path to the CoreCycler the log file for this run
-            Write-Text('')
-            Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
-            Write-ColorText($logFileFullPath) Cyan
-            Write-Text('')
+                # Display the path to the log file
+                if ($isPrime95) {
+                    Write-Text('')
+                    Write-ColorText('Prime95''s results log file can be found at:') Cyan
+                    Write-ColorText($stressTestLogFilePath) Cyan
+                }
+                elseif ($isYCruncherWithLogging) {
+                    Write-Text('')
+                    Write-ColorText('y-cruncher''s log file can be found at:') Cyan
+                    Write-ColorText($stressTestLogFilePath) Cyan
+                }
+                elseif ($isLinpack) {
+                    Write-Text('')
+                    Write-ColorText('Linpack''s log file can be found at:') Cyan
+                    Write-ColorText($stressTestLogFilePath) Cyan
+                }
 
-            Exit-Script
+                # And the path to the CoreCycler the log file for this run
+                Write-Text('')
+                Write-ColorText('The path of the CoreCycler log file for this run is:') Cyan
+                Write-ColorText($logFileFullPath) Cyan
+                Write-Text('')
+
+                Exit-Script
+            }
         }
 
         # y-cruncher can keep on running if the log wrapper is enabled and restartTestProgramForEachCore is not set
@@ -10162,13 +9966,13 @@ function Get-StressTestProgramAffinities {
 
 <#
 .DESCRIPTION
-    Try to save any cached file data to the disk
+    Try to save the log file data to the disk
     Uses Write-VolumeCache to flush the disk write cache
     It may not work for drive internal caches though
 .OUTPUTS
     [Void]
 #>
-function Save-CachedDataToDisk {
+function Save-LogFileDataToDisk {
     Write-DebugText('           Trying to flush the write cache to disk for drive: ' + $scriptDriveLetter)
 
     # Start it as a job to not block the script execution
@@ -10966,7 +10770,7 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
 
 
 # Clear the error variable, it may have been populated by the above calls
-$Error.Clear()
+$Error.clear()
 
 
 
@@ -11248,7 +11052,7 @@ try {
     # Check if we can use Write-VolumeCache to write the log file data to the disk
     # It will not work under certain circumstances, e.g. for VeraCrypt volumes
     # Get-Volume and Write-VolumeCache have the same requirements
-    if ($settings.Logging.flushDiskWriteCache -eq 1 -or $useAutomaticTestModeWithResume) {
+    if ($settings.Logging.flushDiskWriteCache -eq 1) {
         $canUseFlushToDisk = !!(Get-Volume $scriptDriveLetter -ErrorAction Ignore)
 
         # Also check if the drive "letter" is an actual drive, and not e.g. a network share
@@ -12314,18 +12118,11 @@ try {
         # Randomized
         elseif ($coreTestOrderMode -eq 'random') {
             Write-VerboseText('Random test order selected, building the test order array...')
+            [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object { Get-Random })
 
-            # Only unique cores for the random order
-            [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object -Unique | Sort-Object { Get-Random })
-
-            # If we had added a core from CoreFromAutoMode, push that core to the front
+            # If we had added a core from CoreFromAutoMode, we will need to push it to the front here again
             if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt -1) {
-                Write-VerboseText('Pushing the passed core to the beginning of the test order')
                 [Void] $coreTestOrderArray.Insert(0, $CoreFromAutoMode)
-                [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object -Unique)    # This should keep the randomized order, but keep the added core in the front
-
-                $numAvailableCores       = $coreTestOrderArray.Count
-                $numUniqueAvailableCores = @($coreTestOrderArray | Sort-Object | Get-Unique).Count
             }
         }
 
@@ -12789,8 +12586,8 @@ try {
 
 
                 # Try to flush the disk write cache so that the log file is available in case of a crash
-                if ($settings.Logging.flushDiskWriteCache -eq 1 -and $canUseFlushToDisk) {
-                    Save-CachedDataToDisk
+                if ($canUseFlushToDisk) {
+                    Save-LogFileDataToDisk
                 }
 
 

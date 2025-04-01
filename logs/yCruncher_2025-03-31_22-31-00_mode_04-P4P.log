@@ -1,0 +1,52 @@
+
+
+2025-03-31 22:31:03
+
+Checking processor/OS features...
+
+Required Features:
+    SSE, SSE2, SSE3
+
+
+
+Parsing Core -> Handle Mappings...
+    Cores:  0-31 
+
+Parsing NUMA -> Core Mappings...
+    Node  0:  0-31 
+
+Parsing Processor Group -> Core Mappings...
+    Group  0:  (none)
+
+
+
+Component Stress Tester
+
+  1   Logical Cores:      1
+  2   Memory:             28.6 MiB  ( 28.6 MiB per thread )
+  3   NUMA Mode:          Local - Memory allocated from local thread.
+  4/5 Time Limit:         60 seconds per test / Run Forever
+  6   Stop on Error:      Disabled
+
+ 7/8  Enable All Tests / Disable All Tests
+ 9/10 Load/Save Configuration File
+
+  #  Tag   Test Name                   Mem/Thread  Component      CPU------Mem
+ 11  BKT   Basecase + Karatsuba          27.9 KiB  Scalar Integer  -|--------
+ 12  BBP   BBP Digit Extraction            small   SSE2 Float      |---------
+ 13  SFT   Small In-Cache FFTv2           213 KiB  SSE3 Float      -|--------
+ 14  SFTv4 Small In-Cache FFTv4           229 KiB  SSE3 Float      -|--------
+ 15  SNT   Small In-Cache N63            18.2 MiB  Scalar Integer  --|-------
+ 16  SVT   Small In-Cache VT3            28.6 MiB  SSE3 Float      --|-------
+ 17  FFT   Fast Fourier Transform (v2)   26.1 MiB  SSE3 Float      ---------|
+ 18  FFTv4 Fast Fourier Transform (v4)   27.2 MiB  SSE3 Float      ---------|
+ 19  N63   Classic NTT (v2)              28.6 MiB  Scalar Integer  --|-------
+ 20  VT3   Vector Transform (v3)         28.6 MiB  SSE3 Float      --|-------
+
+  0   Start Stress-Testing!
+
+Allocating Memory...
+  Core   2:  28.6 MiB  node 0 (100%)
+
+Iteration: 0  Total Elapsed Time: 0.015 seconds  ( 0.000 minutes )
+                                                                               Running BKT: 
