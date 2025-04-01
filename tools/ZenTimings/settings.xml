@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AppSettings xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Version>1.4</Version>
+  <AutoRefresh>true</AutoRefresh>
+  <AutoRefreshInterval>2000</AutoRefreshInterval>
+  <AdvancedMode>true</AdvancedMode>
+  <AppTheme>DarkMintGradient</AppTheme>
+  <ScreenshotMode>Window</ScreenshotMode>
+  <CheckForUpdates>true</CheckForUpdates>
+  <UpdaterSkippedVersion />
+  <UpdaterRemindLaterAt />
+  <MinimizeToTray>false</MinimizeToTray>
+  <SaveWindowPosition>false</SaveWindowPosition>
+  <AutoUninstallDriver>true</AutoUninstallDriver>
+  <WindowLeft>0</WindowLeft>
+  <WindowTop>0</WindowTop>
+  <SysInfoWindowLeft>0</SysInfoWindowLeft>
+  <SysInfoWindowTop>0</SysInfoWindowTop>
+  <SysInfoWindowWidth>0</SysInfoWindowWidth>
+  <SysInfoWindowHeight>0</SysInfoWindowHeight>
+  <NotifiedChangelog>1.35.1592</NotifiedChangelog>
+  <NotifiedRembrandt />
+</AppSettings>
