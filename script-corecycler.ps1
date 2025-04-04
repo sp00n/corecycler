@@ -5066,8 +5066,19 @@ function Get-CurveOptimizerValues {
         }
 
 
-        # Try to parse the the CO values
-        $coArray = @(($stdOut -Split '\s+') | Where-Object { $_ -Match '\-?\d+' } | ForEach-Object { [Int] $_ } )
+        # Try to parse the CO values
+        $coArray = @()
+
+        $lines = $stdOut -split "`r`n"
+
+        foreach ($line in $lines) {
+            $potentialValues = @($line -split '\s+' | Where-Object { $_ -match '^-?\d+$' } | ForEach-Object { [Int]$_ })
+
+            if ($potentialValues.Count -eq $numPhysCores) {
+                $coArray = $potentialValues
+                break
+            }
+        }
 
         Write-DebugText('The queried and parsed Curve Optimizer values:')
         Write-DebugText($coArray)
