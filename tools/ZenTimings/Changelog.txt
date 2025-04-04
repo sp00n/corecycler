@@ -1,0 +1,134 @@
+# v1.35 Jan 10 2025
+- Update for new 800-series chipsets
+- Fixed blurry icons on some systems
+- Improved 32GB dual rank modules impedance table
+
+# v1.34 Dec 30 2024
+ - Update for AGESA 1.2.0.2b
+ - Fixed Mendocino core detection
+ - Fixed issue with captured screenshot not persisting in clipboard
+ - Add ROG logo for applicable motherboards
+
+# v1.33 Nov 14 2024
+ - Update for AGESA 1.2.0.2a
+ - Fixed detection of dual rank DDR5 memory sticks
+ - Update themes
+
+# v1.32 Aug 7 2024
+ - Add support for Granite Ridge (Ryzen 9000 series)
+ - Extend Phoenix support (Ryzen 8000 series)
+ - Add experimental Nitro settings reading in System Info dialog
+ - Add setting to control screenshot mode (window or desktop)
+ - Update themes
+ - Update site url
+
+# v1.31 Dec 7 2023
+ - Add support for Dragon Range (tested on Ryzen 9 7945HX).
+ - Add CPU VDDIO reading on DDR5 systems.
+ - Fix issues with reading power table on some systems.
+
+# v1.30 Nov 23 2023
+ - Enhanced compatibility with StormPeak and Genoa, offering partial support.
+ - Introduced initial support for Mendocino and Phoenix.
+ - Optimized the refresh process for power management tables, enhancing efficiency.
+ - Improved support for Dali cores.
+ - Addressed and fixed issues with the PM table of Picasso.
+ - Fix saved window position out of bounds.
+ - Simplified the versioning scheme for better clarity.
+
+# v1.2.9 Dec 21 2022
+ - Fixed DRAM speed string syncronization with MCLK
+ - Added a workaround for false-postives, see github issue 33 (https://github.com/irusanov/ZenTimings/issues/33)
+
+# v1.2.8 Dec 17 2022
+ - Imroved support for Zen4 7000 (Raphael) CPUs
+ - Extended support for DDR5 memory
+ - Replaced tXP with tRFCsb in the interface
+ - Fixed issues with GDM and Cmd2T readings for DDR5 memory
+ - Resolved issues with the reading of power tables for Picasso/Dali CPUs
+ - Updated the Discord invite link to a permanent one
+ - Updated core DLL for enhanced functionality and stability
+
+# v1.2.7 Oct 15 2022
+ - Improve Zen4 7000 (Raphael) CPU support
+ - Improve DDR5 support
+
+# v1.2.6 Jun 04 2022
+ - Add experimental DDR5 support
+ - Add basic Rembrandt APU support
+ - Update libraries
+ - Fix corrupted config file handling
+ - Add option to save window position
+ - Add minimize to tray option
+ - Enable system info window
+ - Integrate WinRing driver
+ - Initial plugins system
+ - Update icons
+ - Improve debug report formatting
+ - Add donation links
+ 
+# v1.2.5 Jun 14 2021
+ - Hotfix for locales different than en-US (issue #21)
+
+# v1.2.4 Jun 13 2021
+ - Fix initial Power Table read for AGESA ComboPiV2 1.2.0.0+ (issue #19)
+ - Pause autorefresh when minimized
+ - Add auto update
+ - Display modules versions in About dialog
+ - Small fixes for Renoir PM tables (might still not work on every system)
+
+# v1.2.3 Mar 21 2021
+ - Add Cezanne support (5000 Zen3 series APU)
+ - Add Lucienne support (5000 Zen2 series APU)
+ - Improve Epyc Rome support
+ - Add separate DCT readings for each installed DIMM
+ - Add Asus WMI sensors reading for boards that support it
+ - Fix startup for unsupported CPUs
+ - Reduce minimum .NET framework version for legacy app to 3.5
+
+# v1.2.2 Jan 3 2021
+ - Add PHYWRD, PHYWRL, PHYRDL and PowerDown readings.
+ - Add DRAM and VTT readings (static) from BIOS on some motherboards (MSI and Gigabyte).
+ - Add support for both SMU version number variants to fix Picasso voltage readings on some systems.
+ - Add support for Dali APUs (https://en.wikichip.org/wiki/amd/cores/dali).
+ - Optimized startup, progress is reported in the splash screen.
+ - Save settings in the same directory of the app for better portability and upgrade.
+ - Small UI adjustments and fixes.
+ - Old legacy version is now EOL. Replaced by new version with stripped themes support.
+ - Remove hover state of camera icon.
+ - Attempt to filter incorrect VSOC values reported by SVI2 TFN plane.
+ - Better error reporting.
+ - Fix installed DRAM modules slot labels.
+ - Fix power table reading on 32bit OS.
+ - Fix occasional problem with reading power table on first load after boot.
+
+# v1.2.1 Nov 10 2020
+ - Full Vermeer support
+ - Add separate VDDG IOD and CCD voltages for Zen3
+ - Remove VSOC (SMU)
+ - Fix DRAM module installed detection
+ - Update system info and debug report
+
+# v1.2.0 Oct 31 2020
+ - Rework UI to use WPF, legacy version still available (includes all fixes)
+ - Add dark theme option
+ - Add advanced mode switch
+ - Add Renoir SVI2 readings, thanks @reous for debug reports
+ - Add a workaround for the case when configured clock speed is reported halved by the system
+ - Add preliminary Vermeer and Genesis support
+ - Fix SVI2 SoC voltage for Threadripper/EPYC gen 1 and 2
+ - Change FCLK reading for Zen2 to report fixed configured clock
+ - Display memory module slot in the dropdown
+ - 32bit OS support is back
+ - Improve debug report
+
+# v1.1.0 Aug 20 2020
+ - Add most of the known timings
+ - Add FCLK, MCLK and UCLK readings for supported platforms
+ - Add VDDSOC, CLDO_VDDP and CLDO_VDDG for supported platforms
+ - Add memory controller settings for desktop platforms
+ - Add auto-refresh option for frequencies and voltages
+ - Add debug functionality
+ - Add "Copy to clipboard" to screenshot save dialog
+ - Make a screenshot of the app window without shadow
+ - Redesign the layout completely

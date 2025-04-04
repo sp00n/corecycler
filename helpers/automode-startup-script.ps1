@@ -295,9 +295,9 @@ try {
 
     # Start the script now
     Write-Text('Command:')
-    Write-Text('Start-Process -PassThru -FilePath ''cmd.exe'' -ArgumentList @(''/C'', (''"' + $scriptRoot + '\Run CoreCycler.bat"''), ' + $coreTested + ')')
+    Write-Text('Start-Process -PassThru -FilePath ''cmd.exe'' -ArgumentList @(''/C'', (''"' + $scriptRoot + '\Run CoreCycler.bat" ' + $coreTested + ' && "' + $scriptRoot + '\CoreCycler.exe"''))')
 
-    $process = Start-Process -PassThru -FilePath 'cmd.exe' -ArgumentList @('/C', ('"' + $scriptRoot + '\Run CoreCycler.bat"'), $coreTested)
+    $process = Start-Process -PassThru -FilePath 'cmd.exe' -ArgumentList @('/C', ('"' + $scriptRoot + '\Run CoreCycler.bat" ' + $coreTested + ' && "' + $scriptRoot + '\CoreCycler.exe"'))
 }
 
 # Don't throw an error
