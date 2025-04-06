@@ -257,6 +257,9 @@ The licenses of all included programs remain unaffected by this and retain their
 
 - pbotest
   https://www.overclock.net/threads/corecycler-tool-for-testing-curve-optimizer-settings.1777398/post-29350110
+  
+- ryzen-smu-cli
+  https://github.com/rawhide-kobayashi/ryzen-smu-cli?tab=GPL-3.0-1-ov-file
 
 - IntelVoltageControl
   https://github.com/jamestut/IntelVoltageControl?tab=MIT-1-ov-file

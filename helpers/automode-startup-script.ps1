@@ -143,7 +143,16 @@ function Wait-ForKeyOrTimeout {
     )
 
     for ($i = $timeout; $i -ge 0; $i--) {
-        Write-Text("`r" + ($i.ToString() + ' seconds... (Press any key to immediately continue)').PadRight(54, ' ')) -NoNewline
+        $message = "`r" + ($i.ToString() + ' seconds... (Press any key to immediately continue)').PadRight(54, ' ')
+
+        # Only log the first entry
+        if ($i -eq $timeout) {
+            Write-Text($message) -NoNewline
+        }
+        else {
+            Write-Host($message) -NoNewline
+        }
+        
         
         if ([System.Console]::KeyAvailable) {
             [void][System.Console]::ReadKey($true)
@@ -154,7 +163,7 @@ function Wait-ForKeyOrTimeout {
         Start-Sleep -Seconds 1
     }
     
-            Write-Text("`r" + ('0 seconds... (Press any key to immediately continue)').PadRight(54, ' ')) -NoNewline
+    Write-Text("`r" + ('0 seconds... (Press any key to immediately continue)').PadRight(54, ' ')) -NoNewline
 }
 
 
@@ -231,24 +240,36 @@ try {
     $reader = [System.IO.File]::OpenText($autoModeFile)
     $autoModeFileContentString = $reader.ReadToEnd().Trim()
     $reader.Close()
-    $autoModeFileContent = @($autoModeFileContentString -Split '\r?\n')
 
-    if (!$autoModeFileContent -or $autoModeFileContent.Count -lt 5) {
-        throw [AutoModeResumeFailedException] 'Possible corruption detected, the .automode file doesn''t contain all required information!'
+
+    try {
+        $autoModeInfoFromJson = ConvertFrom-Json $autoModeFileContentString
+    }
+    catch {
+        throw [AutoModeResumeFailedException] ('Possible file corruption detected, could not parse the .automode file!' + [Environment]::NewLine + 'Reason: ' + $_.Exception.Message)
     }
 
-    $fileTimestamp     = [UInt64] $autoModeFileContent[0]
-    $coreTested        = [Int] $autoModeFileContent[1]
-    $logFileCoreCycler = [String] $autoModeFileContent[2]
-    $logFileStressTest = [String] $autoModeFileContent[3]
-    $voltageInfo       = [String] $autoModeFileContent[4]
-    $waitBeforeResume  = $(if ($autoModeFileContent.Length -gt 5) { [Int] $autoModeFileContent[5] } else { 0 })     # Optional
 
+    # We have some required properties
+    @('fileTimestamp', 'lastCoreTested', 'logFileCoreCycler', 'logFileStressTest', 'voltageValues') | ForEach-Object {
+        if (!($autoModeInfoFromJson -and ($autoModeInfoFromJson | Get-Member $_))) {
+            throw [AutoModeResumeFailedException] ('The .automode file is missing the entry "' + $_ + '"!')
+        }
+    }
+
+
+    $fileTimestamp     = [UInt64] $autoModeInfoFromJson.fileTimestamp
+    $lastCoreTested    = [Int] $autoModeInfoFromJson.lastCoreTested
+    $logFileCoreCycler = [String] $autoModeInfoFromJson.logFileCoreCycler
+    $logFileStressTest = [String] $autoModeInfoFromJson.logFileStressTest
+    $voltageValues     = [Array] $autoModeInfoFromJson.voltageValues
+    $waitBeforeResume  = $(if ($autoModeInfoFromJson -and ($autoModeInfoFromJson | Get-Member 'waitBeforeResume')) { [Int] $autoModeInfoFromJson.waitBeforeResume } else { 0 })     # Optional
+    
     Write-Text('Timestamp:           ' + $fileTimestamp)
-    Write-Text('Tested Core:         ' + $coreTested)
+    Write-Text('Tested Core:         ' + $lastCoreTested)
     Write-Text('Logfile CoreCycler:  ' + $logFileCoreCycler)
     Write-Text('Logfile Stress Test: ' + $logFileStressTest)
-    Write-Text('Voltage Settings:    ' + $voltageInfo)
+    Write-Text('Voltage Settings:    ' + $voltageValues)
     Write-Text('Wait before resume:  ' + $waitBeforeResume)
     Write-Text('')
 
@@ -295,9 +316,9 @@ try {
 
     # Start the script now
     Write-Text('Command:')
-    Write-Text('Start-Process -PassThru -FilePath ''cmd.exe'' -ArgumentList @(''/C'', (''"' + $scriptRoot + '\Run CoreCycler.bat"''), ' + $coreTested + ')')
+    Write-Text('Start-Process -PassThru -FilePath ''cmd.exe'' -ArgumentList @(''/C'', (''"' + $scriptRoot + '\Run CoreCycler.bat"''), ' + $lastCoreTested + ')')
 
-    $process = Start-Process -PassThru -FilePath 'cmd.exe' -ArgumentList @('/C', ('"' + $scriptRoot + '\Run CoreCycler.bat"'), $coreTested)
+    $process = Start-Process -PassThru -FilePath 'cmd.exe' -ArgumentList @('/C', ('"' + $scriptRoot + '\Run CoreCycler.bat"'), $lastCoreTested)
 }
 
 # Don't throw an error

@@ -107,6 +107,28 @@ You need to provide a value for each core in your processor, otherwise the tool 
 
 
 
+ryzen-smu-cli
+-------------
+https://github.com/rawhide-kobayashi/ryzen-smu-cli
+
+A CLI tool for the ZenStates SMU library. See ZenStates-Core for compatibility.
+
+Requires .NET Framework 8.
+
+Usage:
+To get the currently applied Curve Optimizer values:
+ryzen-smu-cli --get-offsets-terse
+
+To set new Curve Optimizer values:
+ryzen-smu-cli --offset CO_Core0,CO_Core1,[...],CO_CoreMax
+
+For example, to set the Curve Optimizer values for a 6 core processor:
+ryzen-smu-cli --offset -20,2,-15,-20,-19,-5
+
+Note the minus sign for negative Curve Optimizer values.
+
+
+
 IntelVoltageControl
 -------------------
 https://github.com/jamestut/IntelVoltageControl

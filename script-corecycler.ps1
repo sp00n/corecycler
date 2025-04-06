@@ -93,6 +93,7 @@ $stressTestThreads             = @()
 $stressTestThreadIds           = @()
 $processCounterPathId          = $null
 $processCounterPathTime        = $null
+$currentlyTestedCore           = $null
 $coresWithError                = @()
 $coresWithErrorsCounter        = @{}
 $numCoresWithError             = 0
@@ -158,8 +159,10 @@ $coresWithOneThread          = [System.Collections.ArrayList]::new()
 
 
 # Automatic Test Mode variables
+$CoreFromAutoMode                        = $(if (![String]::IsNullOrWhiteSpace($CoreFromAutoMode)) { [Int] $CoreFromAutoMode } else { -1 })
 $useAutomaticTestMode                    = $false
 $useAutomaticTestModeWithResume          = $false
+$setVoltageOnlyForTestedCore             = $false
 $useCurveOptimizer                       = $false
 $useIntelVoltageAdjustment               = $false
 $limitForCoValues                        = 50
@@ -171,9 +174,10 @@ $coresWithErrorAndMaxVoltageValue        = [System.Collections.ArrayList]::new()
 $numCoresWithIncreasedVoltageValue       = 0
 $numCoresWithErrorAndMaxVoltageValue     = 0
 $apicIdTool                              = $PSScriptRoot + '\tools\APICID.exe'
-$pboCliTool                              = $PSScriptRoot + '\tools\pbocli\pbotest.exe'
+$pboCliTool                              = $PSScriptRoot + '\tools\ryzen-smu-cli\ryzen-smu-cli.exe'
 $intelCliTool                            = $PSScriptRoot + '\tools\IntelVoltageControl\IntelVoltageControl.exe'
 $autoModeFile                            = $PSScriptRoot + '\.automode'
+$autoModeFileTemp                        = $PSScriptRoot + '\.automode-temp'
 $autoModeStartupScriptFile               = $PSScriptRoot + '\helpers\automode-startup-script.ps1'
 $autoModeTaskName                        = 'CoreCycler AutoMode Startup Task'
 $autoModeTaskPath                        = '\CoreCycler\'
@@ -723,7 +727,7 @@ memory = 2GB
 # If you enable this setting, the script will automatically adjust the Curve Optimizer or voltage offset values
 # when an error occurs
 #
-# For Ryzen CPUs up to Zen 4 (Ryzen 7000), it uses PJVol's "pbotest.exe", which is included in the /tools/pbocli/ directory
+# For Ryzen CPUs it uses "ryzen-smu-cli", which is included in the /tools/ryzen-smu-cli/ directory
 # For Intel, it uses "IntelVoltageControl", which allows you to set a voltage offset (also included in the /tools/ directory)
 #
 # Note that this will only INCREASE the Curve Optimizer / voltage offset values, i.e. it will try to make the settings
@@ -731,11 +735,10 @@ memory = 2GB
 # Also note that enabling this setting will require the script to be run with administrator privileges
 # And lastly, enabling it will set "skipCoreOnError" to 0 and "stopOnError" to 0 as long as the limit has not been reached
 #
-# IMPORTANT: This currently does NOT work for Ryzen 8000 and 9000 (Zen 5) CPUs :(
 # IMPORTANT: The automatically adjusted Curve Optimizer / voltage offset values are NOT permanent, so after a regular reboot they
 #            will not be applied anymore
 #            If you want to permanently set these values, you will need to set them in the BIOS, or use a startup script to
-#            set them on every Windows start (see the .txt files for PBO2Tuner/pbocli resp. IntelVoltageControl in the /tools
+#            set them on every Windows start (see the .txt files for ryzen-smu-cli resp. IntelVoltageControl in the /tools
 #            directory for an explanation of the various settings)
 #
 # Default: 0
@@ -796,6 +799,16 @@ maxValue = 0
 #
 # Default: Default
 incrementBy = Default
+
+
+# Set only the currently tested core to the selected Curve Optimizer / voltage offset value
+# All the other cores will be set to 0, resp. the determined maximum value if it's higher than 0
+# This should prevent errors caused by other cores than the currently tested one, or at least diminish the chance for that
+#
+# Note: Currently this only has an effect for Ryzen processors, for Intel up to 14th gen there is only one voltage value
+#
+# Default: 0
+setVoltageOnlyForTestedCore = 0
 
 
 # Repeat the test on a core if it has thrown an error and the Curve Optimizer / voltage offset value was increased
@@ -2827,7 +2840,7 @@ function Get-PerformanceCounterLocalName {
         $Buffer.ToString().Substring(0, $BufferSize-1)
     }
     else {
-        Throw 'Get-PerformanceCounterLocalName : Unable to retrieve localized name. Check computer name and performance counter ID.'
+        throw('Get-PerformanceCounterLocalName : Unable to retrieve localized name. Check computer name and performance counter ID.')
     }
 }
 
@@ -2906,7 +2919,7 @@ function Suspend-Process {
         $result = Suspend-ProcessThreads $process
     }
     else {
-        throw 'Could not find the suspension method "' + $modeToUseForSuspension + '"!'
+        throw('Could not find the suspension method "' + $modeToUseForSuspension + '"!')
     }
 
     return $result
@@ -2949,7 +2962,7 @@ function Resume-Process {
         $result = Resume-ProcessThreads $process $ignoreError
     }
     else {
-        throw 'Could not find the suspension method "' + $modeToUseForSuspension + '"!'
+        throw('Could not find the suspension method "' + $modeToUseForSuspension + '"!')
     }
 
     return $result
@@ -3895,29 +3908,42 @@ function Get-AutoModeFileContent {
     Write-DebugText('Parsing the .automode file')
 
     if (!(Test-Path $autoModeFile -PathType Leaf)) {
-        throw 'Could not find the .automode file!'
+        throw('Could not find the .automode file!')
     }
 
     $reader = [System.IO.File]::OpenText($autoModeFile)
     $autoModeFileContentString = $reader.ReadToEnd().Trim()
     $reader.Close()
-    $autoModeFileContent = @($autoModeFileContentString -Split '\r?\n')
 
-    if (!$autoModeFileContent -or $autoModeFileContent.Count -lt 5) {
-        throw 'Possible corruption detected, the .automode file doesn''t contain all required information!'
+
+    try {
+        $autoModeInfoFromJson = ConvertFrom-Json $autoModeFileContentString
+    }
+    catch {
+        throw $_
     }
 
+
+    # We have some required properties
+    @('fileTimestamp', 'lastCoreTested', 'logFileCoreCycler', 'logFileStressTest', 'voltageValues', 'waitBeforeResume') | ForEach-Object {
+        if (!($autoModeInfoFromJson -and ($autoModeInfoFromJson | Get-Member $_))) {
+            throw('The .automode file is missing the entry "' + $_ + '"!')
+        }
+    }
+
+
+    # ConvertFrom-Json creates a PSCustomObject, which is hard to iterate, so create a hashtable instead
     $autoModeInfo = @{
-        'fileTimestamp'     = [UInt64] $autoModeFileContent[0]
-        'lastCoreTested'    = [Int] $autoModeFileContent[1]
-        'logFileCoreCycler' = [String] $autoModeFileContent[2]
-        'logFileStressTest' = [String] $autoModeFileContent[3]
-        'voltageInfo'       = [String] $autoModeFileContent[4]
-        'waitBeforeResume'  = [Int] $autoModeFileContent[5]
+        'fileTimestamp'     = [UInt64] $autoModeInfoFromJson.fileTimestamp
+        'lastCoreTested'    = [Int] $autoModeInfoFromJson.lastCoreTested
+        'logFileCoreCycler' = [String] $autoModeInfoFromJson.logFileCoreCycler
+        'logFileStressTest' = [String] $autoModeInfoFromJson.logFileStressTest
+        'voltageValues'     = [Array] $autoModeInfoFromJson.voltageValues
+        'waitBeforeResume'  = [Int] $autoModeInfoFromJson.waitBeforeResume
     }
 
     if ($autoModeInfo.lastCoreTested -ne $CoreFromAutoMode) {
-        throw 'The passed core does not match the core in the .automode file! (' + $autoModeInfo.lastCoreTested + ' vs. ' + $CoreFromAutoMode + ')'
+        throw('The passed core does not match the core in the .automode file! (' + $autoModeInfo.lastCoreTested + ' vs. ' + $CoreFromAutoMode + ')')
     }
 
     return $autoModeInfo
@@ -3942,27 +3968,47 @@ function Set-AutoModeFile {
 
     [UInt64] $curTimeStamp = Get-Date -UFormat %s -Millisecond 0
 
-    $autoModeFileContent = @(
-        $curTimeStamp
-        $coreNumber
-        $logFileFullPath
-        $stressTestLogFilePath
-        ($voltageCurrentValues -Join ' ').Trim()
-        $settings['AutomaticTestMode']['waitBeforeAutomaticResume']
-    )
 
-    $null = New-Item $autoModeFile -ItemType File -Force
-
-    if (!(Test-Path $autoModeFile -PathType Leaf)) {
-        Exit-WithFatalError -text 'Could not create the .automode file!'
+    # Remove the old file
+    if (Test-Path $autoModeFile -PathType Leaf) {
+        $null = Remove-Item -Path $autoModeFile -Force
     }
 
-    [System.IO.File]::WriteAllLines($autoModeFile, $autoModeFileContent)
+
+    $autoModeFileObject = @{
+        'fileTimestamp'     = $curTimeStamp
+        'lastCoreTested'    = $coreNumber
+        'logFileCoreCycler' = $logFileFullPath
+        'logFileStressTest' = $stressTestLogFilePath
+        'voltageValues'     = $voltageCurrentValues
+        'waitBeforeResume'  = $settings['AutomaticTestMode']['waitBeforeAutomaticResume']
+    }
+
+    # Convert to JSON
+    $autoModeFileJson = ConvertTo-Json $autoModeFileObject
+
+
+    # We save the file under a different name, and then rename it, which will hopefully trigger the file content flush to disk
+    $null = New-Item $autoModeFileTemp -ItemType File -Force
+
+    if (!(Test-Path $autoModeFileTemp -PathType Leaf)) {
+        Exit-WithFatalError -text 'Could not create the .automode-temp file!'
+    }
+
+    [System.IO.File]::WriteAllLines($autoModeFileTemp, $autoModeFileJson)
 
 
     # Try to flush the cache to the disk, hopefully reducing the amount of corrupted files
     if ($canUseFlushToDisk) {
         Save-CachedDataToDisk
+    }
+
+
+    # Now rename the file
+    $null = Rename-Item -Path $autoModeFileTemp -NewName $autoModeFile -Force
+
+    if (!(Test-Path $autoModeFile -PathType Leaf)) {
+        Exit-WithFatalError -text 'Could not create the .automode file!'
     }
 }
 
@@ -4024,7 +4070,7 @@ function Add-AutoModeScheduledTask {
         $foundTask = Get-ScheduledTask -TaskName $autoModeTaskName -TaskPath $autoModeTaskPath -ErrorAction SilentlyContinue
 
         if (!$foundTask) {
-            throw 'Could not find the created task!'
+            throw('Could not find the created task!')
         }
 
 
@@ -4525,7 +4571,7 @@ function Get-Settings {
                 }
 
                 if (!$settings[$sectionEntry.Name]) {
-                    throw 'Found an unexpected section in the config: [' + $sectionEntry.Name + ']'
+                    throw('Found an unexpected section in the config: [' + $sectionEntry.Name + ']')
                 }
 
                 $settings[$sectionEntry.Name][$userSetting.Name] = $userSetting.Value
@@ -4802,26 +4848,6 @@ function Initialize-AutomaticTestMode {
 
     Write-DebugText('Initializing Automatic Test Mode')
 
-    # This currently does not work on Ryzen 8000 and 9000 :(
-    if ($processor.Name -match '.*AMD.*' -and ($processor.Name -match '8\d{3}' -or $processor.Name -match '9\d{3}')) {
-        Write-Text('')
-        Write-Text('')
-        Write-ColorText('┌───────────────────────────────────┤ ERROR ├──────────────────────────────────┐') Yellow DarkRed
-        Write-ColorText('│ ' + 'You have selected to use the Automatic Test Mode.'.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('│ ' + 'Unfortunately this does not (yet) work with Ryzen 8000 & 9000 processors,'.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('│ ' + 'so please disable the Automatic Test Mode in the config.ini file.'.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('│ ' + ''.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('│ ' + 'The detected processor:'.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('│ ' + $processor.Name.PadRight(76, ' ') + ' │') Yellow DarkRed
-        Write-ColorText('└──────────────────────────────────────────────────────────────────────────────┘') Yellow DarkRed
-        Write-Text('')
-        Write-Text('')
-        Write-ColorText('Exiting...') Red
-        Write-Text('')
-
-        Exit-Script
-    }
-
     # The Automatic Test Mode has been enabled, we require administrator privileges!
     Write-DebugText('Are we admin: ' + $areWeAdmin)
 
@@ -4873,8 +4899,7 @@ function Initialize-AutomaticTestMode {
     }
 
 
-    # This is the string and the array for the starting voltage values
-    $voltageStartValuesString = $null
+    # This is the array for the starting voltage values
     $voltageStartValuesArray  = $null
 
     $modeDescription = $(if ($isIntelProcessor) { 'voltage offset' } else { 'Curve Optimizer' })
@@ -4902,30 +4927,28 @@ function Initialize-AutomaticTestMode {
             $autoModeInfo = Get-AutoModeFileContent
 
             # The value(s) from the .automode file
-            $voltageStartValuesString = $autoModeInfo['voltageInfo'].Trim()
+            $voltageStartValuesArray = $autoModeInfo['voltageValues']
 
             Write-DebugText('The Automatic Test Mode starting values from the .automode file:')
             Write-DebugText('We will increase this value because of the crash')
-            Write-DebugText($voltageStartValuesString)
+            Write-DebugText($voltageStartValuesArray)
         }
     }
 
 
     # The Automatic Test Mode without resuming from a reboot
     # Get the Automatic Test Mode starting values from the settings
-    if (!$voltageStartValuesString) {
+    if (!$voltageStartValuesArray) {
         $voltageStartValuesString = $settings['AutomaticTestMode']['startValues']
 
         Write-DebugText('The Automatic Test Mode starting values from the settings:')
         Write-DebugText($voltageStartValuesString)
+
+        # For Curve Optimizer, this setting has all the CO values for each core (or a single value for all)
+        # For Intel, this has most likely only one entry, but can also contain one entry for each core (which should all be the same value though)
+        # We do not yet have the ability to set the voltage on a per-core basis for Intel
+        $voltageStartValuesArray = @($voltageStartValuesString -Split '\s+')
     }
-
-
-
-    # For Curve Optimizer, this setting has all the CO values for each core (or a single value for all)
-    # For Intel, this has most likely only one entry, but can also contain one entry for each core (which should all be the same value though)
-    # We do not yet have the ability to set the voltage on a per-core basis for Intel
-    $voltageStartValuesArray = @($voltageStartValuesString -Split '\s+')
 
 
     # An empty value or "default" should use the currently assigned voltage values, so get them
@@ -4976,6 +4999,7 @@ function Initialize-AutomaticTestMode {
     $Script:useIntelVoltageAdjustment      = $isIntelProcessor
     $Script:useAutomaticTestMode           = $true
     $Script:useAutomaticTestModeWithResume = ($settings.AutomaticTestMode.enableResumeAfterUnexpectedExit -gt 0)
+    $Script:setVoltageOnlyForTestedCore    = ($settings.AutomaticTestMode.setVoltageOnlyForTestedCore -gt 0)
 
 
     if ($useAutomaticTestModeWithResume) {
@@ -4995,7 +5019,10 @@ function Initialize-AutomaticTestMode {
 
     # Apply the starting values
     # Do these after the startup task has been created
-    Set-NewVoltageValues
+    # But only if not settint the voltage just for the currently tested core
+    if (!$setVoltageOnlyForTestedCore) {
+        Set-NewVoltageValues
+    }
 
 
     Write-VerboseText('The starting value(s):')
@@ -5025,22 +5052,31 @@ function Get-CurveOptimizerValues {
 
         $getCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $getCoValuesProcessInfo.FileName = $pboCliTool
-        $getCoValuesProcessInfo.Arguments = 'get'
+        $getCoValuesProcessInfo.Arguments = '--get-offsets-terse'
         $getCoValuesProcessInfo.Verb = 'runas'
         $getCoValuesProcessInfo.RedirectStandardError = $true
         $getCoValuesProcessInfo.RedirectStandardOutput = $true
         $getCoValuesProcessInfo.UseShellExecute = $false
 
-
         $getCoValuesProcess = New-Object System.Diagnostics.Process
         $getCoValuesProcess.StartInfo = $getCoValuesProcessInfo
-        $null = $getCoValuesProcess.Start()
-
+        $startedProcess = $getCoValuesProcess.Start()
 
         $stdOut = $getCoValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $getCoValuesProcess.StandardError.ReadToEnd()
-        $getCoValuesProcess.WaitForExit()
+
+        if (!$getCoValuesProcess.WaitForExit(5000)) {
+            $getCoValuesProcess.Kill()
+            $getCoValuesProcess.Close()
+            $getCoValuesProcess.Dispose()
+
+            throw('Program didn''t exit within five seconds!')
+        }
+
         $exitCode = $getCoValuesProcess.ExitCode
+
+        $getCoValuesProcess.Close()
+        $getCoValuesProcess.Dispose()
 
 
         if ($exitCode -ne 0) {
@@ -5065,9 +5101,28 @@ function Get-CurveOptimizerValues {
             throw('Returned value was empty')
         }
 
+        # Double trim to also remove any new lines
+        $stdOut = $stdOut.Trim().Trim(' ', '"', '''', [Char]0x09)
+
+        if (!$stdOut -or $stdOut -eq '') {
+            throw('Returned value was empty')
+        }
+
+        $outputLines = @($stdOut -Split '\r?\n')
+
+        Write-DebugText('Returned output:')
+
+        $outputLines | ForEach-Object {
+            Write-DebugText($_)
+        }
 
         # Try to parse the the CO values
-        $coArray = @(($stdOut -Split '\s+') | Where-Object { $_ -Match '\-?\d+' } | ForEach-Object { [Int] $_ } )
+        # Multiple lines output:
+        # > [maybe stuff]
+        # > Current PBO offsets:
+        # > -1,-1,-1,-1,-1,-1
+        # > (empty line)
+        $coArray = @(($outputLines[$outputLines.Count-1] -Split ',') | Where-Object { $_ -Match '\-?\d+' } | ForEach-Object { [Int] $_ } )
 
         Write-DebugText('The queried and parsed Curve Optimizer values:')
         Write-DebugText($coArray)
@@ -5088,7 +5143,7 @@ function Get-CurveOptimizerValues {
         return $coArray
     }
     catch {
-        throw('Could not get the current Curve Optimizer values!' + [Environment]::NewLine + $_)
+        throw('Could not get the current Curve Optimizer values!' + [Environment]::NewLine + 'Reason: ' + $_)
     }
 }
 
@@ -5097,33 +5152,57 @@ function Get-CurveOptimizerValues {
 <#
 .DESCRIPTION
     Set the new Curve Optimizer values
-.PARAMETER overrideCoValues
-    [Array] (optional) Use these CO values instead
+.PARAMETER
+    [Void]
 .OUTPUTS
     [Void]
 #>
 function Set-CurveOptimizerValues {
-    param(
-        [Parameter(Mandatory=$false)] $overrideCoValues
-    )
-
     Write-VerboseText('Trying to set the Curve Optimizer values')
 
     try {
-        if ($overrideCoValues) {
-            Write-DebugText('Overriding the Curve Optimizer values with:')
-            Write-DebugText($overrideCoValues)
+        if ($voltageCurrentValues.Count -gt $numPhysCores) {
+            Write-VerboseText('The amount of cores we''re trying to set is larger than the amount of physical cores!')
+        }
 
-            $coString = $overrideCoValues -Join ' '
+
+        # If we only want to set the currently tested core, set the others to max(0, currentvalue)
+        if ($setVoltageOnlyForTestedCore) {
+            Write-DebugText('The flag to only set the voltage for the currently tested core is enabled')
+            Write-DebugText('Currently tested core: ' + $Script:currentlyTestedCore)
+            Write-DebugText('The original values:')
+            Write-DebugText($voltageCurrentValues)
+
+            if ([String]::IsNullOrWhiteSpace($Script:currentlyTestedCore)) {
+                Write-DebugText('Core testing hasn''t started yet, resetting all cores')
+            }
+
+            $voltageValuesToUse = @()
+
+            for ($i = 0; $i -lt $voltageCurrentValues.Count; $i++) {
+                if ($i -eq $Script:currentlyTestedCore) {
+                    $voltageValuesToUse += [Int] $voltageCurrentValues[$i]
+                }
+                else {
+                    # We may have allowed higher values than 0
+                    $voltageValuesToUse += [Math]::Max(0, $voltageCurrentValues[$i])
+                }
+            }
+
+            Write-DebugText('The modified values:')
+            Write-DebugText($voltageValuesToUse)
         }
         else {
-            $coString = $voltageCurrentValues -Join ' '
+            $voltageValuesToUse = $voltageCurrentValues.Clone()
         }
+
+        $coString = $voltageValuesToUse -Join ','
+
 
         Write-VerboseText('The values to set:')
         Write-VerboseText($coString)
 
-        $argumentString = 'set ' + $coString
+        $argumentString = '--offset ' + $coString
 
         $setCoValuesProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
         $setCoValuesProcessInfo.FileName = $pboCliTool
@@ -5133,16 +5212,24 @@ function Set-CurveOptimizerValues {
         $setCoValuesProcessInfo.RedirectStandardOutput = $true
         $setCoValuesProcessInfo.UseShellExecute = $false
 
-
         $setCoValuesProcess = New-Object System.Diagnostics.Process
         $setCoValuesProcess.StartInfo = $setCoValuesProcessInfo
-        $null = $setCoValuesProcess.Start()
-
+        $startedProcess = $setCoValuesProcess.Start()
 
         $stdOut = $setCoValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $setCoValuesProcess.StandardError.ReadToEnd()
-        $setCoValuesProcess.WaitForExit()
+
+        if (!$setCoValuesProcess.WaitForExit(5000)) {
+            $setCoValuesProcess.Kill()
+            $setCoValuesProcess.Close()
+            $setCoValuesProcess.Dispose()
+
+            throw('Program didn''t exit within five seconds!')
+        }
+
         $exitCode = $setCoValuesProcess.ExitCode
+        $setCoValuesProcess.Close()
+        $setCoValuesProcess.Dispose()
 
 
         if ($exitCode -ne 0) {
@@ -5175,36 +5262,15 @@ function Set-CurveOptimizerValues {
             throw('Returned value was empty')
         }
 
-        # The returned string needs to match the input values, otherwise something has gone wrong
-        # This does not seem to throw $stdErr, so we need to check for it
-        if ($stdOut -ne $coString) {
-            # Special case: the second CCD was disabled, so we only detect the cores for a single CCD, but pbotest still requires the values for all the cores
-            $readVoltageValuesArray = Get-CurveOptimizerValues -IgnoreCoreCount -IgnoreInvalidValues
+        Write-DebugText('Curve Optimizer values successfuly set:')
 
-            # If the returned number of CO values are twice the amount of what we try to set, we assume that the second CCD is disabled
-            if ($voltageCurrentValues.Length -eq $numPhysCores -and $readVoltageValuesArray.Length -eq $voltageCurrentValues.Length * 2) {
-                Write-DebugText('It seems the second CCD is disabled, filling the Curve Optimizer values with 0')
-
-                # Set the disabled core values to 0
-                $dummyCoValues = (@(0..($numPhysCores-1)) | ForEach-Object { 0 })
-                $specialCaseCoValues = $voltageCurrentValues + $dummyCoValues
-
-                Write-DebugText('New special case CO values:')
-                Write-DebugText($specialCaseCoValues)
-
-                Set-CurveOptimizerValues $specialCaseCoValues
-                return
-            }
-            else {
-                throw('Unexpected output message:' + [Environment]::NewLine + $stdOut)
-            }
+        $stdOutLines = @($stdOut -Split '\r?\n')
+        $stdOutLines | ForEach-Object {
+            Write-DebugText($_)
         }
-
-        Write-DebugText('Curve Optimizer values successfuly set to:')
-        Write-DebugText($stdOut)
     }
     catch {
-        throw('Could not set the Curve Optimizer values!' + [Environment]::NewLine + $_)
+        throw('Could not set the Curve Optimizer values!' + [Environment]::NewLine + 'Reason: ' + $_)
     }
 }
 
@@ -5238,8 +5304,18 @@ function Get-IntelVoltageOffset {
 
         $stdOut = $getIntelOffsetValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $getIntelOffsetValuesProcess.StandardError.ReadToEnd()
-        $getIntelOffsetValuesProcess.WaitForExit()
+
+        if (!$getIntelOffsetValuesProcess.WaitForExit(5000)) {
+            $getIntelOffsetValuesProcess.Kill()
+            $getIntelOffsetValuesProcess.Close()
+            $getIntelOffsetValuesProcess.Dispose()
+
+            throw('Program didn''t exit within five seconds!')
+        }
+
         $exitCode = $getIntelOffsetValuesProcess.ExitCode
+        $getIntelOffsetValuesProcess.Close()
+        $getIntelOffsetValuesProcess.Dispose()
 
 
         if ($exitCode -ne 0) {
@@ -5276,7 +5352,7 @@ function Get-IntelVoltageOffset {
         return @($coreVoltage) * $numPhysCores
     }
     catch {
-        throw('Could not get the current Intel voltage offset value!' + [Environment]::NewLine + $_)
+        throw('Could not get the current Intel voltage offset value!' + [Environment]::NewLine + 'Reason: ' + $_)
     }
 }
 
@@ -5317,8 +5393,19 @@ function Set-IntelVoltageOffset {
 
         $stdOut = $setIntelOffsetValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $setIntelOffsetValuesProcess.StandardError.ReadToEnd()
-        $setIntelOffsetValuesProcess.WaitForExit()
+
+        if (!$setIntelOffsetValuesProcess.WaitForExit(5000)) {
+            $setIntelOffsetValuesProcess.Kill()
+            $setIntelOffsetValuesProcess.Close()
+            $setIntelOffsetValuesProcess.Dispose()
+
+            throw('Program didn''t exit within five seconds!')
+        }
+
         $exitCode = $setIntelOffsetValuesProcess.ExitCode
+        $setIntelOffsetValuesProcess.Close()
+        $setIntelOffsetValuesProcess.Dispose()
+
 
 
         if ($exitCode -ne 0) {
@@ -5355,7 +5442,7 @@ function Set-IntelVoltageOffset {
         Write-DebugText('"' + $stdOut + '"')
     }
     catch {
-        throw('Could not set the Intel voltage offset values!' + [Environment]::NewLine + $_)
+        throw('Could not set the Intel voltage offset values!' + [Environment]::NewLine + 'Reason: ' + $_)
     }
 }
 
@@ -7669,7 +7756,7 @@ function Initialize-yCruncher {
     }
 
     # No stopOnError if the automatic test mode is enabled
-    if ($settings.yCruncher.enableYCruncherLoggingWrapper -eq 1 -and $settings.General.stopOnError -gt 0 -and $useAutomaticTestMode) {
+    if ($settings.yCruncher.enableYCruncherLoggingWrapper -eq 1 -and $settings.General.stopOnError -gt 0 -and $settings.AutomaticTestMode.enableAutomaticAdjustment -gt 0) {
         $stopOnError = '        StopOnError : "false"'
     }
 
@@ -11216,6 +11303,16 @@ try {
     Write-VerboseText('Script Root: ' + $PSScriptRoot)
 
     Write-VerboseText('')
+    Write-VerboseText('CPU Info:')
+    Write-VerboseText('Manufacturer:              ' + $processor.Manufacturer)
+    Write-VerboseText('Name:                      ' + $processor.Name)
+    Write-VerboseText('Caption:                   ' + $processor.Caption)
+    Write-VerboseText('NumberOfCores:             ' + $numPhysCores)
+    Write-VerboseText('NumberOfLogicalProcessors: ' + $numLogicalCores)
+    Write-VerboseText('MaxClockSpeed:             ' + $processor.MaxClockSpeed)
+    Write-VerboseText('DeviceID:                  ' + $processor.DeviceID)
+
+    Write-VerboseText('')
     Write-VerboseText('APIC IDs:')
 
     $maxLengthCpu    = ($coresInfo['cpuToApicId'].Keys | Measure-Object -Maximum).Maximum.ToString().Length
@@ -11237,18 +11334,10 @@ try {
     }
 
 
-    # Check if the Automatic Test Mode feature was enabled
-    Initialize-AutomaticTestMode
-
-
-    # Always remove the .automode file at this point, we don't want it to interfere
-    Remove-AutoModeFile
-
-
     # Check if we can use Write-VolumeCache to write the log file data to the disk
     # It will not work under certain circumstances, e.g. for VeraCrypt volumes
     # Get-Volume and Write-VolumeCache have the same requirements
-    if ($settings.Logging.flushDiskWriteCache -eq 1 -or $useAutomaticTestModeWithResume) {
+    if ($settings.Logging.flushDiskWriteCache -eq 1 -or $settings.AutomaticTestMode.enableResumeAfterUnexpectedExit -gt 0) {
         $canUseFlushToDisk = !!(Get-Volume $scriptDriveLetter -ErrorAction Ignore)
 
         # Also check if the drive "letter" is an actual drive, and not e.g. a network share
@@ -11310,7 +11399,7 @@ try {
 
             foreach ($performanceCounterName in $englishCounterNames) {
                 if (!$counterNameIds[$performanceCounterName] -or $counterNameIds[$performanceCounterName] -eq 0) {
-                    Throw 'Could not get the ID for the Performance Counter Name "' + $performanceCounterName + '" from the registry!'
+                    throw('Could not get the ID for the Performance Counter Name "' + $performanceCounterName + '" from the registry!')
                 }
 
                 Write-DebugText('Getting the localized name for "' + $performanceCounterName + '" with ID "' + $counterNameIds[$performanceCounterName] + '"')
@@ -11692,7 +11781,24 @@ try {
         # Store the custom core test order array in an ArrayList
         $settings.General.coreTestOrder -Split '\s*,\s*|\s+' | ForEach-Object {
             if ($_ -Match '^\d+$') {
-                [Void] $coreTestOrderCustom.Add([Int] $_)
+                $coreIndex = [Int] $_
+
+                # Check if cores to test contains an invalid core (i.e. more than available)
+                if ($coreIndex -lt 0 -or $coreIndex -gt $numPhysCores-1) {
+                    $errorMessage = 'Invalid "coreTestOrder" entry detected!' + [Environment]::NewLine
+
+                    if ($coreIndex -lt 0) {
+                        $errorMessage += 'Core entry "' + $coreIndex.ToString() + '" is negative'
+                    }
+
+                    if ($coreIndex -gt $numPhysCores-1) {
+                        $errorMessage += 'Core entry "' + $coreIndex.ToString() + '" is too high (only ' + $numPhysCores + ' cores available - starting with 0, so max is ' + ($numPhysCores-1) + ')'
+                    }
+
+                    Exit-WithFatalError $errorMessage
+                }
+
+                [Void] $coreTestOrderCustom.Add($coreIndex)
             }
         }
     }
@@ -11806,6 +11912,16 @@ try {
         Write-DebugText('Update Check Ended (User Time):     ' + $updateEndTime.ToString('HH:mm:ss'))
         Write-DebugText('Update Check Runtime (User Time):   ' + $updateRunTime.TotalSeconds)
     }
+
+
+
+    # Check if the Automatic Test Mode feature was enabled
+    Initialize-AutomaticTestMode
+
+
+    # Always remove the .automode file at this point, we don't want it to interfere
+    Remove-AutoModeFile
+
 
 
     # Start messages
@@ -12195,7 +12311,7 @@ try {
         Write-ColorText('Trying to resume the test process') Red
 
         Write-VerboseText('Adding core ' + $CoreFromAutoMode + ' to the front of the test array')
-        $coresToTest.Insert(0, $CoreFromAutoMode)
+        [Void] $coresToTest.Insert(0, $CoreFromAutoMode)
 
         $modeDescription = $(if ($useCurveOptimizer) { 'Curve Optimizer' } else { 'voltage offset' })
         Write-VerboseText('Adjusting the ' + $modeDescription + ' voltage value')
@@ -12318,14 +12434,30 @@ try {
             # Only unique cores for the random order
             [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object -Unique | Sort-Object { Get-Random })
 
+            Write-DebugText('The randomized test order:')
+            Write-DebugText($coreTestOrderArray -Join ', ')
+
             # If we had added a core from CoreFromAutoMode, push that core to the front
             if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt -1) {
-                Write-VerboseText('Pushing the passed core to the beginning of the test order')
-                [Void] $coreTestOrderArray.Insert(0, $CoreFromAutoMode)
-                [System.Collections.ArrayList] $coreTestOrderArray = @(@($coreTestOrderArray) | Sort-Object -Unique)    # This should keep the randomized order, but keep the added core in the front
+                Write-VerboseText('Moving the passed core to the beginning of the test order')
+
+                [System.Collections.ArrayList] $coreTestOrderArrayOri = $coreTestOrderArray.Clone()
+                [System.Collections.ArrayList] $coreTestOrderArray = @()
+
+                $coreTestOrderArrayOri | ForEach-Object {
+                    if ([Int] $_ -eq [Int] $CoreFromAutoMode) {
+                        [Void] $coreTestOrderArray.Insert(0, [Int] $_)
+                    }
+                    else {
+                        [Void] $coreTestOrderArray.Add([Int] $_)
+                    }
+                }
 
                 $numAvailableCores       = $coreTestOrderArray.Count
                 $numUniqueAvailableCores = @($coreTestOrderArray | Sort-Object | Get-Unique).Count
+
+                Write-VerboseText('The test order with the core moved to the front:')
+                Write-VerboseText($coreTestOrderArray -Join ', ')
             }
         }
 
@@ -12380,6 +12512,10 @@ try {
             $numCoresWithWheaError               = $coresWithWheaError.Count
             $numCoresWithIncreasedVoltageValue   = $coresWithIncreasedVoltageValue.Count
             $numCoresWithErrorAndMaxVoltageValue = $coresWithErrorAndMaxVoltageValue.Count
+
+
+            # Store our currently tested core in a global variable
+            $Script:currentlyTestedCore = $actualCoreNumber
 
 
             Write-VerboseText('Still available cores:')
@@ -12598,7 +12734,7 @@ try {
             Write-Text($timestamp + ' - Set to Core ' + $coreString)
 
 
-            # Global counters
+            # Global variables
             $Script:numTestedCores++
 
             if (!$Script:testedCoresArray[$actualCoreNumber]) {
@@ -12669,6 +12805,13 @@ try {
                 Write-VerboseText(' - actual affinities:        ' + $checkingAffinities)
 
                 Exit-WithFatalError -text 'The affinities could not be set correctly!'
+            }
+
+
+            # Set the voltage for the currently selected core
+            if ($setVoltageOnlyForTestedCore) {
+                Write-VerboseText('Setting the voltage for the currently tested code')
+                Set-NewVoltageValues
             }
 
 

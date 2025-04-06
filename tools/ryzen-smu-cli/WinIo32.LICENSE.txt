@@ -1,0 +1,67 @@
+﻿END USER LICENSE AGREEMENT
+
+Software License Agreement for WinIo
+The following terms apply to all files associated with the software unless
+explicitly disclaimed in individual files.
+
+IMPORTANT- PLEASE READ CAREFULLY: BY INSTALLING THE SOFTWARE (AS DEFINED BELOW),
+OR COPYING THE SOFTWARE, YOU (EITHER ON BEHALF OF YOURSELF AS AN INDIVIDUAL OR
+ON BEHALF OF AN ENTITY AS ITS AUTHORIZED REPRESENTATIVE) AGREE TO ALL OF THE
+TERMS OF THIS END USER LICENSE AGREEMENT ("AGREEMENT") REGARDING YOUR USE OF
+THE SOFTWARE. IF YOU DO NOT AGREE WITH ALL OF THE TERMS OF THIS AGREEMENT, DO
+NOT INSTALL, COPY OR OTHERWISE USE THE SOFTWARE.
+
+1. GRANT OF LICENSE: Subject to the terms below, Yariv Kaplan ("AUTHOR") hereby
+grants you a non-exclusive, non-transferable, non-assignable license to install
+and to use the downloadable version of WinIo ("SOFTWARE").
+
+a. Redistributable Code. You may reproduce and distribute the object code form
+of the SOFTWARE solely in conjunction with, and as part of, your application
+("Permitted Application"); provided that you comply with the following:
+
+If you redistribute any portion of the Redistributable Code, you agree that:
+
+(i) you will only distribute the Redistributable Code in conjunction with, and
+as part of, your Permitted Application which adds significant functionality to
+the Redistributable Code and that distribution of the Permitted Application does
+not compete with the AUTHOR's distribution of the SOFTWARE;
+
+(ii) you will include a valid copyright notice on your Permitted Application;
+
+(iii) you will not permit further redistribution of the Redistributable Code;
+
+(iv) you will indemnify, hold harmless, and defend the AUTHOR from and against
+any claims or lawsuits, including attorneys' fees, that arise or result from
+the use or distribution of your Permitted Application.
+
+b. License to use Source Code. You may not sell, lease, rent, transfer or
+sublicense the source code of this SOFTWARE.
+
+2. MODIFICATION: SOFTWARE Source Code may be modified without the prior written
+permission of the AUTHOR. Any modifications made to the SOFTWARE will continue
+to be subject to the terms and conditions of this AGREEMENT.
+
+3. COPYRIGHT: All rights, title, and copyrights in and to the SOFTWARE and any
+copies of the SOFTWARE are owned by the AUTHOR. The SOFTWARE is protected by
+copyright laws and international treaty provisions. Therefore, you must treat
+the SOFTWARE like any other copyrighted material.
+
+4. TITLE: You acknowledge that no title to the intellectual property in the
+SOFTWARE is transferred to you. Title, ownership, rights, and intellectual
+property rights in and to the SOFTWARE shall remain the exclusive property of
+the AUTHOR. The SOFTWARE is protected by copyright laws of the United States
+and international treaties.
+
+5. LIMITATION OF LIABILITY: You must assume the entire risk of using the
+SOFTWARE.
+
+IN NO EVENT SHALL THE AUTHOR BE LIABLE TO ANY PARTY FOR DIRECT, INDIRECT,
+SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OF THIS
+SOFTWARE, ITS DOCUMENTATION, OR ANY DERIVATIVES THEREOF, EVEN IF THE AUTHOR
+HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+THE AUTHOR SPECIFICALLY DISCLAIMS ANY WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, AND NON-INFRINGEMENT. THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+AND THE AUTHOR HAS NO OBLIGATION TO PROVIDE MAINTENANCE, SUPPORT, UPDATES,
+ENHANCEMENTS, OR MODIFICATIONS.
