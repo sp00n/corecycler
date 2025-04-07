@@ -18,4 +18,4 @@ test_programs/p95/prime.txt
 test_programs/linpack/**/*.ini
 tools/results.txt
 tools/PBO2Tuner/ZenStates-Core.sys
-logs
+/logs
