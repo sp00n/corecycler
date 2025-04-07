@@ -2349,9 +2349,8 @@ function Test-IsVisualCInstalled {
 
     foreach ($entry in $regKeyEntries) {
         $displayName = $entry.GetValue('DisplayName')
-        
+
         if ($displayName -match '^Microsoft Visual C\+\+\D*(?<Year>(\d|-){4,9}).*Redistributable.*') {
-            $name = $Matches.0
             $versionString = $entry.GetValue('DisplayVersion')
             $versionArr = $versionString -Split '\.'
 
@@ -5129,7 +5128,7 @@ function Get-CurveOptimizerValues {
 
         $getCoValuesProcess = New-Object System.Diagnostics.Process
         $getCoValuesProcess.StartInfo = $getCoValuesProcessInfo
-        $startedProcess = $getCoValuesProcess.Start()
+        $null = $getCoValuesProcess.Start()
 
         $stdOut = $getCoValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $getCoValuesProcess.StandardError.ReadToEnd()
@@ -5283,7 +5282,7 @@ function Set-CurveOptimizerValues {
 
         $setCoValuesProcess = New-Object System.Diagnostics.Process
         $setCoValuesProcess.StartInfo = $setCoValuesProcessInfo
-        $startedProcess = $setCoValuesProcess.Start()
+        $null = $setCoValuesProcess.Start()
 
         $stdOut = $setCoValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $setCoValuesProcess.StandardError.ReadToEnd()
