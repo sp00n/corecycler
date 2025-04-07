@@ -751,6 +751,7 @@ enableAutomaticAdjustment = 0
 # If you leave the value blank or at "Default", it will try to automatically detect your current settings
 #
 # Use a comma separated list or define a single value that will be applied to all cores
+# You can also use spaces or "|" to separate the cores
 # For Intel, this currently only really supports a single voltage offset that is applied to each core
 # For Ryzen, you can define the Curve Optimizer value for each core
 #
@@ -767,6 +768,10 @@ enableAutomaticAdjustment = 0
 #
 # Example for setting Curve Optimizer values for a Ryzen 5800X with 8 cores:
 # startValues = -15, -10, -15, -8, 2, -20, 0, -30
+# Or
+# startValues = -15 -10 -15 -8 2 -20 0 -30
+# Or
+# startValues = -15 | -10 | -15 | -8 | 2 | -20 | 0 | -30
 #
 # Example to assign a single Curve Optimizer value to all cores:
 # startValues = -20
@@ -2328,6 +2333,70 @@ function Exit-WithFatalError {
 
     Read-Host -Prompt 'Press Enter to exit'
     exit
+}
+
+
+
+<#
+.DESCRIPTION
+    Check if the Visual C++ Redistributable package is installed
+.OUTPUTS
+    [Bool]
+#>
+function Test-IsVisualCInstalled {
+    $found = $false
+    $regKeyEntries = Get-ChildItem 'HKLM:\SOFTWARE\WoW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+
+    foreach ($entry in $regKeyEntries) {
+        $displayName = $entry.GetValue('DisplayName')
+        
+        if ($displayName -match '^Microsoft Visual C\+\+\D*(?<Year>(\d|-){4,9}).*Redistributable.*') {
+            $name = $Matches.0
+            $versionString = $entry.GetValue('DisplayVersion')
+            $versionArr = $versionString -Split '\.'
+
+            # At least version 14 I guess
+            # We may need to ask for more specific sub versions
+            if ($versionArr[0] -Match '^[\d\.]+$' -and [Int] $versionArr[0] -ge 14) {
+                $found = $true
+                break
+            }
+        }
+    }
+
+    return $found
+}
+
+
+
+<#
+.DESCRIPTION
+    Check if the .NET 8 is installed
+.OUTPUTS
+    [Bool]
+#>
+function Test-IsDotNetInstalled {
+    $found = $false
+    $hasDotNetExe = Get-Command 'dotnet' -ErrorAction Ignore
+
+    if (!$hasDotNetExe) {
+        return $false
+    }
+
+    $installedVersions = Get-ChildItem $hasDotNetExe.Path.Replace('dotnet.exe', 'shared\Microsoft.NETCore.App') -ErrorAction Ignore | ForEach-Object {
+        $_.Name
+    }
+
+    foreach ($versionString in $installedVersions) {
+        $versionArr = $versionString -Split '\.'
+
+        if ($versionArr[0] -Match '^[\d\.]+$' -and [Int] $versionArr[0] -ge 8) {
+            $found = $true
+            break
+        }
+    }
+
+    return $found
 }
 
 
@@ -4293,8 +4362,8 @@ function Import-Settings {
                         $thisSetting = [String] $value
                     }
 
-                    # Try to split the string by comma or space
-                    $splitString = @(@($thisSetting -Split '\s*,\s*|\s+') | Where-Object { $_.Length -gt 0 })
+                    # Try to split the string by comma, "|" or space
+                    $splitString = @(@($thisSetting -Split '\s*[,\|]\s*|\s+') | Where-Object { $_.Length -gt 0 })
 
                     # Is there only one entry and is it not an integer?
                     if ($splitString.Count -eq 1 -and $splitString[0] -Match '^\-?\d+$') {
@@ -11047,6 +11116,33 @@ if (!$hasDotNet3_5 -and !$hasDotNet4_0 -and !$hasDotNet4_x) {
     Write-Host('')
     Write-Host('You can download the .NET Framework here:') -ForegroundColor Yellow
     Write-Host('https://dotnet.microsoft.com/download/dotnet-framework') -ForegroundColor Cyan
+
+    Exit-WithFatalError
+}
+
+
+# Check if .NET 8 is installed
+# We need this for smu-ryzen-cli
+if (!(Test-IsDotNetInstalled)) {
+    Write-Host('')
+    Write-Host('FATAL ERROR: .NET 8 could not be found on the system!') -ForegroundColor Red
+    Write-Host('')
+    Write-Host('You can download the latest version here:') -ForegroundColor Yellow
+    Write-Host('https://dotnet.microsoft.com/en-us/download') -ForegroundColor Cyan
+
+    Exit-WithFatalError
+}
+
+
+# Check if Visual C++ is installed
+# We need it for the y-cruncher console wrapper
+if (!(Test-IsVisualCInstalled)) {
+    Write-Host('')
+    Write-Host('FATAL ERROR: Visual C++ Runtime could not be found or the version is too old!') -ForegroundColor Red
+    Write-Host('At least version 14 of the VC++ Redistributable is required!') -ForegroundColor Red
+    Write-Host('')
+    Write-Host('You can download the latest version here:') -ForegroundColor Yellow
+    Write-Host('https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist') -ForegroundColor Cyan
 
     Exit-WithFatalError
 }
