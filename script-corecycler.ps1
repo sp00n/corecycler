@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.0.1
+    0.10.1.0alpha2
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.1.0'
+$version = '0.10.1.0alpha2'
 
 
 # This defines the strict mode
@@ -755,9 +755,10 @@ enableAutomaticAdjustment = 0
 # For Intel, this currently only really supports a single voltage offset that is applied to each core
 # For Ryzen, you can define the Curve Optimizer value for each core
 #
-# Note: For Ryzen, the minimum possible Curve Optimizer value is defined by your CPU (and possibly motherboard)
-#       -30 is a common minimum value for Curve Optimizer, sometimes even -50
-# Note: For Intel, the values are provided in millivolts, so e.g. -130 for an undervolt of -0.130v
+# Note: For Ryzen, the minimum possible Curve Optimizer value is defined by your CPU
+#       -30 is the minimum value for Curve Optimizer on Ryzen 5000, and -50 for Ryzen 7000 and upwards
+#       (and each point of Curve Optimizer equals around 3-5 millivolts)
+# Note: For Intel, the values are provided in millivolts, so e.g. -120 for an undervolt of -0.120v
 #
 # IMPORTANT: Use a negative sign if you want negative CO values / a negative voltage offset, not providing a negative sign will
 #            instead apply a positive CO / voltage offset!
@@ -1588,11 +1589,11 @@ $GetWindowsDefinition = @'
 
 
 # The definition to send a message to a process
-$SendMessageDefinition = @'
+$WindowMessageDefinition = @'
     using System;
     using System.Runtime.InteropServices;
 
-    public static class SendMessageClass {
+    public static class WindowMessage {
         // Values for Msg
         public static uint WM_SETFOCUS             = 0x0007;    // Set focus command
         public static uint WM_CLOSE                = 0x0010;    // Close command
@@ -2009,13 +2010,13 @@ $RegistryFlusherDefinition = @'
 Add-Type -ErrorAction Stop -Name PowerUtil -Namespace Windows -MemberDefinition $PowerUtilDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ShutdownBlockDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $GetWindowsDefinition
+Add-Type -ErrorAction Stop -TypeDefinition $WindowMessageDefinition
+Add-Type -ErrorAction Stop -TypeDefinition $SetSuspendAndResumeWithDebugDefinition
+Add-Type -ErrorAction Stop -TypeDefinition $SetThreadHandlerDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $WindowFlashDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ConsoleWindowMenuDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $ChangeConsoleModeDefinition
-Add-Type -ErrorAction Stop -TypeDefinition $SetThreadHandlerDefinition
-Add-Type -ErrorAction Stop -TypeDefinition $SetSuspendAndResumeWithDebugDefinition
 Add-Type -ErrorAction Stop -TypeDefinition $RegistryFlusherDefinition
-$SendMessage = Add-Type -ErrorAction Stop -TypeDefinition $SendMessageDefinition -PassThru
 
 
 # Also make VisualBasic available
@@ -3226,8 +3227,8 @@ function Resume-ProcessThreads {
 
     Write-DebugText('           ID:') -NoNewline
 
-    $process.Threads | ForEach-Object {
-        $currentThreadId = $_.Id
+    foreach ($thread in $process.Threads) {
+        $currentThreadId = $thread.Id
 
         # See https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
         $currentThreadHandle = [ThreadHandler]::OpenThread([ThreadHandler]::THREAD_SUSPEND_RESUME, $false, $currentThreadId)
@@ -4952,7 +4953,7 @@ function Initialize-AutomaticTestMode {
             [Void] [System.Diagnostics.Process]::Start($newProcess)
 
             # Close this window, the new window should be opened
-            [Void] $SendMessage::SendMessage($parentMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+            [Void] [WindowMessage]::SendMessage($parentMainWindowHandle, [WindowMessage]::WM_CLOSE, 0, 0)
             exit
         }
         else {
@@ -5699,7 +5700,7 @@ function Get-TortureWeakValue {
     [Void]
 #>
 function Send-CommandToAida64 {
-    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseConsistentWhitespace', '')]  # The $SendMessage::PostMessage lines cause a "Use space after a comma" error if using MORE than one space...
+    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseConsistentWhitespace', '')]  # The [WindowMessage]::PostMessage lines cause a "Use space after a comma" error if using MORE than one space...
     param(
         [Parameter(Mandatory=$true)] [String] $command
     )
@@ -5714,32 +5715,32 @@ function Send-CommandToAida64 {
     Write-VerboseText($timestamp + ' - Trying to send the "' + $command + '" command to Aida64')
 
     if ($command.ToLowerInvariant() -eq 'start') {
-        $KEY = $SendMessage::KEY_S
+        $KEY = [WindowMessage]::KEY_S
     }
     elseif ($command.ToLowerInvariant() -eq 'stop') {
-        $KEY = $SendMessage::KEY_T
+        $KEY = [WindowMessage]::KEY_T
     }
     elseif ($command.ToLowerInvariant() -eq 'dismiss') {
-        $KEY = $SendMessage::KEY_D
+        $KEY = [WindowMessage]::KEY_D
     }
     elseif ($command.ToLowerInvariant() -eq 'clear') {
-        $KEY = $SendMessage::KEY_E
+        $KEY = [WindowMessage]::KEY_E
     }
 
     # This sends an ALT + KEY keystroke to the Aida64 main window
-    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::WM_SYSKEYDOWN, $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 1, 0, 0))
-    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::WM_SYSKEYDOWN, $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 1, 0, 0))
-    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::KEY_UP,        $SendMessage::KEY_MENU, $SendMessage::GetLParam(1, $SendMessage::KEY_MENU, 0, 0, 1, 1))
-    [Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::KEY_UP,        $KEY,                   $SendMessage::GetLParam(1, $KEY, 0, 0, 1, 1))
+    [Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::WM_SYSKEYDOWN, [WindowMessage]::KEY_MENU, [WindowMessage]::GetLParam(1, [WindowMessage]::KEY_MENU, 0, 1, 0, 0))
+    [Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::WM_SYSKEYDOWN, $KEY,                      [WindowMessage]::GetLParam(1, $KEY, 0, 1, 0, 0))
+    [Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::KEY_UP,        [WindowMessage]::KEY_MENU, [WindowMessage]::GetLParam(1, [WindowMessage]::KEY_MENU, 0, 0, 1, 1))
+    [Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::KEY_UP,        $KEY,                      [WindowMessage]::GetLParam(1, $KEY, 0, 0, 1, 1))
 
 
     # DEBUG
     # Just to be able to see the entries in Spy++ more easily
-    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
-    #[Void] $SendMessage::PostMessage($windowProcessMainWindowHandle, $SendMessage::KEY_UP, 0, $SendMessage::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::KEY_UP, 0, [WindowMessage]::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::KEY_UP, 0, [WindowMessage]::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::KEY_UP, 0, [WindowMessage]::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::KEY_UP, 0, [WindowMessage]::GetLParam(0, 0, 0, 0, 0, 0))
+    #[Void] [WindowMessage]::PostMessage($windowProcessMainWindowHandle, [WindowMessage]::KEY_UP, 0, [WindowMessage]::GetLParam(0, 0, 0, 0, 0, 0))
 }
 
 
@@ -7107,7 +7108,7 @@ function Close-Prime95 {
             try {
                 for ($i = 1; $i -le 5; $i++) {
                     Write-DebugText('Try ' + $i)
-                    [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+                    [Void] [WindowMessage]::SendMessage($windowProcessMainWindowHandle, [WindowMessage]::WM_CLOSE, 0, 0)
 
                     # We've send the close request, let's wait a second for it to actually exit
                     if ($windowProcess -and !$windowProcess.HasExited) {
@@ -7655,7 +7656,7 @@ function Close-Aida64 {
                 try {
                     for ($i = 1; $i -le 5; $i++) {
                         Write-DebugText('Try ' + $i)
-                        [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+                        [Void] [WindowMessage]::SendMessage($windowProcessMainWindowHandle, [WindowMessage]::WM_CLOSE, 0, 0)
 
                         # We've send the close request, let's wait a second for it to actually exit
                         if ($windowProcess -and !$windowProcess.HasExited) {
@@ -7699,8 +7700,9 @@ function Close-Aida64 {
         if ($windowProcess) {
             Write-VerboseText('Still there, could not gracefully close Aida64, forcefully killing the process')
 
-            # Unfortunately this will leave any tray icons behind
+            # Unfortunately this can leave tray icons behind
             Stop-Process $windowProcess.Id -Force -ErrorAction Ignore
+            Start-Sleep 2
         }
 
         # Check if both processes are gone
@@ -8013,10 +8015,10 @@ function Close-yCruncher {
             try {
                 for ($i = 1; $i -le 5; $i++) {
                     Write-DebugText('Try ' + $i)
-                    [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+                    [Void] [WindowMessage]::SendMessage($windowProcessMainWindowHandle, [WindowMessage]::WM_CLOSE, 0, 0)
 
                     # This seems to make powershell / .Net crash
-                    #[Void] $SendMessage::SendMessageTimeout($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0, $SendMessage::SMTO_ABORTIFHUNG, 1000)
+                    #[Void] [WindowMessage]::SendMessageTimeout($windowProcessMainWindowHandle, [WindowMessage]::WM_CLOSE, 0, 0, [WindowMessage]::SMTO_ABORTIFHUNG, 1000)
 
 
                     # We've send the close request, let's wait a second for it to actually exit
@@ -8413,7 +8415,7 @@ function Close-Linpack {
             try {
                 for ($i = 1; $i -le 5; $i++) {
                     Write-DebugText('Try ' + $i)
-                    [Void] $SendMessage::SendMessage($windowProcessMainWindowHandle, $SendMessage::WM_CLOSE, 0, 0)
+                    [Void] [WindowMessage]::SendMessage($windowProcessMainWindowHandle, [WindowMessage]::WM_CLOSE, 0, 0)
 
                     # We've send the close request, let's wait a second for it to actually exit
                     if ($windowProcess -and !$windowProcess.HasExited) {
