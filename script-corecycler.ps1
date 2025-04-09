@@ -1198,8 +1198,8 @@ $stressTestPrograms = @{
         'absoluteInstallPath' = $null
         'fullPathToExe'       = $null
         'fullPathToLoadExe'   = $null
-        'command'             = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%fullPathToExe%" priority:2 config "%configFilePath%"'
-        'commandWithLogging'  = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%helpersPath%WriteConsoleToWriteFileWrapper.exe" "%fullPathToLoadExe%" priority:2 config "%configFilePath%" /dlllog:"%logFilePath%"'
+        'command'             = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%fullPathToExe%" priority:-1 config "%configFilePath%"'     # Setting the priority to 2 (Above Normal) causes lags when executing other programs from within the script, even if we set the priority to normal later on
+        'commandWithLogging'  = 'cmd /C start /MIN /AFFINITY 0xC "y-cruncher - %fileName%" "%helpersPath%WriteConsoleToWriteFileWrapper.exe" "%fullPathToLoadExe%" priority:-1 config "%configFilePath%" /dlllog:"%logFilePath%"'
         'windowBehaviour'     = 6
         'testModes'           = @(
             '04-P4P'
@@ -2267,6 +2267,27 @@ function Write-DebugText {
 
         Write-LogEntry @paramsLog
     }
+}
+
+
+<#
+.DESCRIPTION
+    Writes the into settings text
+.PARAMETER Text
+    [String] The text to output (left side)
+.PARAMETER Setting
+    [String] The text to output (right side)
+.OUTPUTS
+    [Void]
+#>
+function Write-SettingIntroText {
+    param(
+        [Parameter(Mandatory=$true)] $Text,
+        [Parameter(Mandatory=$true)] $Setting
+    )
+
+    $strLenLeftSide = 41
+    Write-ColorText(($Text.ToString() + ': ').PadRight($strLenLeftSide, '.') + ' ' + $Setting.ToString()) Cyan
 }
 
 
@@ -5134,12 +5155,12 @@ function Get-CurveOptimizerValues {
         $stdOut = $getCoValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $getCoValuesProcess.StandardError.ReadToEnd()
 
-        if (!$getCoValuesProcess.WaitForExit(5000)) {
+        if (!$getCoValuesProcess.WaitForExit(3000)) {
             $getCoValuesProcess.Kill()
             $getCoValuesProcess.Close()
             $getCoValuesProcess.Dispose()
 
-            throw('Program didn''t exit within five seconds!')
+            throw('Program didn''t exit within three seconds!')
         }
 
         $exitCode = $getCoValuesProcess.ExitCode
@@ -5288,12 +5309,12 @@ function Set-CurveOptimizerValues {
         $stdOut = $setCoValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $setCoValuesProcess.StandardError.ReadToEnd()
 
-        if (!$setCoValuesProcess.WaitForExit(5000)) {
+        if (!$setCoValuesProcess.WaitForExit(3000)) {
             $setCoValuesProcess.Kill()
             $setCoValuesProcess.Close()
             $setCoValuesProcess.Dispose()
 
-            throw('Program didn''t exit within five seconds!')
+            throw('Program didn''t exit within three seconds!')
         }
 
         $exitCode = $setCoValuesProcess.ExitCode
@@ -5374,12 +5395,12 @@ function Get-IntelVoltageOffset {
         $stdOut = $getIntelOffsetValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $getIntelOffsetValuesProcess.StandardError.ReadToEnd()
 
-        if (!$getIntelOffsetValuesProcess.WaitForExit(5000)) {
+        if (!$getIntelOffsetValuesProcess.WaitForExit(3000)) {
             $getIntelOffsetValuesProcess.Kill()
             $getIntelOffsetValuesProcess.Close()
             $getIntelOffsetValuesProcess.Dispose()
 
-            throw('Program didn''t exit within five seconds!')
+            throw('Program didn''t exit within three seconds!')
         }
 
         $exitCode = $getIntelOffsetValuesProcess.ExitCode
@@ -5463,12 +5484,12 @@ function Set-IntelVoltageOffset {
         $stdOut = $setIntelOffsetValuesProcess.StandardOutput.ReadToEnd()
         $stdErr = $setIntelOffsetValuesProcess.StandardError.ReadToEnd()
 
-        if (!$setIntelOffsetValuesProcess.WaitForExit(5000)) {
+        if (!$setIntelOffsetValuesProcess.WaitForExit(3000)) {
             $setIntelOffsetValuesProcess.Kill()
             $setIntelOffsetValuesProcess.Close()
             $setIntelOffsetValuesProcess.Dispose()
 
-            throw('Program didn''t exit within five seconds!')
+            throw('Program didn''t exit within three seconds!')
         }
 
         $exitCode = $setIntelOffsetValuesProcess.ExitCode
@@ -10820,7 +10841,7 @@ function Get-ProcessorCoresInformation {
 
     $stdOut = $apicIdProcess.StandardOutput.ReadToEnd()
     $stdErr = $apicIdProcess.StandardError.ReadToEnd()
-    $apicIdProcess.WaitForExit()
+    $apicIdProcess.WaitForExit(2000)
     $exitCode = $apicIdProcess.ExitCode
 
 
@@ -12042,63 +12063,68 @@ try {
 
     $logLevel = [Math]::Min([Math]::Max(0, $settings.Logging.logLevel), 4)
 
-    Write-ColorText('Log Level set to: ..................... ' + $logLevel + ' [' + $logLevelText[$logLevel] + ']') Cyan
-    Write-ColorText('Use the Windows Event Log: ............ ' + ($(if ($settings.Logging.useWindowsEventLog) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-    Write-ColorText('Check for WHEA errors: ................ ' + ($(if ($settings.General.lookForWheaErrors) { 'ENABLED' } else { 'DISABLED' }))) Cyan
+
+    Write-SettingIntroText -Text 'Log Level set to'                       -Setting ($logLevel.ToString() + ' [' + $logLevelText[$logLevel] + ']')
+    Write-SettingIntroText -Text 'Use the Windows Event Log'              -Setting ($(if ($settings.Logging.useWindowsEventLog) { 'ENABLED' } else { 'DISABLED' }))
+    Write-SettingIntroText -Text 'Check for WHEA errors'                  -Setting ($(if ($settings.General.lookForWheaErrors) { 'ENABLED' } else { 'DISABLED' }))
 
     # Display some initial information
-    Write-ColorText('Stress test program: .................. ' + $selectedStressTestProgram.ToUpperInvariant()) Cyan
-    Write-ColorText('Selected test mode: ................... ' + $settings.mode.ToUpperInvariant()) Cyan
+    Write-SettingIntroText -Text 'Stress test program'                    -Setting ($selectedStressTestProgram.ToUpperInvariant())
+    Write-SettingIntroText -Text 'Selected test mode'                     -Setting ($settings.mode.ToUpperInvariant())
 
     if ($isPrime95 -and $settings.mode -ne 'CUSTOM') {
-        Write-ColorText('Selected FFT size: .................... ' + $settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)') Cyan
+        Write-SettingIntroText -Text 'Selected FFT size'                  -Setting ($settings.Prime95.FFTSize.ToUpperInvariant() + ' (' + [Math]::Floor($minFFTSize/1024) + 'K - ' + [Math]::Ceiling($maxFFTSize/1024) + 'K)')
     }
     if ($isYCruncher -or $isYCruncherOld) {
-        Write-ColorText('Selected y-cruncher tests: ............ ' + ($settings.yCruncher.tests -Join ', ')) Cyan
-        Write-ColorText('Duration per test: .................... ' + ($settings.yCruncher.testDuration)) Cyan
+        Write-SettingIntroText -Text 'Selected y-cruncher tests'          -Setting ($settings.yCruncher.tests -Join ', ')
+        Write-SettingIntroText -Text 'Duration per test'                  -Setting ($settings.yCruncher.testDuration)
     }
     if ($isLinpack) {
-        Write-ColorText('Memory size: .......................... ' + ($settings.Linpack.memory.ToUpperInvariant())) Cyan
+        Write-SettingIntroText -Text 'Memory size'                        -Setting ($settings.Linpack.memory.ToUpperInvariant())
     }
 
-    Write-ColorText('Detected processor: ................... ' + $processor.Name) Cyan
-    Write-ColorText('Logical/Physical cores: ............... ' + $numLogicalCores + ' logical / ' + $numPhysCores + ' physical cores') Cyan
-    Write-ColorText('Hyperthreading / SMT is: .............. ' + ($(if ($isHyperthreadingEnabled) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-    Write-ColorText('Selected number of threads: ........... ' + $settings.General.numberOfThreads) Cyan
+    Write-SettingIntroText -Text 'Detected processor'                     -Setting ($processor.Name)
+    Write-SettingIntroText -Text 'Logical/Physical cores'                 -Setting ($numLogicalCores.ToString() + ' logical / ' + $numPhysCores.ToString() + ' physical cores')
+    Write-SettingIntroText -Text 'Hyperthreading / SMT is'                -Setting ($(if ($isHyperthreadingEnabled) { 'ENABLED' } else { 'DISABLED' }))
+    Write-SettingIntroText -Text 'Selected number of threads'             -Setting ($settings.General.numberOfThreads)
 
     if ($settings.General.numberOfThreads -eq 1) {
-        Write-ColorText('Assign both cores to stress thread: ... ' + ($(if ($settings.General.assignBothVirtualCoresForSingleThread) { 'ENABLED' } else { 'DISABLED' }))) Cyan
+        Write-SettingIntroText -Text 'Assign both cores to stress thread' -Setting ($(if ($settings.General.assignBothVirtualCoresForSingleThread) { 'ENABLED' } else { 'DISABLED' }))
     }
 
-    Write-ColorText('Runtime per core: ..................... ' + (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpperInvariant()) Cyan
-    Write-ColorText('Suspend periodically: ................. ' + ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-    Write-ColorText('Restart for each core: ................ ' + ($(if ($settings.General.restartTestProgramForEachCore) { 'ENABLED' } else { 'DISABLED' }))) Cyan
-    Write-ColorText('Test order of cores: .................. ' + $settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') { ' (' + $coreTestOrderMode.ToUpperInvariant() + ')' })) Cyan
-    Write-ColorText('Number of iterations: ................. ' + $settings.General.maxIterations) Cyan
+    Write-SettingIntroText -Text 'Runtime per core'                       -Setting (Get-FormattedRuntimePerCoreString $settings.General.runtimePerCore).ToUpperInvariant()
+    Write-SettingIntroText -Text 'Suspend periodically'                   -Setting ($(if ($settings.General.suspendPeriodically) { 'ENABLED' } else { 'DISABLED' }))
+    Write-SettingIntroText -Text 'Restart for each core'                  -Setting ($(if ($settings.General.restartTestProgramForEachCore) { 'ENABLED' } else { 'DISABLED' }))
+    Write-SettingIntroText -Text 'Test order of cores'                    -Setting ($settings.General.coreTestOrder.ToUpperInvariant() + $(if ($settings.General.coreTestOrder.ToLowerInvariant() -eq 'default') { ' (' + $coreTestOrderMode.ToUpperInvariant() + ')' }))
+    Write-SettingIntroText -Text 'Number of iterations'                   -Setting ($settings.General.maxIterations)
 
 
     # Print a message if we're ignoring certain cores
     if ($settings.General.coresToIgnore.Count -gt 0) {
         $coresToIgnoreString = (($settings.General.coresToIgnore | Sort-Object) -Join ', ')
-        Write-ColorText('Ignored cores: ........................ ' + $coresToIgnoreString) Cyan
+        Write-SettingIntroText -Text 'Ignored cores'                      -Setting ($coresToIgnoreString)
     }
 
 
     # Automatic Test Mode
     if ($useAutomaticTestMode) {
         if ($useAutomaticTestModeWithResume) {
-            Write-ColorText('Automatic Test Mode with resume: ...... ENABLED') Cyan
+            Write-SettingIntroText -Text 'Automatic Test Mode with resume'      -Setting ('ENABLED')
         }
         else {
-            Write-ColorText('Automatic Test Mode: .................. ENABLED') Cyan
+            Write-SettingIntroText -Text 'Automatic Test Mode'                  -Setting ('ENABLED')
         }
 
         if ($useCurveOptimizer) {
-            Write-ColorText('Starting Curve Optimizer values: ...... ' + ($voltageStartingValues -Join ', ')) Cyan
+            Write-SettingIntroText -Text 'Starting Curve Optimizer values'      -Setting ($voltageStartingValues -Join ', ')
+        }
+
+        if ($useCurveOptimizer -and $setVoltageOnlyForTestedCore) {
+            Write-SettingIntroText -Text 'Set voltage only for the tested core' -Setting ('ENABLED')
         }
 
         if ($useIntelVoltageAdjustment) {
-            Write-ColorText('Starting voltage offset value: ....... ' + $voltageStartingValues[0] + 'mv') Cyan
+            Write-SettingIntroText -Text 'Starting voltage offset value'        -Setting ($voltageStartingValues[0] + 'mv')
         }
     }
 
@@ -12403,6 +12429,8 @@ try {
 
     # Add the previously tested core from before the reboot if we're in Automatic Test Mode with resume
     if ($useAutomaticTestModeWithResume -and $CoreFromAutoMode -gt -1) {
+        $timestamp = Get-Date -Format HH:mm:ss
+        Write-DebugText($timestamp)
         Write-Text('')
         Write-ColorText('Apparently the computer crashed in the last run while testing core ' + $CoreFromAutoMode) Red
         Write-ColorText('Trying to resume the test process') Red
@@ -12907,7 +12935,7 @@ try {
 
             # Set the voltage for the currently selected core
             if ($setVoltageOnlyForTestedCore) {
-                Write-VerboseText('Setting the voltage for the currently tested code')
+                Write-VerboseText('Setting the voltage for the currently tested core')
                 Set-NewVoltageValues
             }
 
