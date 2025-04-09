@@ -7,7 +7,7 @@
   "targets": {
     ".NETCoreApp,Version=v8.0": {},
     ".NETCoreApp,Version=v8.0/win-x64": {
-      "ryzen-smu-cli/0.0.3": {
+      "ryzen-smu-cli/0.1.2": {
         "dependencies": {
           "Microsoft.NET.ILLink.Tasks": "8.0.14",
           "System.CommandLine": "2.0.0-beta4.22272.1",
@@ -93,7 +93,7 @@
     }
   },
   "libraries": {
-    "ryzen-smu-cli/0.0.3": {
+    "ryzen-smu-cli/0.1.2": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
