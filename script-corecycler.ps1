@@ -2,7 +2,7 @@
 .AUTHOR
     sp00n
 .VERSION
-    0.10.1.0alpha2
+    0.11.0.0alpha1
 .DESCRIPTION
     Sets the affinity of the selected stress test program process to only one
     core and cycles through all the cores which allows to test the stability of
@@ -23,7 +23,7 @@ param(
 
 
 # Our current version
-$version = '0.10.1.0alpha2'
+$version = '0.11.0.0alpha1'
 
 
 # This defines the strict mode
@@ -855,6 +855,24 @@ enableResumeAfterUnexpectedExit = 0
 # Default: 120
 waitBeforeAutomaticResume = 120
 
+
+# Create a System Restore Point when using the Automatic Test Mode
+# Using the Automatic Test Mode with very unstable starting settings may result in a corrupted Windows installation,
+# so creating a System Restore Point before activation is highly recommended
+# This way you can more easily restore a corrupted installation
+#
+# NOTE: The script will only create a System Restore Point if the last one is older than 24 hours
+#       It will also not do so while in the middle of the Automatic Test Mode process, only when starting a fresh one
+#
+# Default: 1
+createSystemRestorePoint = 1
+
+
+# Ask for the creation of a System Restore Point
+# If this setting is disabled, the System Restore Point will be automatically created without user interaction
+#
+# Default: 1
+askForSystemRestorePointCreation = 1
 
 
 
@@ -4993,7 +5011,7 @@ function Initialize-AutomaticTestMode {
 
 
     # This is the array for the starting voltage values
-    $voltageStartValuesArray  = $null
+    $voltageStartValuesArray = $null
 
     $modeDescription = $(if ($isIntelProcessor) { 'voltage offset' } else { 'Curve Optimizer' })
 
@@ -5041,6 +5059,12 @@ function Initialize-AutomaticTestMode {
         # For Intel, this has most likely only one entry, but can also contain one entry for each core (which should all be the same value though)
         # We do not yet have the ability to set the voltage on a per-core basis for Intel
         $voltageStartValuesArray = @($voltageStartValuesString -Split '\s+')
+
+
+        # At this point, we also want to ask for the creation of a System Restore Point
+        if ($settings['AutomaticTestMode']['createSystemRestorePoint'] -gt 0) {
+            Test-CreateNewSystemRestorePoint
+        }
     }
 
 
@@ -11017,6 +11041,115 @@ function Add-ToErrorCollection {
 
 
 
+<#
+.DESCRIPTION
+    Get the last System Restore Point
+.OUTPUTS
+    [Object] The last System Restore Point object, or a default object
+#>
+function Get-LastSystemRestorePoint {
+    $defaultRestorePointObj = @{
+        'CreationTime'     = 0
+        'Date'             = Get-Date -Date '1970-01-01 00:00:00'
+        'SequenceNumber'   = -1
+        'Description'      = 'No System Restore Point found'
+        'EventType'        = 'NONE'
+        'RestorePointType' = 'NONE'
+    }
+
+    $dateField = @{
+        'Label'      = 'Date'
+        'Expression' = { $_.ConvertToDateTime($_.CreationTime) }
+    }
+
+    $lastRestorePoint = Get-ComputerRestorePoint | Select-Object -Property CreationTime, $dateField, SequenceNumber, Description, EventType, RestorePointType -Last 1
+
+    if ($lastRestorePoint) {
+        return $lastRestorePoint
+    }
+
+    return $defaultRestorePointObj
+}
+
+
+
+<#
+.DESCRIPTION
+    Check if we should create a new System Restore Point
+.OUTPUTS
+    Text
+#>
+function Test-CreateNewSystemRestorePoint {
+    $askToCreate = ($settings.AutomaticTestMode.askForSystemRestorePointCreation -gt 0)
+    $createNewRestorePoint = $false
+    $lastRestorePoint = Get-LastSystemRestorePoint
+
+    [UInt64] $curTimeStamp = Get-Date -UFormat %s -Millisecond 0
+    [UInt64] $lastRestorPointTime = Get-Date -Date $lastRestorePoint.Date -UFormat %s -Millisecond 0
+    [UInt64] $sinceLastPoint = $curTimeStamp - $lastRestorPointTime
+    [UInt64] $maxSeconds = 24 * 60 * 60
+
+    Write-DebugText('Last System Restore Point time: ' + $lastRestorPointTime)
+    Write-DebugText('Current timestamp:              ' + $curTimeStamp)
+    Write-DebugText('Time since last Restore Point:  ' + $sinceLastPoint + 's (' + [Math]::Round($sinceLastPoint/60/60, 3)  + 'h)')
+    Write-DebugText('Creation interval:              ' + $maxSeconds + 's (' + [Math]::Round($maxSeconds/60/60, 3)  + 'h)')
+
+
+    if ($sinceLastPoint -le $maxSeconds) {
+        Write-VerboseText('The System Restore Point creation interval time has not yet been exceeded, do not create a new one')
+        return
+    }
+
+
+    if ($askToCreate) {
+        Write-VerboseText('The System Restore Point creation interval time has been exceeded, asking to create a new one')
+
+        Write-Text('')
+        Write-ColorText('┌─' + '───────────────────────┤ CREATE SYSTEM RESTORE POINT ├──────────────────────' + '─┐') Yellow Blue
+        Write-ColorText('│ ' + 'While using the Automatic Test Mode you can encounter a corrupted Windows'.PadRight(76, ' ') + ' │') Yellow Blue
+        Write-ColorText('│ ' + 'installation if the settings are very unstable and cause system crashes.'.PadRight(76, ' ') + ' │') Yellow Blue
+        Write-ColorText('│ ' + 'Therefore it is advised to create a System Restore Point before starting.'.PadRight(76, ' ') + ' │') Yellow Blue
+        Write-ColorText('│ ' + ''.PadRight(76, ' ') + ' │') Yellow Blue
+        Write-ColorText('│ ' + 'The time since the last Restore Point has exceeded 24 hours, do you want to'.PadRight(76, ' ') + ' │') Yellow Blue
+        Write-ColorText('│ ' + 'create a new System Restore Point now?'.PadRight(76, ' ') + ' │') Yellow Blue
+        Write-ColorText('└─' + '────────────────────────────────────────────────────────────────────────────' + '─┘') Yellow Blue
+        Write-Text('')
+        Write-Text('')
+
+
+        $title    = 'Create a new System Restore Point?'
+        $question = ' '
+        $choices  = @(
+            [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', 'Yes, create a new System Restore Point')
+            [System.Management.Automation.Host.ChoiceDescription]::new('&No', 'No, do not create a new System Restore Point')
+        )
+        $decision = $Host.UI.PromptForChoice($title, $question, $choices, 0)
+
+        if ($decision -eq 0) {
+            $createNewRestorePoint = $true
+        }
+    }
+    else {
+        Write-VerboseText('The System Restore Point creation interval time has been exceeded, proceeding to create a new one')
+        $createNewRestorePoint = $true
+    }
+
+
+    if ($createNewRestorePoint) {
+        Write-Text('Creating a new System Restore Point...')
+        $timeString = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+        Checkpoint-Computer -Description ('CoreCycler Automatic Test Mode ' + $timeString) -RestorePointType MODIFY_SETTINGS
+
+        Write-Text('System Restore Point created')
+    }
+    else {
+        Write-Text('Selected to not create a new System Restore Point')
+    }
+}
+
+
+
 
 #
 # -------------------------------------------------------------------------------------------------------------------------------------
@@ -12060,7 +12193,7 @@ try {
 
 
 
-    # Check if the Automatic Test Mode feature was enabled
+    # Check if the Automatic Test Mode feature is enabled
     Initialize-AutomaticTestMode
 
 
@@ -12151,7 +12284,7 @@ try {
         }
 
         if ($useIntelVoltageAdjustment) {
-            Write-SettingIntroText -Text 'Starting voltage offset value'        -Setting ($voltageStartingValues[0] + 'mv')
+            Write-SettingIntroText -Text 'Starting voltage offset value'        -Setting ($voltageStartingValues[0].ToString() + 'mv')
         }
     }
 
