@@ -750,6 +750,9 @@ enableAutomaticAdjustment = 0
 # If you specify values here, they will overwrite your currently applied CO / voltage offset settings
 # If you leave the value blank or at "Default", it will try to automatically detect your current settings
 #
+# For Ryzen, you can use the "Minimum" value to automatically set the values to their respective minimum Curve Optimizer values
+# (-30 for Ryzen 5000 and -50 for Ryzen 7000 and upwards)
+#
 # Use a comma separated list or define a single value that will be applied to all cores
 # You can also use spaces or "|" to separate the cores
 # For Intel, this currently only really supports a single voltage offset that is applied to each core
@@ -5050,6 +5053,19 @@ function Initialize-AutomaticTestMode {
         else {
             # Get the currently applied Curve Optimizer values
             $voltageStartValuesArray = Get-CurveOptimizerValues
+        }
+    }
+
+
+    # The "minimum" value should set the values to -30 for Ryzen 5000 or -50 for Ryzen 7000 or upwards
+    if ($voltageStartValuesArray[0].ToString().ToLowerInvariant() -eq 'minimum') {
+        # For Intel, there is no minimum value
+        if ($isIntelProcessor) {
+            Exit-WithFatalError -text 'Selected "Minimum" for the voltage start values, but this setting is unsupported on an Intel processor!'
+        }
+        else {
+            $minCoValue = $(if ($processor.Name -match '[7-9]\d{3}') { -50 } else { -30 } )
+            $voltageStartValuesArray = @($minCoValue) * $numPhysCores
         }
     }
 
@@ -10841,8 +10857,19 @@ function Get-ProcessorCoresInformation {
 
     $stdOut = $apicIdProcess.StandardOutput.ReadToEnd()
     $stdErr = $apicIdProcess.StandardError.ReadToEnd()
-    $apicIdProcess.WaitForExit(2000)
+
+    if (!$apicIdProcess.WaitForExit(3000)) {
+        $apicIdProcess.Kill()
+        $apicIdProcess.Close()
+        $apicIdProcess.Dispose()
+
+        throw('Program didn''t exit within three seconds!')
+    }
+
     $exitCode = $apicIdProcess.ExitCode
+
+    $apicIdProcess.Close()
+    $apicIdProcess.Dispose()
 
 
     if ($exitCode -ne 0) {
